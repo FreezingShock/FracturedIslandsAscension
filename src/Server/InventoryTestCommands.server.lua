@@ -190,10 +190,21 @@ local function onPlayerChatted(player, message)
 	end
 end
 
-Players.PlayerAdded:Connect(function(player)
-	player.Chatted:Connect(function(message)
-		onPlayerChatted(player, message)
-	end)
+-- ===================== REMOTE COMMAND LISTENER =====================
+local AdminCommandEvent = ReplicatedStorage:WaitForChild("AdminCommandEvent")
+
+AdminCommandEvent.OnServerEvent:Connect(function(player, cmd, args)
+	if not isAdmin(player) then
+		return
+	end -- server-side authority check
+
+	if cmd == "give" then
+		handleGive(player, args)
+	elseif cmd == "clear" then
+		handleClear(player)
+	elseif cmd == "cap" then
+		handleCap(player, args)
+	end
 end)
 
 -- Handle players already in game (Studio)
