@@ -165,7 +165,9 @@ git pull origin main
 rojo serve default.project.json
 
 # Stage all changes
-git add .
+git add -A
+git commit -m ""
+git push
 
 # Commit with a descriptive message
 git commit -m "feat: add StatisticsPageModule skill color theming"
