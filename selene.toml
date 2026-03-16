@@ -1,0 +1,6 @@
+std = "roblox"
+[rules]
+incorrect_standard_library_use = "allow"
+global_usage = "allow"
+unused_variable = "allow"
+unscoped_variables = "allow"
