@@ -8,6 +8,11 @@
 	  - Saving via ProfileService (slots into existing DataManager pattern)
 	  - _G.ChangeSkill(player, skillName, level) for manual level setting
 	  - Firing SkillUpdated RemoteEvent to clients
+	  
+	UPDATED: Inventory fields merged into the same ProfileStore under
+	         the `_Inventory` key. InventoryDataManager accesses this
+	         via GetProfile() / GetInventoryData(). Skill data is
+	         completely untouched — inventory is structurally isolated.
 --]]
 
 local Players = game:GetService("Players")
@@ -163,15 +168,30 @@ local SKILL_NAMES = {
 }
 
 -- ===================== PROFILE STORE =====================
--- Separate store from stats so they don't collide
-local SKILLS_TEMPLATE = {}
+-- Unified template: skills at top level, inventory under _Inventory.
+-- Reconcile() fills in _Inventory for existing players on first load.
+local PROFILE_TEMPLATE = {}
 for _, skillName in ipairs(SKILL_NAMES) do
-	SKILLS_TEMPLATE[skillName] = { level = 1, xp = 0 }
+	PROFILE_TEMPLATE[skillName] = { level = 1, xp = 0 }
 end
 
+-- ── Inventory data (structurally isolated under one key) ──
+-- items         : array of { itemId = string, count = number }
+-- hotbarSlots   : { [1] = itemId or nil, ..., [9] = itemId or nil }
+-- toolOrder     : { [itemId] = number } — display sort order
+-- nextOrderIndex: number — auto-increment for new item types
+-- maxCapacity   : number — total item cap across all stacks
+PROFILE_TEMPLATE._Inventory = {
+	items = {}, -- saved inventory (written on PlayerRemoving)
+	hotbarSlots = {}, -- { [slotNumber] = itemId }
+	toolOrder = {}, -- { [itemId] = orderNumber }
+	nextOrderIndex = 1,
+	maxCapacity = 1000,
+}
+
 local SkillProfileStore = ProfileService.GetProfileStore(
-	"PlayerSkills_v1", -- bump to wipe skill data
-	SKILLS_TEMPLATE
+	"PlayerSkills_v1", -- no version bump needed — Reconcile handles new keys
+	PROFILE_TEMPLATE
 )
 
 local skillProfiles = {} -- [player.UserId] = profile
@@ -194,6 +214,29 @@ local function sanitizeSkillData(data)
 			data[skillName].xp = math.max(tonumber(data[skillName].xp) or 0, 0)
 		end
 	end
+
+	-- ── Sanitize inventory fields ──
+	if type(data._Inventory) ~= "table" then
+		data._Inventory = {
+			items = {},
+			hotbarSlots = {},
+			toolOrder = {},
+			nextOrderIndex = 1,
+			maxCapacity = 1000,
+		}
+	end
+	local inv = data._Inventory
+	if type(inv.items) ~= "table" then
+		inv.items = {}
+	end
+	if type(inv.hotbarSlots) ~= "table" then
+		inv.hotbarSlots = {}
+	end
+	if type(inv.toolOrder) ~= "table" then
+		inv.toolOrder = {}
+	end
+	inv.nextOrderIndex = math.max(tonumber(inv.nextOrderIndex) or 1, 1)
+	inv.maxCapacity = math.max(tonumber(inv.maxCapacity) or 1000, 1)
 end
 
 -- ===================== BUILD CLIENT PAYLOAD =====================
@@ -265,6 +308,30 @@ end
 function SkillsDataManager.GetData(player)
 	local profile = skillProfiles[player.UserId]
 	return profile and profile.Data or nil
+end
+
+-- ===================== GET PROFILE (for InventoryDataManager) =====================
+--- Returns the raw profile object so other managers can access
+--- their own data slice. Returns nil if not loaded.
+function SkillsDataManager.GetProfile(player)
+	return skillProfiles[player.UserId]
+end
+
+-- ===================== GET INVENTORY DATA =====================
+--- Convenience accessor for the _Inventory slice.
+--- Returns the live table reference (mutations persist to profile).
+function SkillsDataManager.GetInventoryData(player)
+	local profile = skillProfiles[player.UserId]
+	if not profile then
+		return nil
+	end
+	return profile.Data._Inventory
+end
+
+-- ===================== IS LOADED =====================
+--- Returns true if the player's profile is loaded and ready.
+function SkillsDataManager.IsLoaded(player): boolean
+	return skillProfiles[player.UserId] ~= nil
 end
 
 -- ===================== ADD XP =====================
