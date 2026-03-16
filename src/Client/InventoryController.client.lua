@@ -3,16 +3,13 @@
 --  Place inside: StarterPlayerScripts
 --
 --  Client-side inventory system for Fractured Islands: Ascension.
---  Hotbar is always visible. Full inventory panel toggles with G.
 --
---  Features:
---    - Slot pooling (no destroy/recreate on every update)
---    - True drag on PC (ghost follows cursor, drop on target)
---    - Tap-select on mobile
---    - TooltipModule integration (hides on click, shows on hover)
---    - Search & sort (rarity, quantity, name)
---    - Number key shortcuts for hotbar
---    - Drop-to-world by dragging to empty space
+--  REWRITTEN: Inventory slots now live inside the CentralizedMenu's
+--  Inventory frame (innerFrame > Inventory > InventoryFrame).
+--  Hotbar stays in CustomInventory ScreenGui.
+--  Slot 9 is a permanent "Menu" button that opens the full Nexus menu.
+--  E key toggles inventory-only mode.
+--  Drag works cross-ScreenGui via AbsolutePosition hit testing.
 -- ============================================================
 
 local Players = game:GetService("Players")
@@ -28,21 +25,18 @@ local playerGui = player:WaitForChild("PlayerGui")
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local TooltipModule = require(Modules:WaitForChild("TooltipModule")) :: any
 local ItemRegistry = require(Modules:WaitForChild("ItemRegistry")) :: any
+local MenuBridge = require(Modules:WaitForChild("MenuBridge")) :: any
 
 local StarterGui = game:GetService("StarterGui")
 
 -- Disable default Roblox backpack/inventory
 local function disableDefaultBackpack()
-	local success, err = pcall(function()
+	local success, _ = pcall(function()
 		StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.Backpack, false)
 	end)
-	if not success then
-		warn("[InventoryController] Failed to disable default backpack: " .. tostring(err))
-	end
 end
 
 disableDefaultBackpack()
--- Re-disable on respawn (Roblox re-enables core GUI on character spawn)
 player.CharacterAdded:Connect(function()
 	task.wait(0.1)
 	disableDefaultBackpack()
@@ -53,11 +47,9 @@ local UISounds = workspace:WaitForChild("UISounds")
 local UIClick = UISounds:WaitForChild("Click")
 local UIClick3 = UISounds:WaitForChild("Click3")
 
--- Optional sounds from other game — use FindFirstChild so they don't error
 local guiAudios = workspace:FindFirstChild("GUI Audios")
 local selectSound1 = guiAudios and guiAudios:FindFirstChild("Select.01")
 local selectSound2 = guiAudios and guiAudios:FindFirstChild("Select.02")
-local filterSound = guiAudios and guiAudios:FindFirstChild("Click.03")
 local equipSound = guiAudios and guiAudios:FindFirstChild("Hover.01")
 local unequipSound = guiAudios and guiAudios:FindFirstChild("Click.05")
 
@@ -71,55 +63,27 @@ local AssignHotbarFunc = ReplicatedStorage:WaitForChild("AssignHotbar")
 local DropItemFunc = ReplicatedStorage:WaitForChild("DropItem")
 local MoveToEndFunc = ReplicatedStorage:WaitForChild("MoveToEnd")
 
--- ===================== GUI REFERENCES =====================
+-- ===================== GUI REFERENCES — HOTBAR (CustomInventory) =====================
 local hotbarGui = playerGui:WaitForChild("CustomInventory")
 local hotbarFrame = hotbarGui:WaitForChild("Hotbar")
-local inventoryOuter = hotbarGui:WaitForChild("Inventory")
-local inventoryFrame = inventoryOuter:WaitForChild("InventoryFrame")
-local topBar = inventoryOuter:WaitForChild("TopBar")
-local searchBox = topBar:WaitForChild("SearchBox")
-local rarityButton = topBar:WaitForChild("Rarity")
-local quantityButton = topBar:WaitForChild("Quantity")
-local nameButton = topBar:WaitForChild("Name")
-local myInventoryLabel = topBar:WaitForChild("MyInventory")
-local dropButton = inventoryOuter:WaitForChild("DropButton")
-local capacityLabel = inventoryOuter:WaitForChild("BackpackCapacity")
-local InventoryArrow = hotbarGui:WaitForChild("InventoryArrow")
 local slotTemplate = ReplicatedStorage:WaitForChild("SlotTemplate")
+
+-- ===================== GUI REFERENCES — INVENTORY (inside CentralizedMenu) =====================
+local centralizedMenu = playerGui:WaitForChild("CentralizedAscensionMenu")
+local boundingBox = centralizedMenu:WaitForChild("BoundingBox")
+local outerFrame = boundingBox:WaitForChild("outerFrame")
+local innerFrame = outerFrame:WaitForChild("innerFrame")
+local inventoryPanel = innerFrame:WaitForChild("Inventory")
+local inventoryFrame = inventoryPanel:WaitForChild("InventoryFrame")
+local capacityLabel = inventoryPanel:WaitForChild("BackpackCapacity")
 
 -- ===================== TWEEN CONFIG =====================
 local TWEEN_QUINT = TweenInfo.new(0.4, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
-local TWEEN_BACK_OUT = TweenInfo.new(0.5, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
-local TWEEN_BACK_IN = TweenInfo.new(0.35, Enum.EasingStyle.Back, Enum.EasingDirection.In)
-local TWEEN_LINEAR_FAST = TweenInfo.new(0.15, Enum.EasingStyle.Linear)
-
--- ===================== POSITION CONFIG =====================
-local INVENTORY_SHOWN = UDim2.new(0.5, -335, 1, -400)
-local INVENTORY_HIDDEN = UDim2.new(0.5, -335, 1, 50)
-local TOPBAR_SHOWN = UDim2.fromOffset(4, 4)
-local TOPBAR_HIDDEN = UDim2.fromOffset(4, -40)
-local INVFRAME_SHOWN = UDim2.fromOffset(0, 40)
-local INVFRAME_HIDDEN = UDim2.fromOffset(0, -265)
-local SEARCH_SHOWN = UDim2.new(1, -204, 0, 4)
-local SEARCH_HIDDEN = UDim2.new(1, 0, 0, 4)
-local RARITY_SHOWN = UDim2.fromOffset(165, 5)
-local RARITY_HIDDEN = UDim2.fromOffset(165, -40)
-local QUANTITY_SHOWN = UDim2.fromOffset(80, 5)
-local QUANTITY_HIDDEN = UDim2.fromOffset(80, -40)
-local NAME_SHOWN = UDim2.fromOffset(10, 5)
-local NAME_HIDDEN = UDim2.fromOffset(10, -40)
-local DROPBTN_SHOWN = UDim2.new(0.5, -100, 1, -45)
-local DROPBTN_HIDDEN = UDim2.new(0.5, -100, 1, 5)
-local ARROW_WITH_SLOTS = UDim2.new(0.5, -50, 0.883, 0)
-local ARROW_WITHOUT_SLOTS = UDim2.new(0.5, -50, 0.97, 0)
-local INFOBUTTON_SHOWN = UDim2.new(1, -28, 1, -28)
-local INFOBUTTON_HIDDEN = UDim2.fromScale(1, 1)
 
 -- ===================== DRAG CONFIG =====================
-local DRAG_THRESHOLD = 4 -- pixels before click becomes drag
+local DRAG_THRESHOLD = 4
 local GHOST_TRANSPARENCY = 0.6
 local HIGHLIGHT_COLOR_VALID = Color3.fromHex("#55FF55")
-local HIGHLIGHT_COLOR_INVALID = Color3.fromHex("#FF5555")
 local DIM_TRANSPARENCY = 0.5
 
 -- ===================== COLOR CONFIG =====================
@@ -130,7 +94,6 @@ local WHITE = Color3.new(1, 1, 1)
 
 -- ===================== STATE =====================
 local inventoryVisible = false
-local isAnimating = false
 local currentEquippedTool = nil
 
 -- Data from server
@@ -139,13 +102,8 @@ local currentInventoryData = {} -- { toolInfo, ... }
 local currentTotalItems = 0
 local currentMaxCapacity = 1000
 
--- Search & sort
-local currentSearchText = ""
-local currentSortCriterion = nil -- "rarity" | "quantity" | "name"
-local currentSortState = nil -- "asc" | "desc"
-
 -- Drag state (PC)
-local dragState = nil -- { toolName, sourceFrame, isHotbar, slotIndex, ghost, startPos, isDragging }
+local dragState = nil
 local suppressTooltip = false
 
 -- Mobile selection
@@ -157,23 +115,11 @@ local mobileSelectedSlot = nil
 local hotbarSlots = {} -- [1..9] = { frame, toolInfo, hovered }
 local inventoryPool = {} -- array of { frame, toolInfo, hovered, inUse }
 local MAX_HOTBAR = 9
+local MENU_SLOT = 9 -- Slot 9 is permanently "Menu"
 
 -- Active highlight during drag
 local highlightedSlot = nil
 local highlightOriginalColor = nil
-
--- ===================== SORT STATE COLORS =====================
-local SORT_COLORS = {
-	asc = Color3.fromHex("#FF5555"),
-	desc = Color3.fromHex("#55FF55"),
-	none = Color3.fromHex("#646464"),
-}
-
-local sortButtons = {
-	Rarity = { button = rarityButton, stroke = rarityButton:WaitForChild("UIStroke"), criterion = "rarity" },
-	Quantity = { button = quantityButton, stroke = quantityButton:WaitForChild("UIStroke"), criterion = "quantity" },
-	Name = { button = nameButton, stroke = nameButton:WaitForChild("UIStroke"), criterion = "name" },
-}
 
 -- ===================== EQUIP SOUND HANDLER =====================
 PlayEquipSound.OnClientEvent:Connect(function(action)
@@ -185,14 +131,10 @@ PlayEquipSound.OnClientEvent:Connect(function(action)
 end)
 
 -- ===================== TWEEN HELPERS =====================
-local function tweenTo(obj, props, info)
+local function _tweenTo(obj, props, info)
 	local tw = TweenService:Create(obj, info or TWEEN_QUINT, props)
 	tw:Play()
 	return tw
-end
-
-local function tweenStrokeColor(stroke, color)
-	tweenTo(stroke, { Color = color }, TWEEN_QUINT)
 end
 
 -- ===================== TOOLTIP HELPERS =====================
@@ -210,11 +152,7 @@ local function buildTooltipData(toolInfo)
 	local title = prefix .. "<b>" .. (toolInfo.displayName or toolInfo.name) .. "</b></font>"
 	local desc = '<font color="#AAAAAA">' .. rarityName .. " — " .. tostring(toolInfo.count) .. "x</font>"
 
-	return {
-		title = title,
-		desc = desc,
-		click = "",
-	}
+	return { title = title, desc = desc, click = "" }
 end
 
 local function showItemTooltip(toolInfo)
@@ -231,23 +169,7 @@ local function hideItemTooltip()
 	TooltipModule.hide(TOOLTIP_SOURCE)
 end
 
--- ===================== RARITY COLOR HELPERS =====================
-local function _getSlotBaseColor(toolInfo)
-	if not toolInfo then
-		return ItemRegistry.getRarity(0).bgColor
-	end
-	local rarityConf = ItemRegistry.getRarity(toolInfo.rarity or 0)
-	return rarityConf and rarityConf.bgColor or ItemRegistry.getRarity(0).bgColor
-end
-
-local function _getSlotBorderColor(toolInfo)
-	if not toolInfo then
-		return ItemRegistry.getRarity(0).color
-	end
-	local rarityConf = ItemRegistry.getRarity(toolInfo.rarity or 0)
-	return rarityConf and rarityConf.color or ItemRegistry.getRarity(0).color
-end
-
+-- ===================== SLOT VISUAL HELPERS =====================
 local function updateSlotVisual(slotFrame, toolInfo, isEquipped, isHovered)
 	slotFrame.BackgroundTransparency = 0.3
 	if not toolInfo then
@@ -276,6 +198,20 @@ local function updateSlotVisual(slotFrame, toolInfo, isEquipped, isHovered)
 	slotFrame.BackgroundColor3 = baseColor
 end
 
+-- ===================== SLOT 9 — PERMANENT MENU BUTTON =====================
+local function setupMenuSlot(slotFrame)
+	local mythicConf = ItemRegistry.getRarity(5) -- Mythic
+	slotFrame.ToolName.Text = "Menu"
+	slotFrame.StackNum.Text = ""
+	slotFrame.RarityLabel.Text = mythicConf.display
+	slotFrame.RarityLabel.TextColor3 = mythicConf.color
+	slotFrame.UIStroke.Color = mythicConf.color
+	slotFrame.BackgroundColor3 = mythicConf.bgColor
+	slotFrame.BackgroundTransparency = 0.3
+	slotFrame.SlotNum.Text = tostring(MENU_SLOT)
+	slotFrame.Visible = true
+end
+
 -- ===================== HOTBAR SLOT CREATION (once) =====================
 local function createHotbarSlots()
 	for i = 1, MAX_HOTBAR do
@@ -294,26 +230,49 @@ local function createHotbarSlots()
 		}
 		hotbarSlots[i] = slotData
 
-		-- ── Hover ──
-		newSlot.MouseEnter:Connect(function()
-			slotData.hovered = true
-			local isEq = currentEquippedTool
-				and slotData.toolInfo
-				and currentEquippedTool.Name == slotData.toolInfo.name
-			updateSlotVisual(newSlot, slotData.toolInfo, isEq, true)
-			if slotData.toolInfo then
-				showItemTooltip(slotData.toolInfo)
-			end
-		end)
+		if i == MENU_SLOT then
+			-- ── Menu button: always visible, special styling ──
+			setupMenuSlot(newSlot)
 
-		newSlot.MouseLeave:Connect(function()
-			slotData.hovered = false
-			local isEq = currentEquippedTool
-				and slotData.toolInfo
-				and currentEquippedTool.Name == slotData.toolInfo.name
-			updateSlotVisual(newSlot, slotData.toolInfo, isEq, false)
-			hideItemTooltip()
-		end)
+			newSlot.MouseEnter:Connect(function()
+				slotData.hovered = true
+				local mythicConf = ItemRegistry.getRarity(5)
+				newSlot.BackgroundColor3 = mythicConf.bgColor:Lerp(WHITE, LIGHTEN_FACTOR)
+				TooltipModule.show({
+					title = '<font color="#FF5555"><b>Menu</b></font>',
+					desc = '<font color="#AAAAAA">Open the Nexus Menu and inventory.</font>',
+					click = '<font color="#FFFF55">Click for Menu!</font>',
+				}, TOOLTIP_SOURCE)
+			end)
+
+			newSlot.MouseLeave:Connect(function()
+				slotData.hovered = false
+				local mythicConf = ItemRegistry.getRarity(5)
+				newSlot.BackgroundColor3 = mythicConf.bgColor
+				hideItemTooltip()
+			end)
+		else
+			-- ── Normal item slot ──
+			newSlot.MouseEnter:Connect(function()
+				slotData.hovered = true
+				local isEq = currentEquippedTool
+					and slotData.toolInfo
+					and currentEquippedTool.Name == slotData.toolInfo.name
+				updateSlotVisual(newSlot, slotData.toolInfo, isEq, true)
+				if slotData.toolInfo then
+					showItemTooltip(slotData.toolInfo)
+				end
+			end)
+
+			newSlot.MouseLeave:Connect(function()
+				slotData.hovered = false
+				local isEq = currentEquippedTool
+					and slotData.toolInfo
+					and currentEquippedTool.Name == slotData.toolInfo.name
+				updateSlotVisual(newSlot, slotData.toolInfo, isEq, false)
+				hideItemTooltip()
+			end)
+		end
 	end
 end
 
@@ -338,7 +297,6 @@ local function getOrCreateInventorySlot(index)
 	}
 	inventoryPool[index] = slotData
 
-	-- ── Hover (wired once) ──
 	newSlot.MouseEnter:Connect(function()
 		slotData.hovered = true
 		if slotData.toolInfo then
@@ -360,48 +318,15 @@ local function getOrCreateInventorySlot(index)
 	return slotData
 end
 
--- ===================== FILTER & SORT =====================
-local function getFilteredInventory()
-	local result = {}
-	for _, toolInfo in ipairs(currentInventoryData) do
-		local name = (toolInfo.displayName or toolInfo.name):lower()
-		if currentSearchText == "" or name:find(currentSearchText, 1, true) then
-			table.insert(result, toolInfo)
-		end
-	end
-
-	if currentSortCriterion and currentSortState then
-		local comparator
-		if currentSortCriterion == "rarity" then
-			comparator = function(a, b)
-				return a.rarity < b.rarity
-			end
-		elseif currentSortCriterion == "quantity" then
-			comparator = function(a, b)
-				return a.count < b.count
-			end
-		elseif currentSortCriterion == "name" then
-			comparator = function(a, b)
-				return (a.displayName or a.name) < (b.displayName or b.name)
-			end
-		end
-		if comparator then
-			if currentSortState == "desc" then
-				table.sort(result, function(a, b)
-					return comparator(b, a)
-				end)
-			else
-				table.sort(result, comparator)
-			end
-		end
-	end
-
-	return result
-end
-
 -- ===================== REFRESH DISPLAY =====================
 local function refreshHotbar()
 	for i = 1, MAX_HOTBAR do
+		if i == MENU_SLOT then
+			-- Menu slot is always visible and never changes from server data
+			setupMenuSlot(hotbarSlots[i].frame)
+			continue
+		end
+
 		local slotData = hotbarSlots[i]
 		local toolInfo = currentHotbarData[i]
 		local hasItem = (type(toolInfo) == "table" and toolInfo.name ~= nil)
@@ -420,10 +345,8 @@ local function refreshInventory()
 		return
 	end
 
-	local filtered = getFilteredInventory()
-
 	-- Update pool slots
-	for i, toolInfo in ipairs(filtered) do
+	for i, toolInfo in ipairs(currentInventoryData) do
 		local slotData = getOrCreateInventorySlot(i)
 		slotData.toolInfo = toolInfo
 		slotData.inUse = true
@@ -436,12 +359,13 @@ local function refreshInventory()
 		slotData.frame.UIStroke.Color = rarityConf.color
 		slotData.frame.BackgroundColor3 = slotData.hovered and rarityConf.bgColor:Lerp(WHITE, LIGHTEN_FACTOR)
 			or rarityConf.bgColor
+		slotData.frame.BackgroundTransparency = 0.3
 		slotData.frame.Visible = true
 		slotData.frame.Swap.Visible = false
 	end
 
 	-- Hide unused pool slots
-	for i = #filtered + 1, #inventoryPool do
+	for i = #currentInventoryData + 1, #inventoryPool do
 		local slotData = inventoryPool[i]
 		slotData.toolInfo = nil
 		slotData.inUse = false
@@ -456,9 +380,9 @@ local function refreshAll()
 	refreshInventory()
 end
 
--- Show all 9 hotbar slots (including empty) during drag so player can drop into any
+-- Show all 8 item hotbar slots (not slot 9) during drag
 local function _showAllHotbarSlots()
-	for i = 1, MAX_HOTBAR do
+	for i = 1, MAX_HOTBAR - 1 do -- slots 1-8 only
 		hotbarSlots[i].frame.Visible = true
 	end
 end
@@ -484,13 +408,11 @@ if player.Character then
 end
 player.CharacterAdded:Connect(setupCharacterEquipTracking)
 
--- ===================== DRAG SYSTEM (PC) =====================
+-- ===================== DRAG SYSTEM =====================
 
---- Find which slot (hotbar or inventory) is under the given screen position.
---- Returns: slotData, isHotbar, slotIndex (or nil if nothing)
 local function findSlotAtPosition(screenPos)
-	-- Check hotbar slots
-	for i = 1, MAX_HOTBAR do
+	-- Check hotbar slots (1-8, skip menu slot 9)
+	for i = 1, MAX_HOTBAR - 1 do
 		local slotData = hotbarSlots[i]
 		if slotData.frame.Visible then
 			local absPos = slotData.frame.AbsolutePosition
@@ -506,7 +428,7 @@ local function findSlotAtPosition(screenPos)
 		end
 	end
 
-	-- Check inventory slots
+	-- Check inventory slots (only when visible)
 	if inventoryVisible then
 		for i, slotData in ipairs(inventoryPool) do
 			if slotData.inUse and slotData.frame.Visible then
@@ -527,7 +449,6 @@ local function findSlotAtPosition(screenPos)
 	return nil, nil, nil
 end
 
---- Check if screen position is over inventory frame (but not on a slot)
 local function isOverInventoryArea(screenPos)
 	if not inventoryVisible then
 		return false
@@ -552,21 +473,20 @@ local function _setDragHighlight(slotFrame, valid)
 	_clearDragHighlight()
 	highlightedSlot = slotFrame
 	highlightOriginalColor = slotFrame.UIStroke.Color
-	slotFrame.UIStroke.Color = valid and HIGHLIGHT_COLOR_VALID or HIGHLIGHT_COLOR_INVALID
+	slotFrame.UIStroke.Color = valid and HIGHLIGHT_COLOR_VALID or Color3.fromHex("#FF5555")
 end
 
 local function _createDragGhost(sourceFrame)
 	local ghost = sourceFrame:Clone()
 	ghost.Name = "DragGhost"
+	-- Parent to hotbarGui (CustomInventory) which is always enabled
 	ghost.Parent = hotbarGui
 	ghost.ZIndex = 100
 	ghost.BackgroundTransparency = GHOST_TRANSPARENCY
-	-- Force pixel size from source so it matches exactly regardless of parent
 	local absSize = sourceFrame.AbsoluteSize
 	ghost.Size = UDim2.fromOffset(absSize.X, absSize.Y)
 	ghost.AnchorPoint = Vector2.new(0.5, 0.5)
 
-	-- Make all children semi-transparent too
 	for _, child in ipairs(ghost:GetDescendants()) do
 		if child:IsA("GuiObject") then
 			if child.BackgroundTransparency < 1 then
@@ -575,7 +495,6 @@ local function _createDragGhost(sourceFrame)
 		end
 	end
 
-	-- Remove interactivity
 	for _, child in ipairs(ghost:GetDescendants()) do
 		if child:IsA("GuiButton") then
 			child.Active = false
@@ -587,18 +506,15 @@ end
 
 local function _cleanupDrag()
 	if dragState then
-		-- Restore source slot opacity
 		if dragState.sourceFrame then
-			dragState.sourceFrame.BackgroundTransparency = 0
+			dragState.sourceFrame.BackgroundTransparency = 0.3
 		end
-		-- Destroy ghost
 		if dragState.ghost then
 			dragState.ghost:Destroy()
 		end
 		dragState = nil
 	end
 	_clearDragHighlight()
-	-- Re-hide empty hotbar slots now that drag is over
 	refreshHotbar()
 end
 
@@ -607,8 +523,7 @@ local function _startDragOnSlot(toolInfo, slotFrame, isHotbar, slotIndex, mouseP
 		return
 	end
 
-	-- ── Block drag when inventory panel is closed ──
-	-- Still allow immediate equip via click path
+	-- Block drag when inventory panel is closed — click-to-equip only
 	if not inventoryVisible then
 		if isHotbar and slotIndex then
 			EquipToolFunc:InvokeServer(slotIndex)
@@ -632,7 +547,6 @@ local function _startDragOnSlot(toolInfo, slotFrame, isHotbar, slotIndex, mouseP
 		isDragging = false,
 	}
 
-	-- Reveal all 9 hotbar slots so player can target empty ones
 	_showAllHotbarSlots()
 end
 
@@ -646,22 +560,19 @@ local function onDragMove(mousePos)
 		if dist < DRAG_THRESHOLD then
 			return
 		end
-		-- Threshold exceeded — enter drag mode
 		dragState.isDragging = true
 		dragState.ghost = _createDragGhost(dragState.sourceFrame)
 		dragState.sourceFrame.BackgroundTransparency = DIM_TRANSPARENCY
 	end
 
-	-- Move ghost — input.Position is viewport-relative, but ScreenGui uses
-	-- IgnoreGuiInset=true (coordinate origin at screen top), so add inset.Y
+	-- Ghost in IgnoreGuiInset=true ScreenGui: add inset.Y to viewport-relative input.Position
 	if dragState.ghost then
 		local inset = GuiService:GetGuiInset()
 		dragState.ghost.Position = UDim2.fromOffset(mousePos.X, mousePos.Y + inset.Y)
 	end
 
-	-- Highlight drop target — AbsolutePosition is in raw screen coords too
-	local adjustedPos = Vector2.new(mousePos.X, mousePos.Y)
-	local targetSlot, _, _ = findSlotAtPosition(adjustedPos)
+	-- Hit test uses viewport-relative coords (matches AbsolutePosition)
+	local targetSlot, _, _ = findSlotAtPosition(Vector2.new(mousePos.X, mousePos.Y))
 	if targetSlot and targetSlot.frame ~= dragState.sourceFrame then
 		_setDragHighlight(targetSlot.frame, true)
 	else
@@ -680,9 +591,7 @@ local function onDragEnd(mousePos)
 	local sourceIsHotbar = dragState.isHotbar
 	local sourceSlotIndex = dragState.slotIndex
 
-	-- ── HIT TEST BEFORE CLEANUP ──
-	-- _cleanupDrag calls refreshHotbar which hides empty hotbar slots.
-	-- We must capture the drop target while they're still visible.
+	-- Hit test BEFORE cleanup (cleanup hides empty hotbar slots)
 	local targetSlot, targetIsHotbar, targetSlotIndex
 	local overInventory = false
 	if wasDragging then
@@ -695,7 +604,6 @@ local function onDragEnd(mousePos)
 	suppressTooltip = false
 
 	if not wasDragging then
-		-- Was a click, not a drag — equip/toggle
 		if sourceIsHotbar and sourceSlotIndex then
 			EquipToolFunc:InvokeServer(sourceSlotIndex)
 		else
@@ -705,29 +613,18 @@ local function onDragEnd(mousePos)
 		return
 	end
 
-	-- ── RESOLVE DROP ACTION using pre-captured target ──
 	if targetSlot and targetSlot.toolInfo then
-		-- Drop on occupied slot → swap
 		SwapItemsFunc:InvokeServer(toolName, targetSlot.toolInfo.name)
-		if selectSound2 then
-			selectSound2:Play()
-		end
+		if selectSound2 then selectSound2:Play() end
 	elseif targetSlot and targetIsHotbar and not targetSlot.toolInfo then
-		-- Drop on empty hotbar slot → assign
 		AssignHotbarFunc:InvokeServer(targetSlotIndex, toolName)
-		if selectSound2 then
-			selectSound2:Play()
-		end
+		if selectSound2 then selectSound2:Play() end
 	elseif overInventory then
-		-- Dropped on inventory area but not on a slot
 		if sourceIsHotbar then
 			MoveToEndFunc:InvokeServer(toolName)
-			if selectSound2 then
-				selectSound2:Play()
-			end
+			if selectSound2 then selectSound2:Play() end
 		end
 	else
-		-- Dropped on empty space → drop to world
 		DropItemFunc:InvokeServer(toolName)
 		UIClick:Play()
 	end
@@ -744,12 +641,9 @@ end
 
 local function handleMobileTap(toolInfo, slotFrame, isHotbar, slotIndex)
 	if not toolInfo then
-		-- Tapped empty hotbar slot while something selected → assign
 		if mobileSelectedName and isHotbar and slotIndex then
 			AssignHotbarFunc:InvokeServer(slotIndex, mobileSelectedName)
-			if selectSound2 then
-				selectSound2:Play()
-			end
+			if selectSound2 then selectSound2:Play() end
 			clearMobileSelection()
 		else
 			clearMobileSelection()
@@ -759,21 +653,14 @@ local function handleMobileTap(toolInfo, slotFrame, isHotbar, slotIndex)
 
 	if mobileSelectedName then
 		if mobileSelectedName == toolInfo.name then
-			-- Tapped same item → deselect
 			clearMobileSelection()
 		else
-			-- Tapped different item → swap
 			SwapItemsFunc:InvokeServer(mobileSelectedName, toolInfo.name)
-			if selectSound2 then
-				selectSound2:Play()
-			end
+			if selectSound2 then selectSound2:Play() end
 			clearMobileSelection()
 		end
 	else
-		-- Nothing selected → select this item
-		if selectSound1 then
-			selectSound1:Play()
-		end
+		if selectSound1 then selectSound1:Play() end
 		mobileSelectedName = toolInfo.name
 		mobileSelectedSlot = slotFrame
 		slotFrame.Swap.Visible = true
@@ -781,19 +668,24 @@ local function handleMobileTap(toolInfo, slotFrame, isHotbar, slotIndex)
 end
 
 -- ===================== SLOT INPUT WIRING =====================
--- Wire click/drag handlers on hotbar slots (once at creation)
 local function wireHotbarSlotInput(slotIndex)
 	local slotData = hotbarSlots[slotIndex]
 	local selectBtn = slotData.frame:WaitForChild("Select")
 
+	if slotIndex == MENU_SLOT then
+		-- ── Menu button click → open full Nexus menu ──
+		selectBtn.MouseButton1Down:Connect(function()
+			UIClick:Play()
+			MenuBridge.openFullMenu()
+		end)
+		return
+	end
+
 	selectBtn.MouseButton1Down:Connect(function()
 		if not slotData.toolInfo then
-			-- Empty slot — if mobile and has selection, assign
 			if isMobile and mobileSelectedName then
 				AssignHotbarFunc:InvokeServer(slotIndex, mobileSelectedName)
-				if selectSound2 then
-					selectSound2:Play()
-				end
+				if selectSound2 then selectSound2:Play() end
 				clearMobileSelection()
 			end
 			return
@@ -804,7 +696,6 @@ local function wireHotbarSlotInput(slotIndex)
 			return
 		end
 
-		-- PC: start potential drag (use raw screen coords to match InputChanged)
 		local rawMouse = UserInputService:GetMouseLocation()
 		local inset = GuiService:GetGuiInset()
 		local mousePos = Vector2.new(rawMouse.X, rawMouse.Y - inset.Y)
@@ -812,7 +703,6 @@ local function wireHotbarSlotInput(slotIndex)
 	end)
 end
 
--- Wire inventory pool slot input (called once per pool slot creation)
 local function wireInventorySlotInput(poolIndex)
 	local slotData = inventoryPool[poolIndex]
 	local selectBtn = slotData.frame:WaitForChild("Select")
@@ -859,7 +749,7 @@ UserInputService.InputEnded:Connect(function(input)
 end)
 
 -- ===================== TOOLTIP SUPPRESSION ON CLICK =====================
-UserInputService.InputBegan:Connect(function(input, gameProcessed)
+UserInputService.InputBegan:Connect(function(input, _)
 	if input.UserInputType == Enum.UserInputType.MouseButton1 then
 		suppressTooltip = true
 		TooltipModule.forceHide()
@@ -869,7 +759,6 @@ end)
 UserInputService.InputEnded:Connect(function(input)
 	if input.UserInputType == Enum.UserInputType.MouseButton1 then
 		suppressTooltip = false
-		-- Re-show tooltip if hovering over a slot
 		local rawMouse = UserInputService:GetMouseLocation()
 		local inset = GuiService:GetGuiInset()
 		local adjustedPos = Vector2.new(rawMouse.X, rawMouse.Y - inset.Y)
@@ -880,235 +769,6 @@ UserInputService.InputEnded:Connect(function(input)
 	end
 end)
 
--- ===================== INVENTORY ARROW =====================
-local arrowMoving = false
-local lastArrowTarget = nil
-
-local function updateArrowPosition()
-	if arrowMoving then
-		return
-	end
-	local hasVisibleSlot = false
-	for i = 1, MAX_HOTBAR do
-		if hotbarSlots[i] and hotbarSlots[i].frame.Visible then
-			hasVisibleSlot = true
-			break
-		end
-	end
-	local target = hasVisibleSlot and ARROW_WITH_SLOTS or ARROW_WITHOUT_SLOTS
-	if lastArrowTarget == target then
-		return
-	end
-	lastArrowTarget = target
-	arrowMoving = true
-	local tw = tweenTo(InventoryArrow, { Position = target }, TWEEN_QUINT)
-	tw.Completed:Once(function()
-		arrowMoving = false
-	end)
-end
-
--- ===================== DROP BUTTON (mobile fallback) =====================
-local dropBtnVisible = false
-
-local function showDropButton()
-	if dropBtnVisible then
-		return
-	end
-	dropBtnVisible = true
-	dropButton.Visible = true
-	tweenTo(dropButton, { Position = DROPBTN_SHOWN }, TWEEN_BACK_OUT)
-end
-
-local function hideDropButton()
-	if not dropBtnVisible then
-		return
-	end
-	dropBtnVisible = false
-	local tw = tweenTo(dropButton, { Position = DROPBTN_HIDDEN }, TWEEN_BACK_IN)
-	tw.Completed:Once(function()
-		if not dropBtnVisible then
-			dropButton.Visible = false
-		end
-	end)
-end
-
-local function updateDropButton()
-	if mobileSelectedSlot and mobileSelectedSlot.Parent == hotbarFrame then
-		showDropButton()
-	else
-		hideDropButton()
-	end
-end
-
-dropButton.MouseButton1Click:Connect(function()
-	if mobileSelectedName and mobileSelectedSlot and mobileSelectedSlot.Parent == hotbarFrame then
-		MoveToEndFunc:InvokeServer(mobileSelectedName)
-		if selectSound2 then
-			selectSound2:Play()
-		end
-		clearMobileSelection()
-		updateDropButton()
-	end
-end)
-
--- ===================== OPEN / CLOSE INVENTORY =====================
-local function openInventory()
-	if isAnimating or inventoryVisible then
-		return
-	end
-	isAnimating = true
-	inventoryVisible = true
-	UIClick:Play()
-
-	inventoryOuter.Visible = true
-	refreshAll()
-
-	-- Staggered reveal using Completed callbacks
-	tweenTo(
-		inventoryOuter,
-		{ Position = INVENTORY_SHOWN },
-		TweenInfo.new(0.8, Enum.EasingStyle.Back, Enum.EasingDirection.InOut)
-	)
-	task.delay(0.2, function()
-		tweenTo(topBar, { Position = TOPBAR_SHOWN }, TWEEN_BACK_OUT)
-	end)
-	task.delay(0.3, function()
-		tweenTo(inventoryFrame, { Position = INVFRAME_SHOWN }, TWEEN_QUINT)
-	end)
-	task.delay(0.5, function()
-		tweenTo(rarityButton, { Position = RARITY_SHOWN }, TWEEN_BACK_OUT)
-		if filterSound then
-			filterSound:Play()
-		end
-	end)
-	task.delay(0.55, function()
-		tweenTo(quantityButton, { Position = QUANTITY_SHOWN }, TWEEN_BACK_OUT)
-		if filterSound then
-			filterSound:Play()
-		end
-	end)
-	task.delay(0.6, function()
-		tweenTo(nameButton, { Position = NAME_SHOWN }, TWEEN_BACK_OUT)
-		if filterSound then
-			filterSound:Play()
-		end
-	end)
-	task.delay(0.65, function()
-		local tw = tweenTo(searchBox, { Position = SEARCH_SHOWN }, TWEEN_BACK_OUT)
-		if filterSound then
-			filterSound:Play()
-		end
-		tw.Completed:Once(function()
-			isAnimating = false
-		end)
-	end)
-
-	local arrowTween = TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
-	tweenTo(InventoryArrow, { Rotation = 180 }, arrowTween)
-	updateArrowPosition()
-end
-
-local function closeInventory()
-	if isAnimating or not inventoryVisible then
-		return
-	end
-	isAnimating = true
-	inventoryVisible = false
-	UIClick:Play()
-
-	-- Clear selection state
-	clearMobileSelection()
-	hideDropButton()
-	_cleanupDrag()
-	TooltipModule.forceHide()
-
-	tweenTo(
-		inventoryOuter,
-		{ Position = INVENTORY_HIDDEN },
-		TweenInfo.new(1.0, Enum.EasingStyle.Back, Enum.EasingDirection.InOut)
-	)
-	task.delay(0.1, function()
-		tweenTo(rarityButton, { Position = RARITY_HIDDEN }, TWEEN_BACK_IN)
-		tweenTo(quantityButton, { Position = QUANTITY_HIDDEN }, TWEEN_BACK_IN)
-		tweenTo(nameButton, { Position = NAME_HIDDEN }, TWEEN_BACK_IN)
-		tweenTo(searchBox, { Position = SEARCH_HIDDEN }, TWEEN_BACK_IN)
-	end)
-	task.delay(0.15, function()
-		tweenTo(topBar, { Position = TOPBAR_HIDDEN }, TWEEN_BACK_IN)
-	end)
-	task.delay(0.2, function()
-		tweenTo(inventoryFrame, { Position = INVFRAME_HIDDEN }, TWEEN_QUINT)
-	end)
-
-	local arrowTween = TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
-	tweenTo(InventoryArrow, { Rotation = 0 }, arrowTween)
-
-	task.delay(1.0, function()
-		if not inventoryVisible then
-			inventoryOuter.Visible = false
-			isAnimating = false
-		end
-	end)
-
-	refreshHotbar()
-	updateArrowPosition()
-end
-
-local function toggleInventory()
-	if inventoryVisible then
-		closeInventory()
-	else
-		openInventory()
-	end
-end
-
--- ===================== SEARCH BOX =====================
-searchBox:GetPropertyChangedSignal("Text"):Connect(function()
-	currentSearchText = searchBox.Text:lower()
-	if inventoryVisible then
-		refreshInventory()
-	end
-end)
-
--- ===================== SORT BUTTONS =====================
-for _, btnInfo in pairs(sortButtons) do
-	btnInfo.button.MouseButton1Click:Connect(function()
-		local criterion = btnInfo.criterion
-		if currentSortCriterion == criterion then
-			if currentSortState == "desc" then
-				currentSortState = "asc"
-			elseif currentSortState == "asc" then
-				currentSortState = nil
-				currentSortCriterion = nil
-			end
-		else
-			currentSortCriterion = criterion
-			currentSortState = "desc"
-		end
-		UIClick:Play()
-
-		-- Update stroke colors
-		for _, otherBtn in pairs(sortButtons) do
-			local color = (otherBtn.criterion == currentSortCriterion and currentSortState)
-					and SORT_COLORS[currentSortState]
-				or SORT_COLORS.none
-			tweenStrokeColor(otherBtn.stroke, color)
-		end
-
-		if inventoryVisible then
-			refreshInventory()
-		end
-	end)
-end
-
--- ===================== INVENTORY ARROW CLICK =====================
-InventoryArrow.MouseButton1Click:Connect(function()
-	if isAnimating then
-		return
-	end
-	toggleInventory()
-end)
-
 -- ===================== SERVER DATA HANDLER =====================
 UpdateInventoryEvent.OnClientEvent:Connect(function(data)
 	currentHotbarData = data.hotbar or {}
@@ -1117,8 +777,6 @@ UpdateInventoryEvent.OnClientEvent:Connect(function(data)
 	currentMaxCapacity = data.max_capacity or 1000
 
 	refreshAll()
-	updateArrowPosition()
-	updateDropButton()
 end)
 
 -- ===================== KEY BINDINGS =====================
@@ -1144,35 +802,75 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
 
 	local key = input.KeyCode
 
-	-- G key → toggle inventory
-	if key == Enum.KeyCode.G then
-		if not isAnimating then
-			toggleInventory()
+	-- E key → toggle inventory-only mode
+	if key == Enum.KeyCode.E then
+		if MenuBridge.isOpen() then
+			MenuBridge.closeAll()
+		else
+			MenuBridge.openInventory()
 		end
 		return
 	end
 
-	-- Number keys → equip hotbar slot (or assign if mobile selected)
+	-- G key → close everything
+	if key == Enum.KeyCode.G then
+		if MenuBridge.isOpen() then
+			MenuBridge.closeAll()
+		end
+		return
+	end
+
+	-- Number keys → equip hotbar slot
 	local slotIndex = keyToSlot[key]
 	if slotIndex then
+		if slotIndex == MENU_SLOT then
+			-- Key 9 → open full menu (same as clicking slot 9)
+			MenuBridge.openFullMenu()
+			return
+		end
+
 		if mobileSelectedName then
-			-- Mobile selection active → assign to hotbar
 			local targetInfo = currentHotbarData[slotIndex]
 			if type(targetInfo) == "table" and targetInfo.name and targetInfo.name ~= mobileSelectedName then
 				SwapItemsFunc:InvokeServer(mobileSelectedName, targetInfo.name)
 			elseif not targetInfo or targetInfo == false then
 				AssignHotbarFunc:InvokeServer(slotIndex, mobileSelectedName)
 			end
-			if selectSound2 then
-				selectSound2:Play()
-			end
+			if selectSound2 then selectSound2:Play() end
 			clearMobileSelection()
-			updateDropButton()
 		else
 			EquipToolFunc:InvokeServer(slotIndex)
 		end
 	end
 end)
+
+-- ===================== MENUBRIDGE CALLBACKS =====================
+-- CentralizedMenuController notifies us when state changes
+MenuBridge._onStateChanged = function(mode)
+	local wasVisible = inventoryVisible
+	inventoryVisible = (mode ~= nil) -- visible in both "inventory" and "full" modes
+
+	if inventoryVisible and not wasVisible then
+		refreshInventory()
+	end
+
+	-- Cleanup drag if menu closes mid-drag
+	if not inventoryVisible and dragState then
+		_cleanupDrag()
+		suppressTooltip = false
+	end
+
+	-- Clear mobile selection on close
+	if not inventoryVisible then
+		clearMobileSelection()
+		TooltipModule.forceHide()
+	end
+end
+
+-- Expose refresh for external callers
+MenuBridge._refreshInventory = function()
+	refreshInventory()
+end
 
 -- ===================== INITIAL STATE =====================
 createHotbarSlots()
@@ -1181,30 +879,5 @@ for i = 1, MAX_HOTBAR do
 end
 
 hotbarFrame.Visible = true
-inventoryOuter.Visible = false
-dropButton.Visible = false
-
--- Initialize sort button strokes
-for _, btnInfo in pairs(sortButtons) do
-	btnInfo.stroke.Color = SORT_COLORS.none
-end
-
--- Position elements in hidden state
-inventoryOuter.Position = INVENTORY_HIDDEN
-topBar.Position = TOPBAR_HIDDEN
-inventoryFrame.Position = INVFRAME_HIDDEN
-searchBox.Position = SEARCH_HIDDEN
-rarityButton.Position = RARITY_HIDDEN
-quantityButton.Position = QUANTITY_HIDDEN
-nameButton.Position = NAME_HIDDEN
-dropButton.Position = DROPBTN_HIDDEN
-
--- Arrow position poll (lightweight, no RenderStepped)
-task.spawn(function()
-	while true do
-		updateArrowPosition()
-		task.wait(0.5)
-	end
-end)
 
 print("[InventoryController] Ready ✓")

@@ -54,6 +54,7 @@ local ProfilePageModule = require(Modules:WaitForChild("ProfilePageModule")) :: 
 local SettingsPageModule = require(Modules:WaitForChild("SettingsPageModule")) :: any -- ← CHANGED
 local StatisticsPageModule = require(Modules:WaitForChild("StatisticsPageModule")) :: any
 local CollectionsPageModule = require(Modules:WaitForChild("CollectionsPageModule")) :: any
+local MenuBridge = require(Modules:WaitForChild("MenuBridge")) :: any
 
 local Lighting = game:GetService("Lighting")
 local TraceRouteService = game:GetService("TraceRouteService")
@@ -89,8 +90,12 @@ local MENU_OPEN = UDim2.fromScale(0.5, 0.5)
 local MENU_CLOSED = UDim2.fromScale(0.5, -0.5)
 local menuTweenInfo = TweenInfo.new(TWEEN_TIME, Enum.EasingStyle.Back, TWEEN_DIR)
 
+-- ===================== INVENTORY PANEL REF =====================
+local inventoryPanel = innerFrame:WaitForChild("Inventory")
+
 -- ===================== STATE =====================
 local menuOpen = false
+local openMode = nil -- nil | "inventory" | "full"
 local navStack = {}
 local activeTween = nil
 local returnHoldProgress = 0
@@ -925,6 +930,8 @@ local function navigateToRoot(animated)
 			end
 		end
 	end
+	menuFrame.Visible = true
+	inventoryPanel.Visible = true
 	GridMenuModule.showRoot(ROOT_GRID, animated)
 	hideReturnButton()
 	hideSkillAverage()
@@ -1071,19 +1078,49 @@ local function pushSubPage(key)
 end
 
 -- ===================== OPEN / CLOSE ENTIRE MENU =====================
-local function openMenu()
+local function openMenu(mode)
+	mode = mode or "full"
+
+	-- Already open — check for mode upgrade
 	if menuOpen then
+		if openMode == "inventory" and mode == "full" then
+			-- Upgrade: show the grid area
+			openMode = "full"
+			menuFrame.Visible = true
+			inventoryPanel.Visible = true
+			navigateToRoot(true)
+			MenuBridge.notifyStateChanged("full")
+		end
 		return
 	end
+
 	menuOpen = true
+	openMode = mode
 	tweenBlur(BLUR_SIZE)
 	CentralizedMenu.Enabled = true
 	hideSidebar()
-	navigateToRoot(false)
+
+	if mode == "full" then
+		menuFrame.Visible = true
+		inventoryPanel.Visible = true
+		navigateToRoot(false)
+	elseif mode == "inventory" then
+		menuFrame.Visible = false
+		inventoryPanel.Visible = true
+		GridMenuModule.reset()
+		hideReturnButton()
+		hideSkillAverage()
+		hideRomanToggle()
+		hideSearchBox()
+		setTitleInstant("Your Inventory")
+	end
+
 	BoundingBox.Position = MENU_CLOSED
 	tweenObject(BoundingBox, { Position = MENU_OPEN }, menuTweenInfo)
 	UIClick:Play()
 	UIIn:Play()
+	navStack = {}
+	MenuBridge.notifyStateChanged(mode)
 end
 
 local function closeMenu()
@@ -1091,6 +1128,7 @@ local function closeMenu()
 		return
 	end
 	menuOpen = false
+	openMode = nil
 	tweenBlur(0)
 	showSidebar()
 	local nav = currentNav()
@@ -1109,16 +1147,19 @@ local function closeMenu()
 				frame.Visible = false
 			end
 			GridMenuModule.showRoot(ROOT_GRID, false)
+			menuFrame.Visible = false
+			inventoryPanel.Visible = false
 		end
 	end)
 	navStack = {}
+	MenuBridge.notifyStateChanged(nil)
 end
 
 local function toggleMenu()
 	if menuOpen then
 		closeMenu()
 	else
-		openMenu()
+		openMenu("full")
 	end
 end
 
@@ -1155,6 +1196,35 @@ GridMenuModule.init(sharedRefs, {
 		closeMenu()
 	end,
 })
+
+-- ===================== REGISTER MENUBRIDGE CALLBACKS =====================
+MenuBridge._openInventoryMode = function()
+	if menuOpen then
+		closeMenu()
+	else
+		openMenu("inventory")
+	end
+end
+
+MenuBridge._openFullMode = function()
+	if menuOpen and openMode == "full" then
+		closeMenu()
+	else
+		openMenu("full")
+	end
+end
+
+MenuBridge._closeAll = function()
+	closeMenu()
+end
+
+MenuBridge._isOpen = function()
+	return menuOpen
+end
+
+MenuBridge._getMode = function()
+	return openMode
+end
 
 -- ===================== REGISTER NexusMenu AS ROOT GRID =====================
 GridMenuModule.registerGrid(ROOT_GRID, NexusMenu, NEXUS_BUTTONS, {
@@ -1216,6 +1286,8 @@ sharedRefs.SkillsPageModule = SkillsPageModule
 
 -- ===================== INITIAL STATE =====================
 CentralizedMenu.Enabled = false
+menuFrame.Visible = false
+inventoryPanel.Visible = false
 BoundingBox.Position = MENU_CLOSED
 returnBox.Position = RETURN_HIDDEN
 skillAverageFrame.Position = SKILLAVG_HIDDEN
@@ -1229,15 +1301,6 @@ for _, frame in pairs(menuChildFrames) do
 	frame.Visible = false
 end
 
--- ===================== E KEY TOGGLE =====================
-UserInputService.InputBegan:Connect(function(input, gameProcessed)
-	if gameProcessed then
-		return
-	end
-	if input.KeyCode == Enum.KeyCode.E then
-		toggleMenu()
-	end
-end)
 
 -- ===================== NEXUS SIDEBAR BUTTON =====================
 NexusBtn.MouseButton1Click:Connect(function()
