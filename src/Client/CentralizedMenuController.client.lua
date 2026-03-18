@@ -1,11 +1,6 @@
 -- ============================================================
 --  CentralizedMenuController (LocalScript)
 --  StarterPlayerScripts
---
---  UPDATED: Now uses GridMenuModule for all grid wiring and
---  stack-based grid-to-grid navigation.  NexusMenu is registered
---  as the root grid.  Sub-grids swap in-place; page modules
---  still slide left/right as before.
 -- ============================================================
 
 local TweenService = game:GetService("TweenService")
@@ -13,7 +8,7 @@ local RunService = game:GetService("RunService")
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
 local GuiService = game:GetService("GuiService")
-local ReplicatedStorage = game:GetService("ReplicatedStorage") -- ← CHANGED: added
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -26,38 +21,40 @@ local UIOut = workspace:WaitForChild("UISounds"):WaitForChild("Out")
 
 -- ===================== GUI REFERENCES =====================
 local CentralizedMenu = playerGui:WaitForChild("CentralizedAscensionMenu")
-local BoundingBox = CentralizedMenu:WaitForChild("BoundingBox") -- ← CHANGED: was script.Parent
+local BoundingBox = CentralizedMenu:WaitForChild("BoundingBox")
 local outerFrame = BoundingBox:WaitForChild("outerFrame")
 local innerFrame = outerFrame:WaitForChild("innerFrame")
-local menuFrame = innerFrame:WaitForChild("Menu")
+local menuClip = innerFrame:WaitForChild("MenuClip")
+local menuFrame = innerFrame:WaitForChild("MenuClip"):WaitForChild("Menu") -- Menu now lives inside MenuClip
 local NexusMenu = menuFrame:WaitForChild("NexusMenu")
 local topBarFrame = innerFrame:WaitForChild("topBarFrame")
 local menuTitleLabel = topBarFrame:WaitForChild("MenuTitleLabel")
-local returnBox = topBarFrame:WaitForChild("returnBox")
+local returnBox = topBarFrame:WaitForChild("depricated"):WaitForChild("returnBox")
 local returnButton = returnBox:WaitForChild("returnButton")
-local romantonumButton = topBarFrame:WaitForChild("romantonumButton")
-local skillAverageFrame = topBarFrame:WaitForChild("skillAverageFrame")
-local searchBoxOuter = topBarFrame:WaitForChild("searchBoxOuter")
+local romantonumButton = topBarFrame:WaitForChild("depricated"):WaitForChild("romantonumButton")
+local skillAverageFrame = topBarFrame:WaitForChild("depricated"):WaitForChild("skillAverageFrame")
+local searchBoxOuter = topBarFrame:WaitForChild("depricated"):WaitForChild("searchBoxOuter")
+local inventoryPanel = innerFrame:WaitForChild("Inventory")
+local inventoryFrame = inventoryPanel:WaitForChild("InventoryFrame")
 
-local TemporaryMenus = CentralizedMenu:WaitForChild("TemporaryMenus") -- stays: BlankSlot lives here
+local TemporaryMenus = CentralizedMenu:WaitForChild("TemporaryMenus")
 local Sidebar = playerGui:WaitForChild("Sidebar")
 local SidebarBB = Sidebar:WaitForChild("SidebarBB")
 local NexusBtn = SidebarBB:WaitForChild("Nexus")
 
 -- ===================== MODULES =====================
-local Modules = ReplicatedStorage:WaitForChild("Modules") -- ← CHANGED: added
+local Modules = ReplicatedStorage:WaitForChild("Modules")
 
-local TooltipModule = require(Modules:WaitForChild("TooltipModule")) :: any -- ←  CHANGED
-local GridMenuModule = require(Modules:WaitForChild("GridMenuModule")) :: any -- ← CHANGED
-local SkillsPageModule = require(Modules:WaitForChild("SkillsPageModule")) :: any -- ← CHANGED
-local ProfilePageModule = require(Modules:WaitForChild("ProfilePageModule")) :: any -- ← CHANGED
-local SettingsPageModule = require(Modules:WaitForChild("SettingsPageModule")) :: any -- ← CHANGED
+local TooltipModule = require(Modules:WaitForChild("TooltipModule")) :: any
+local GridMenuModule = require(Modules:WaitForChild("GridMenuModule")) :: any
+local SkillsPageModule = require(Modules:WaitForChild("SkillsPageModule")) :: any
+local ProfilePageModule = require(Modules:WaitForChild("ProfilePageModule")) :: any
+local SettingsPageModule = require(Modules:WaitForChild("SettingsPageModule")) :: any
 local StatisticsPageModule = require(Modules:WaitForChild("StatisticsPageModule")) :: any
 local CollectionsPageModule = require(Modules:WaitForChild("CollectionsPageModule")) :: any
 local MenuBridge = require(Modules:WaitForChild("MenuBridge")) :: any
 
 local Lighting = game:GetService("Lighting")
-local TraceRouteService = game:GetService("TraceRouteService")
 
 -- ===================== TWEEN CONFIG =====================
 local TWEEN_TIME = 0.5
@@ -88,17 +85,23 @@ local sidebarHideTweenInfo = TweenInfo.new(0.3, Enum.EasingStyle.Quint, Enum.Eas
 
 local MENU_OPEN = UDim2.fromScale(0.5, 0.5)
 local MENU_CLOSED = UDim2.fromScale(0.5, -0.5)
-local menuTweenInfo = TweenInfo.new(TWEEN_TIME, Enum.EasingStyle.Back, TWEEN_DIR)
+local menuTweenInfo = TweenInfo.new(TWEEN_TIME, Enum.EasingStyle.Back, TWEEN_DIR) -- FIX: was missing
 
--- ===================== INVENTORY PANEL REF =====================
-local inventoryPanel = innerFrame:WaitForChild("Inventory")
+-- Menu panel slide (Position on menuFrame inside MenuClip — free from UIListLayout)
+local MENU_PANEL_HIDDEN = UDim2.fromScale(0, -1)
+local MENU_PANEL_SHOWN = UDim2.new(0, 0, 0, 0)
+local menuPanelTweenIn = TweenInfo.new(0.45, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
+local menuPanelTweenOut = TweenInfo.new(0.3, Enum.EasingStyle.Quint, Enum.EasingDirection.In)
+local menuPanelTween = nil
+-- InventoryFrame size tween (shrinks when nexus grid is visible)
+local INVFRAME_SIZE_DEFAULT = UDim2.new(1, 0, 0, 190)
+local INVFRAME_SIZE_NEXUS = UDim2.new(1, 0, 0, 130)
+local invFrameTweenInfo = TweenInfo.new(0.35, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
 
 -- ===================== STATE =====================
 local menuOpen = false
-local openMode = nil -- nil | "inventory" | "full"
+local openMode: "full" | "inventory" | nil = nil
 local navStack = {}
-local activeTween = nil
-local returnHoldProgress = 0
 local progressTween = nil
 local sidebarVisible = true
 local sidebarActiveTween = nil
@@ -119,7 +122,6 @@ local blurTweenInfo = TweenInfo.new(0.35, Enum.EasingStyle.Quint, Enum.EasingDir
 local function tweenBlur(targetSize)
 	if blurTween then
 		blurTween:Cancel()
-		blurTween = nil
 	end
 	blurTween = TweenService:Create(blur, blurTweenInfo, { Size = targetSize })
 	blurTween:Play()
@@ -128,7 +130,6 @@ end
 -- ===================== RETURN BUTTON HOLD =====================
 local HOLD_THRESHOLD = 0.5
 local returnPressTime = nil
-local returnHeld = false
 local returnDebounce = false
 local RETURN_DEBOUNCE_TIME = 1
 
@@ -140,10 +141,6 @@ local function tweenObject(object, targetProps, info)
 	local tw = TweenService:Create(object, info or tweenInfo, targetProps)
 	tw:Play()
 	return tw
-end
-
-local function _snapPosition(object, pos)
-	object.Position = pos
 end
 
 local function cancelSidebarTween()
@@ -167,6 +164,35 @@ local function hideSidebar()
 	sidebarActiveTween:Play()
 end
 
+-- ===================== MENU PANEL TWEEN HELPERS =====================
+-- FIX: _closeMenuPanel fires CONCURRENT with BoundingBox tween, not inside tw.Completed.
+-- FIX: navigateToRoot no longer touches menuFrame.Visible — these helpers own that.
+
+local function _openMenuPanel()
+	if menuPanelTween then
+		menuPanelTween:Cancel()
+	end
+	menuClip.Visible = true -- ← ADD: owner of this lives here
+	menuFrame.Position = MENU_PANEL_HIDDEN
+	menuFrame.Visible = true
+	menuPanelTween = TweenService:Create(menuFrame, menuPanelTweenIn, { Position = MENU_PANEL_SHOWN })
+	menuPanelTween:Play()
+end
+
+local function _closeMenuPanel()
+	if menuPanelTween then
+		menuPanelTween:Cancel()
+	end
+	menuPanelTween = TweenService:Create(menuFrame, menuPanelTweenOut, { Position = MENU_PANEL_HIDDEN })
+	menuPanelTween.Completed:Once(function(state)
+		if state == Enum.PlaybackState.Completed then
+			menuFrame.Visible = false
+			menuFrame.Position = MENU_PANEL_HIDDEN
+			menuClip.Visible = false -- ← MOVE here from tw.Completed
+		end
+	end)
+	menuPanelTween:Play()
+end
 -- ===================== TYPEWRITER (title label) =====================
 local titleTypewriteToken = nil
 
@@ -202,31 +228,24 @@ end
 local function showReturnButton()
 	tweenObject(returnBox, { Position = RETURN_VISIBLE })
 end
-
 local function hideReturnButton()
 	tweenObject(returnBox, { Position = RETURN_HIDDEN })
 end
-
 local function showSkillAverage()
 	tweenObject(skillAverageFrame, { Position = SKILLAVG_VISIBLE })
 end
-
 local function hideSkillAverage()
 	tweenObject(skillAverageFrame, { Position = SKILLAVG_HIDDEN })
 end
-
 local function showRomanToggle()
 	romantonumButton.Visible = true
 end
-
 local function hideRomanToggle()
 	romantonumButton.Visible = false
 end
-
 local function showSearchBox()
 	tweenObject(searchBoxOuter, { Position = SEARCH_VISIBLE })
 end
-
 local function hideSearchBox()
 	tweenObject(searchBoxOuter, { Position = SEARCH_HIDDEN })
 end
@@ -238,10 +257,11 @@ local menuChildFrames = {}
 local function currentNav()
 	return navStack[#navStack]
 end
-
 local function navDepth()
 	return #navStack
 end
+
+local closeNexusPanel
 
 -- ===================== BUTTON CONFIGS =====================
 local NEXUS_BUTTONS = {
@@ -375,11 +395,14 @@ local NEXUS_BUTTONS = {
 	},
 	CloseSlot = {
 		tooltipData = {
-			title = '<font color="#FF5555"><b>Close Menu</b></font>',
-			desc = '<font color="#AAAAAA">Click to return to the game.</font>',
+			title = '<font color="#FF5555"><b>Close Nexus Menu</b></font>',
+			desc = '<font color="#AAAAAA">Click to close Nexus Menu, Inventory menu remains open.</font>',
 			click = '<font color="#FFFF55">Click to close!</font>',
 		},
-		action = "close",
+		action = "callback", -- ← THIS WAS MISSING
+		callback = function()
+			closeNexusPanel()
+		end,
 	},
 }
 
@@ -912,6 +935,7 @@ for childName in pairs(allMenuChildNames) do
 end
 
 -- ===================== NAVIGATE TO ROOT =====================
+-- FIX: does NOT touch menuFrame.Visible — _openMenuPanel owns that
 local function navigateToRoot(animated)
 	local nav = currentNav()
 	if nav and nav.config and nav.config.module then
@@ -930,8 +954,6 @@ local function navigateToRoot(animated)
 			end
 		end
 	end
-	menuFrame.Visible = true
-	inventoryPanel.Visible = true
 	GridMenuModule.showRoot(ROOT_GRID, animated)
 	hideReturnButton()
 	hideSkillAverage()
@@ -1049,13 +1071,11 @@ local function navigateBack()
 		typewriteTitle(GridMenuModule.getGridTitle(activeKey))
 		UIClick:Play()
 		navStack = {}
-
 		if GridMenuModule.getGridDepth() > 0 then
 			showReturnButton()
 		else
 			hideReturnButton()
 		end
-
 		hideSkillAverage()
 		hideRomanToggle()
 		hideSearchBox()
@@ -1070,26 +1090,26 @@ local function pushSubPage(key)
 	if not nav then
 		return
 	end
-	table.insert(navStack, {
-		key = key,
-		config = nav.config,
-		depth = nav.depth + 1,
-	})
+	table.insert(navStack, { key = key, config = nav.config, depth = nav.depth + 1 })
 end
 
 -- ===================== OPEN / CLOSE ENTIRE MENU =====================
 local function openMenu(mode)
 	mode = mode or "full"
 
-	-- Already open — check for mode upgrade
+	-- FIX: inventory→full upgrade uses _openMenuPanel, not .Visible = true
 	if menuOpen then
 		if openMode == "inventory" and mode == "full" then
-			-- Upgrade: show the grid area
 			openMode = "full"
-			menuFrame.Visible = true
 			inventoryPanel.Visible = true
-			navigateToRoot(true)
+			navigateToRoot(false) -- prep grid state while menuFrame is still hidden
 			MenuBridge.notifyStateChanged("full")
+			tweenObject(inventoryFrame, { Size = INVFRAME_SIZE_NEXUS }, invFrameTweenInfo)
+			task.delay(0.15, function()
+				if menuOpen and openMode == "full" then
+					_openMenuPanel()
+				end
+			end)
 		end
 		return
 	end
@@ -1101,11 +1121,19 @@ local function openMenu(mode)
 	hideSidebar()
 
 	if mode == "full" then
-		menuFrame.Visible = true
 		inventoryPanel.Visible = true
-		navigateToRoot(false)
+		navigateToRoot(false) -- prep grid state while menuFrame is still hidden
+		tweenObject(inventoryFrame, { Size = INVFRAME_SIZE_NEXUS }, invFrameTweenInfo)
+		task.delay(0.5, function()
+			if menuOpen and openMode == "full" then
+				_openMenuPanel()
+			end
+		end)
 	elseif mode == "inventory" then
+		-- Menu grid hidden in inventory-only mode
+		menuClip.Visible = false -- ← ADD (grid not shown in inventory-only mode)
 		menuFrame.Visible = false
+		menuFrame.Position = MENU_PANEL_HIDDEN
 		inventoryPanel.Visible = true
 		GridMenuModule.reset()
 		hideReturnButton()
@@ -1113,6 +1141,7 @@ local function openMenu(mode)
 		hideRomanToggle()
 		hideSearchBox()
 		setTitleInstant("Your Inventory")
+		inventoryFrame.Size = INVFRAME_SIZE_DEFAULT -- snap, no tween needed
 	end
 
 	BoundingBox.Position = MENU_CLOSED
@@ -1137,18 +1166,23 @@ local function closeMenu()
 	end
 	TooltipModule.forceHide()
 	UIOut:Play()
+
+	-- FIX: both tweens fire concurrently here, not sequentially
+	-- _closeMenuPanel (0.3s) finishes before BoundingBox (0.5s) — clean overlap
+	_closeMenuPanel()
 	local tw = TweenService:Create(BoundingBox, menuTweenInfo, { Position = MENU_CLOSED })
 	tw:Play()
 	tw.Completed:Once(function(state)
 		if state == Enum.PlaybackState.Completed and not menuOpen then
+			inventoryFrame.Size = INVFRAME_SIZE_DEFAULT
 			CentralizedMenu.Enabled = false
+			-- menuClip.Visible = false  ← REMOVE, _closeMenuPanel handles it
+			inventoryPanel.Visible = false
 			for _, frame in pairs(menuChildFrames) do
 				frame.Position = SLIDE_RIGHT
 				frame.Visible = false
 			end
 			GridMenuModule.showRoot(ROOT_GRID, false)
-			menuFrame.Visible = false
-			inventoryPanel.Visible = false
 		end
 	end)
 	navStack = {}
@@ -1161,6 +1195,64 @@ local function toggleMenu()
 	else
 		openMenu("full")
 	end
+end
+
+-- ===================== CLOSE NEXUS PANEL ONLY =====================
+-- Dismisses the grid overlay and switches to inventory-only mode.
+-- Called by the root NexusMenu's CloseSlot button.
+closeNexusPanel = function()
+	if not menuOpen or openMode ~= "full" then
+		return
+	end
+
+	-- Close any active page module
+	local nav = currentNav()
+	if nav and nav.config and nav.config.module then
+		nav.config.module.reset()
+	end
+
+	-- Hide any visible page child frames
+	for _, frame in pairs(menuChildFrames) do
+		if frame.Visible then
+			frame.Position = SLIDE_RIGHT
+			frame.Visible = false
+		end
+	end
+
+	-- Tween the menu panel out
+	_closeMenuPanel()
+
+	-- Delay grid reset until panel finishes tweening out (0.3s)
+	task.delay(0.3, function()
+		if openMode == "inventory" then
+			GridMenuModule.reset()
+		end
+	end)
+
+	-- Tween inventory frame back AFTER panel is fully gone
+	task.delay(0.45, function()
+		if openMode == "inventory" then
+			tweenObject(inventoryFrame, { Size = INVFRAME_SIZE_DEFAULT }, invFrameTweenInfo)
+		end
+	end)
+
+	navStack = {}
+
+	-- Switch mode
+	openMode = "inventory"
+
+	-- Clean up top bar
+	hideReturnButton()
+	hideSkillAverage()
+	hideRomanToggle()
+	hideSearchBox()
+	typewriteTitle("Your Inventory")
+
+	-- NO immediate inventoryFrame tween here — the delayed one above handles it
+
+	TooltipModule.forceHide()
+	MenuBridge.notifyStateChanged("inventory")
+	UIOut:Play()
 end
 
 -- ===================== SHARED REFS =====================
@@ -1208,7 +1300,7 @@ end
 
 MenuBridge._openFullMode = function()
 	if menuOpen and openMode == "full" then
-		closeMenu()
+		closeNexusPanel()
 	else
 		openMenu("full")
 	end
@@ -1217,19 +1309,15 @@ end
 MenuBridge._closeAll = function()
 	closeMenu()
 end
-
 MenuBridge._isOpen = function()
 	return menuOpen
 end
-
 MenuBridge._getMode = function()
 	return openMode
 end
 
 -- ===================== REGISTER NexusMenu AS ROOT GRID =====================
-GridMenuModule.registerGrid(ROOT_GRID, NexusMenu, NEXUS_BUTTONS, {
-	title = "Your Nexus Menu",
-})
+GridMenuModule.registerGrid(ROOT_GRID, NexusMenu, NEXUS_BUTTONS, { title = "Your Nexus Menu" })
 
 local CollectionsGrid = menuFrame:WaitForChild("CollectionsMenu1")
 local StatisticsGrid = menuFrame:WaitForChild("StatisticsMenu1")
@@ -1287,7 +1375,10 @@ sharedRefs.SkillsPageModule = SkillsPageModule
 -- ===================== INITIAL STATE =====================
 CentralizedMenu.Enabled = false
 menuFrame.Visible = false
+menuFrame.Position = MENU_PANEL_HIDDEN -- FIX: clean starting position for tween
 inventoryPanel.Visible = false
+inventoryFrame.Size = INVFRAME_SIZE_DEFAULT
+menuClip.Visible = false -- ← ADD
 BoundingBox.Position = MENU_CLOSED
 returnBox.Position = RETURN_HIDDEN
 skillAverageFrame.Position = SKILLAVG_HIDDEN
@@ -1300,7 +1391,6 @@ for _, frame in pairs(menuChildFrames) do
 	frame.Position = SLIDE_RIGHT
 	frame.Visible = false
 end
-
 
 -- ===================== NEXUS SIDEBAR BUTTON =====================
 NexusBtn.MouseButton1Click:Connect(function()

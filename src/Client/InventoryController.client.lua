@@ -66,6 +66,8 @@ local MoveToEndFunc = ReplicatedStorage:WaitForChild("MoveToEnd")
 -- ===================== GUI REFERENCES — HOTBAR (CustomInventory) =====================
 local hotbarGui = playerGui:WaitForChild("CustomInventory")
 local hotbarFrame = hotbarGui:WaitForChild("Hotbar")
+local hotbarBB = hotbarFrame:WaitForChild("HotbarBB")
+local hotbarFrames = hotbarBB:WaitForChild("HotbarFrames")
 local slotTemplate = ReplicatedStorage:WaitForChild("SlotTemplate")
 
 -- ===================== GUI REFERENCES — INVENTORY (inside CentralizedMenu) =====================
@@ -200,7 +202,7 @@ end
 
 -- ===================== SLOT 9 — PERMANENT MENU BUTTON =====================
 local function setupMenuSlot(slotFrame)
-	local mythicConf = ItemRegistry.getRarity(5) -- Mythic
+	local mythicConf = ItemRegistry.getRarity(6) -- Mythic
 	slotFrame.ToolName.Text = "Menu"
 	slotFrame.StackNum.Text = ""
 	slotFrame.RarityLabel.Text = mythicConf.display
@@ -219,7 +221,7 @@ local function createHotbarSlots()
 		newSlot.Name = "Slot" .. i
 		newSlot.LayoutOrder = i
 		newSlot.SlotNum.Text = tostring(i)
-		newSlot.Parent = hotbarFrame
+		newSlot.Parent = hotbarFrames
 		newSlot.Visible = false
 		newSlot.Swap.Visible = false
 
@@ -236,18 +238,18 @@ local function createHotbarSlots()
 
 			newSlot.MouseEnter:Connect(function()
 				slotData.hovered = true
-				local mythicConf = ItemRegistry.getRarity(5)
+				local mythicConf = ItemRegistry.getRarity(6)
 				newSlot.BackgroundColor3 = mythicConf.bgColor:Lerp(WHITE, LIGHTEN_FACTOR)
 				TooltipModule.show({
-					title = '<font color="#FF5555"><b>Menu</b></font>',
+					title = '<font color="#FFFF55"><b>Menu</b></font>',
 					desc = '<font color="#AAAAAA">Open the Nexus Menu and inventory.</font>',
-					click = '<font color="#FFFF55">Click for Menu!</font>',
+					click = '<font color="#FFFF55">Click to view!</font>',
 				}, TOOLTIP_SOURCE)
 			end)
 
 			newSlot.MouseLeave:Connect(function()
 				slotData.hovered = false
-				local mythicConf = ItemRegistry.getRarity(5)
+				local mythicConf = ItemRegistry.getRarity(6)
 				newSlot.BackgroundColor3 = mythicConf.bgColor
 				hideItemTooltip()
 			end)
@@ -274,6 +276,33 @@ local function createHotbarSlots()
 			end)
 		end
 	end
+end
+
+-- ===================== DROPSHADOW TWEEN =====================
+local dropShadow = hotbarBB:FindFirstChild("DropShadow")
+if dropShadow then
+	local dropShadowTween = nil
+
+	local function tweenDropShadow()
+		local s = hotbarBB.AbsoluteSize
+		if dropShadowTween then
+			dropShadowTween:Cancel()
+		end
+		dropShadowTween = TweenService:Create(
+			dropShadow,
+			TweenInfo.new(0.35, Enum.EasingStyle.Quint, Enum.EasingDirection.Out),
+			{ Size = UDim2.fromOffset(s.X, s.Y) }
+		)
+		dropShadowTween:Play()
+	end
+
+	-- Snap on first frame, then tween all future changes
+	task.defer(function()
+		local s = hotbarBB.AbsoluteSize
+		dropShadow.Size = UDim2.fromOffset(s.X, s.Y)
+	end)
+
+	hotbarBB:GetPropertyChangedSignal("AbsoluteSize"):Connect(tweenDropShadow)
 end
 
 -- ===================== INVENTORY SLOT POOL =====================
@@ -615,14 +644,20 @@ local function onDragEnd(mousePos)
 
 	if targetSlot and targetSlot.toolInfo then
 		SwapItemsFunc:InvokeServer(toolName, targetSlot.toolInfo.name)
-		if selectSound2 then selectSound2:Play() end
+		if selectSound2 then
+			selectSound2:Play()
+		end
 	elseif targetSlot and targetIsHotbar and not targetSlot.toolInfo then
 		AssignHotbarFunc:InvokeServer(targetSlotIndex, toolName)
-		if selectSound2 then selectSound2:Play() end
+		if selectSound2 then
+			selectSound2:Play()
+		end
 	elseif overInventory then
 		if sourceIsHotbar then
 			MoveToEndFunc:InvokeServer(toolName)
-			if selectSound2 then selectSound2:Play() end
+			if selectSound2 then
+				selectSound2:Play()
+			end
 		end
 	else
 		DropItemFunc:InvokeServer(toolName)
@@ -643,7 +678,9 @@ local function handleMobileTap(toolInfo, slotFrame, isHotbar, slotIndex)
 	if not toolInfo then
 		if mobileSelectedName and isHotbar and slotIndex then
 			AssignHotbarFunc:InvokeServer(slotIndex, mobileSelectedName)
-			if selectSound2 then selectSound2:Play() end
+			if selectSound2 then
+				selectSound2:Play()
+			end
 			clearMobileSelection()
 		else
 			clearMobileSelection()
@@ -656,11 +693,15 @@ local function handleMobileTap(toolInfo, slotFrame, isHotbar, slotIndex)
 			clearMobileSelection()
 		else
 			SwapItemsFunc:InvokeServer(mobileSelectedName, toolInfo.name)
-			if selectSound2 then selectSound2:Play() end
+			if selectSound2 then
+				selectSound2:Play()
+			end
 			clearMobileSelection()
 		end
 	else
-		if selectSound1 then selectSound1:Play() end
+		if selectSound1 then
+			selectSound1:Play()
+		end
 		mobileSelectedName = toolInfo.name
 		mobileSelectedSlot = slotFrame
 		slotFrame.Swap.Visible = true
@@ -685,7 +726,9 @@ local function wireHotbarSlotInput(slotIndex)
 		if not slotData.toolInfo then
 			if isMobile and mobileSelectedName then
 				AssignHotbarFunc:InvokeServer(slotIndex, mobileSelectedName)
-				if selectSound2 then selectSound2:Play() end
+				if selectSound2 then
+					selectSound2:Play()
+				end
 				clearMobileSelection()
 			end
 			return
@@ -836,7 +879,9 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
 			elseif not targetInfo or targetInfo == false then
 				AssignHotbarFunc:InvokeServer(slotIndex, mobileSelectedName)
 			end
-			if selectSound2 then selectSound2:Play() end
+			if selectSound2 then
+				selectSound2:Play()
+			end
 			clearMobileSelection()
 		else
 			EquipToolFunc:InvokeServer(slotIndex)
