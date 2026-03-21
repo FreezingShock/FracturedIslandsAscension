@@ -45,7 +45,7 @@ ItemRegistry.RarityConfig = {
 	[2] = {
 		name = "Rare",
 		color = Color3.fromHex("#5555FF"),
-		bgColor = Color3.fromHex("#00AA00"),
+		bgColor = Color3.fromHex("#0000AA"),
 		hexColor = "#5555FF",
 		display = '<stroke color="#0000AA" joins="round" thickness=".5">★★</stroke>',
 		tooltipPrefix = '<font color="#5555FF">',
@@ -78,8 +78,8 @@ ItemRegistry.RarityConfig = {
 		name = "Game",
 		display = "✿",
 		hexColor = "#FFFF55",
-		color = Color3.fromHex("#FFFF55"),
-		bgColor = Color3.fromHex("#FFAA00"),
+		color = Color3.fromHex("#FFAA00"),
+		bgColor = Color3.fromHex("#FFFF55"),
 		tooltipPrefix = '<font color="#FFFF55">',
 	},
 }

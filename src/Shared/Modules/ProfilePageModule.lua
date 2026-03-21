@@ -106,11 +106,6 @@ local pageTitle = nil
 local totalFrame = nil
 local totalLabel = nil
 
--- Search box references
-local searchBoxOuter = nil
-local searchBoxInner = nil
-local searchBox = nil
-
 -- Stat name labels (for typewriter restore)
 local statNameLabels = {}
 
@@ -373,26 +368,6 @@ local function applyStatColor(color)
 	statDescFrame.StatNameVal.StatValue.Underline.BackgroundColor3 = color
 end
 
--- ===================== SEARCH FILTER =====================
-local function applySearchFilter(query)
-	if not statButtons then
-		return
-	end
-	query = string.lower(query or "")
-	for _, entry in ipairs(statButtons) do
-		local btn = entry.button
-		-- The button's parent hierarchy: stat card frame
-		local card = entry.cardFrame
-		if card then
-			if query == "" then
-				card.Visible = true
-			else
-				card.Visible = string.find(string.lower(entry.stat), query, 1, true) ~= nil
-			end
-		end
-	end
-end
-
 -- ===================== OPEN STAT BREAKDOWN =====================
 local function onStatButtonClicked(statName, statKey, description, color)
 	activeStatKey = statKey
@@ -410,7 +385,6 @@ local function onStatButtonClicked(statName, statKey, description, color)
 	UIClick:Play()
 	tween(scrollingFrame, { Position = UDim2.fromScale(-1, 0) })
 	tween(statDescFrame, { Position = UDim2.new(0, 0, 0, 0) })
-	tween(searchBoxOuter, { Position = UDim2.new(1, -205, -1, 4) })
 	task.wait(0.125)
 	typewrite(statNameLabel, statName, 0.05)
 	typewrite(descLabel, description, 0.025)
@@ -429,7 +403,6 @@ local function restoreStatList()
 	UIClick:Play()
 	tween(statDescFrame, { Position = UDim2.fromScale(1, 0) })
 	tween(scrollingFrame, { Position = UDim2.new(0, 0, 0, 0) })
-	tween(searchBoxOuter, { Position = UDim2.new(1, -205, 0, 4) })
 
 	for _, btn in pairs(pageButtons) do
 		setGradient(btn, GRADIENT_DEFAULT)
@@ -469,13 +442,6 @@ function M.init(sharedRefs, frame)
 
 	scrollingFrame = profileMenuFrame:WaitForChild("ScrollingFrame")
 	statDescFrame = profileMenuFrame:WaitForChild("StatDescFrame")
-
-	-- Search box from shared topBarFrame
-	searchBoxOuter = shared.topBarFrame:WaitForChild("searchBoxOuter")
-	local searchBoxInnerFrame = searchBoxOuter:FindFirstChild("searchBoxInner")
-	if searchBoxInnerFrame then
-		searchBox = searchBoxInnerFrame:FindFirstChild("searchBox")
-	end
 
 	-- Desc frame internals
 	statNameLabel = statDescFrame.StatNameVal.StatName
@@ -616,20 +582,6 @@ function M.init(sharedRefs, frame)
 	wirePageButton(obtainmentBtn, "Obtainment")
 	wirePageButton(flatBoosts, "Flat")
 	wirePageButton(multBoosts, "Multiplier")
-
-	-- ===================== WIRE SEARCH BOX (ONCE) =====================
-	if searchBox then
-		searchBox:GetPropertyChangedSignal("Text"):Connect(function()
-			if not isOpen or internalView ~= "list" then
-				return
-			end
-			applySearchFilter(searchBox.Text)
-		end)
-
-		searchBox.FocusLost:Connect(function()
-			-- Don't clear — keep the filter active until cleared by user
-		end)
-	end
 
 	-- ===================== HEARTBEAT: LIVE STAT VALUE =====================
 	RunService.Heartbeat:Connect(function()
@@ -790,15 +742,6 @@ function M.open()
 	totalLabel.Text = ""
 	totalFrame.Visible = false
 
-	-- Show search box
-	tween(searchBoxOuter, { Position = UDim2.new(1, -205, 0, 4) })
-
-	-- Clear search filter
-	if searchBox then
-		searchBox.Text = ""
-	end
-	applySearchFilter("")
-
 	-- Restore stat name labels
 	for _, entry in ipairs(statButtons) do
 		local label = statNameLabels[entry.statKey]
@@ -835,12 +778,6 @@ function M.reset()
 	statDescFrame.Position = UDim2.fromScale(1, 0)
 	totalLabel.Text = ""
 	totalFrame.Visible = false
-
-	-- Reset search
-	if searchBox then
-		searchBox.Text = ""
-	end
-	applySearchFilter("")
 
 	-- Set all stat name labels instantly
 	if statButtons then

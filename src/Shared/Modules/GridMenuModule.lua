@@ -231,13 +231,6 @@ function M.navigateToGrid(gridKey)
 
 	-- Update title + return button
 	shared.typewriteTitle(data.title)
-	if #gridStack > 0 then
-		shared.showReturnButton()
-	end
-
-	-- Hide page-specific top bar elements when on a sub-grid
-	shared.hideSkillAverage()
-	shared.hideRomanToggle()
 
 	UIClick:Play()
 end
@@ -263,11 +256,6 @@ function M.navigateBack()
 	if newData then
 		fadeInGrid(newData.frame, false)
 		shared.typewriteTitle(newData.title)
-	end
-
-	-- Hide return button if back at root
-	if #gridStack == 0 then
-		shared.hideReturnButton()
 	end
 
 	UIClick:Play()

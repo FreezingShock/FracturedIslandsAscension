@@ -26,6 +26,7 @@ local Modules = ReplicatedStorage:WaitForChild("Modules")
 local TooltipModule = require(Modules:WaitForChild("TooltipModule")) :: any
 local ItemRegistry = require(Modules:WaitForChild("ItemRegistry")) :: any
 local MenuBridge = require(Modules:WaitForChild("MenuBridge")) :: any
+local LiquidGlassHandler = require(Modules:WaitForChild("LiquidGlassHandler")) :: any
 
 local StarterGui = game:GetService("StarterGui")
 
@@ -79,6 +80,25 @@ local inventoryPanel = innerFrame:WaitForChild("Inventory")
 local inventoryFrame = inventoryPanel:WaitForChild("InventoryFrame")
 local capacityLabel = inventoryPanel:WaitForChild("BackpackCapacity")
 
+-- ===================== GUI REFERENCES — TRANSFER FRAME =====================
+local transferContainer = hotbarGui:WaitForChild("Transfer")
+local transferFrame = transferContainer:WaitForChild("TransferFrame")
+local transferLabel = transferFrame:WaitForChild("TransferLabel")
+local transferBG = transferFrame:WaitForChild("BG")
+
+-- ===================== LIQUID GLASS — BACKGROUND FRAMES =====================
+local inventoryGlass = LiquidGlassHandler.apply(inventoryPanel)
+local transferGlass = LiquidGlassHandler.apply(transferFrame)
+
+-- Inventory panel starts hidden; disable glass until opened
+if inventoryGlass then
+	inventoryGlass.setEnabled(false)
+end
+-- Transfer frame starts hidden
+if transferGlass then
+	transferGlass.setEnabled(false)
+end
+
 -- ===================== TWEEN CONFIG =====================
 local TWEEN_QUINT = TweenInfo.new(0.4, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
 
@@ -88,11 +108,113 @@ local GHOST_TRANSPARENCY = 0.6
 local HIGHLIGHT_COLOR_VALID = Color3.fromHex("#55FF55")
 local DIM_TRANSPARENCY = 0.5
 
+-- ===================== TRANSFER FRAME CONFIG =====================
+local TRANSFER_POS_HIDDEN = UDim2.fromScale(0.5, 1.5)
+local TRANSFER_POS_SHOWN = UDim2.fromScale(0.5, 0.5)
+local transferTweenIn = TweenInfo.new(0.45, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+local transferTweenOut = TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+local transferColorTween = TweenInfo.new(0.25, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
+
+local TRANSFER_DEFAULT_COLOR = Color3.fromHex("#FFAA00")
+local TRANSFER_DEFAULT_TEXT = Color3.fromHex("#FFFF55")
+local TRANSFER_HOVER_COLOR = Color3.fromHex("#00AA00")
+local TRANSFER_HOVER_TEXT = Color3.fromHex("#55FF55")
+
+local transferVisible = false
+local transferHovered = false
+local transferSlideTween = nil
+
 -- ===================== COLOR CONFIG =====================
 local DARKEN_FACTOR = 0.7
 local LIGHTEN_FACTOR = 0.7
 local BLACK = Color3.new(0, 0, 0)
 local WHITE = Color3.new(1, 1, 1)
+
+-- ===================== TRANSFER FRAME FUNCTIONS =====================
+local function _setTransferColors(frameColor, textColor, instant)
+	if instant then
+		transferFrame.BackgroundColor3 = frameColor
+		transferBG.ImageColor3 = frameColor
+		transferFrame.UIStroke.Color = frameColor
+		transferLabel.UIStroke.Color = frameColor
+		transferLabel.TextColor3 = textColor
+		return
+	end
+	TweenService:Create(transferFrame, transferColorTween, { BackgroundColor3 = frameColor }):Play()
+	TweenService:Create(transferBG, transferColorTween, { ImageColor3 = frameColor }):Play()
+	TweenService:Create(transferFrame.UIStroke, transferColorTween, { Color = frameColor }):Play()
+	TweenService:Create(transferLabel.UIStroke, transferColorTween, { Color = frameColor }):Play()
+	TweenService:Create(transferLabel, transferColorTween, { TextColor3 = textColor }):Play()
+end
+
+local function _showTransferFrame()
+	if transferVisible then
+		return
+	end
+	transferVisible = true
+	transferHovered = false
+	transferLabel.Text = "Transfer to Inventory"
+	_setTransferColors(TRANSFER_DEFAULT_COLOR, TRANSFER_DEFAULT_TEXT, true)
+	transferContainer.Visible = true
+	transferFrame.Position = TRANSFER_POS_HIDDEN
+	if transferSlideTween then
+		transferSlideTween:Cancel()
+	end
+	transferSlideTween = TweenService:Create(transferFrame, transferTweenIn, { Position = TRANSFER_POS_SHOWN })
+	transferSlideTween:Play()
+
+	if transferGlass then
+		transferGlass.setEnabled(true)
+	end
+end
+
+local function _hideTransferFrame()
+	if not transferVisible then
+		return
+	end
+	transferVisible = false
+	transferHovered = false
+	if transferSlideTween then
+		transferSlideTween:Cancel()
+	end
+	transferSlideTween = TweenService:Create(transferFrame, transferTweenOut, { Position = TRANSFER_POS_HIDDEN })
+	transferSlideTween.Completed:Once(function(state)
+		if state == Enum.PlaybackState.Completed and not transferVisible then
+			transferContainer.Visible = false
+		end
+	end)
+	transferSlideTween:Play()
+
+	if transferGlass then
+		transferGlass.setEnabled(false)
+	end
+end
+
+local function _isOverTransferFrame(screenPos)
+	if not transferVisible then
+		return false
+	end
+	local absPos = transferFrame.AbsolutePosition
+	local absSize = transferFrame.AbsoluteSize
+	return screenPos.X >= absPos.X
+		and screenPos.X <= absPos.X + absSize.X
+		and screenPos.Y >= absPos.Y
+		and screenPos.Y <= absPos.Y + absSize.Y
+end
+
+local function _updateTransferHover(isHovered)
+	if isHovered == transferHovered then
+		return
+	end
+	transferHovered = isHovered
+	if isHovered then
+		transferLabel.Text = "Complete Transfer"
+		_setTransferColors(TRANSFER_HOVER_COLOR, TRANSFER_HOVER_TEXT, false)
+	else
+		transferLabel.Text = "Transfer to Inventory"
+		_setTransferColors(TRANSFER_DEFAULT_COLOR, TRANSFER_DEFAULT_TEXT, false)
+	end
+end
 
 -- ===================== STATE =====================
 local inventoryVisible = false
@@ -122,6 +244,9 @@ local MENU_SLOT = 9 -- Slot 9 is permanently "Menu"
 -- Active highlight during drag
 local highlightedSlot = nil
 local highlightOriginalColor = nil
+
+transferContainer.Visible = false
+transferFrame.Position = TRANSFER_POS_HIDDEN
 
 -- ===================== EQUIP SOUND HANDLER =====================
 PlayEquipSound.OnClientEvent:Connect(function(action)
@@ -210,7 +335,7 @@ local function setupMenuSlot(slotFrame)
 	slotFrame.UIStroke.Color = mythicConf.color
 	slotFrame.BackgroundColor3 = mythicConf.bgColor
 	slotFrame.BackgroundTransparency = 0.3
-	slotFrame.SlotNum.Text = tostring(MENU_SLOT)
+	slotFrame.SlotNum.Text = "C"
 	slotFrame.Visible = true
 end
 
@@ -231,7 +356,7 @@ local function createHotbarSlots()
 			hovered = false,
 		}
 		hotbarSlots[i] = slotData
-
+		LiquidGlassHandler.apply(newSlot)
 		if i == MENU_SLOT then
 			-- ── Menu button: always visible, special styling ──
 			setupMenuSlot(newSlot)
@@ -290,7 +415,7 @@ if dropShadow then
 		end
 		dropShadowTween = TweenService:Create(
 			dropShadow,
-			TweenInfo.new(0.35, Enum.EasingStyle.Quint, Enum.EasingDirection.Out),
+			TweenInfo.new(0.3, Enum.EasingStyle.Quint, Enum.EasingDirection.Out),
 			{ Size = UDim2.fromOffset(s.X, s.Y) }
 		)
 		dropShadowTween:Play()
@@ -325,6 +450,7 @@ local function getOrCreateInventorySlot(index)
 		inUse = false,
 	}
 	inventoryPool[index] = slotData
+	LiquidGlassHandler.apply(newSlot)
 
 	newSlot.MouseEnter:Connect(function()
 		slotData.hovered = true
@@ -544,6 +670,7 @@ local function _cleanupDrag()
 		dragState = nil
 	end
 	_clearDragHighlight()
+	_hideTransferFrame()
 	refreshHotbar()
 end
 
@@ -553,6 +680,7 @@ local function _startDragOnSlot(toolInfo, slotFrame, isHotbar, slotIndex, mouseP
 	end
 
 	-- Block drag when inventory panel is closed — click-to-equip only
+	-- Exception: hotbar drag in inventory-only mode shows transfer frame
 	if not inventoryVisible then
 		if isHotbar and slotIndex then
 			EquipToolFunc:InvokeServer(slotIndex)
@@ -561,6 +689,12 @@ local function _startDragOnSlot(toolInfo, slotFrame, isHotbar, slotIndex, mouseP
 		end
 		UIClick:Play()
 		return
+	end
+
+	-- Show transfer frame when dragging from hotbar in inventory-only mode (no nexus grid)
+	local currentMode = MenuBridge.getMode()
+	if isHotbar and currentMode == "inventory" then
+		_showTransferFrame()
 	end
 
 	suppressTooltip = true
@@ -601,11 +735,17 @@ local function onDragMove(mousePos)
 	end
 
 	-- Hit test uses viewport-relative coords (matches AbsolutePosition)
-	local targetSlot, _, _ = findSlotAtPosition(Vector2.new(mousePos.X, mousePos.Y))
+	local screenPos = Vector2.new(mousePos.X, mousePos.Y)
+	local targetSlot, _, _ = findSlotAtPosition(screenPos)
 	if targetSlot and targetSlot.frame ~= dragState.sourceFrame then
 		_setDragHighlight(targetSlot.frame, true)
+		_updateTransferHover(false)
+	elseif _isOverTransferFrame(screenPos) then
+		_clearDragHighlight()
+		_updateTransferHover(true)
 	else
 		_clearDragHighlight()
+		_updateTransferHover(false)
 	end
 end
 
@@ -623,13 +763,16 @@ local function onDragEnd(mousePos)
 	-- Hit test BEFORE cleanup (cleanup hides empty hotbar slots)
 	local targetSlot, targetIsHotbar, targetSlotIndex
 	local overInventory = false
+	local overTransfer = false
 	if wasDragging then
 		local adjustedPos = Vector2.new(mousePos.X, mousePos.Y)
 		targetSlot, targetIsHotbar, targetSlotIndex = findSlotAtPosition(adjustedPos)
 		overInventory = isOverInventoryArea(adjustedPos)
+		overTransfer = _isOverTransferFrame(adjustedPos)
 	end
 
 	_cleanupDrag()
+	_hideTransferFrame()
 	suppressTooltip = false
 
 	if not wasDragging then
@@ -642,7 +785,12 @@ local function onDragEnd(mousePos)
 		return
 	end
 
-	if targetSlot and targetSlot.toolInfo then
+	if overTransfer then
+		MoveToEndFunc:InvokeServer(toolName)
+		if selectSound2 then
+			selectSound2:Play()
+		end
+	elseif targetSlot and targetSlot.toolInfo then
 		SwapItemsFunc:InvokeServer(toolName, targetSlot.toolInfo.name)
 		if selectSound2 then
 			selectSound2:Play()
@@ -833,6 +981,7 @@ local keyToSlot = {
 	[Enum.KeyCode.Seven] = 7,
 	[Enum.KeyCode.Eight] = 8,
 	[Enum.KeyCode.Nine] = 9,
+	[Enum.KeyCode.C] = 9,
 }
 
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
@@ -847,11 +996,7 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
 
 	-- E key → toggle inventory-only mode
 	if key == Enum.KeyCode.E then
-		if MenuBridge.isOpen() then
-			MenuBridge.closeAll()
-		else
-			MenuBridge.openInventory()
-		end
+		MenuBridge.openInventory()
 		return
 	end
 
@@ -894,6 +1039,11 @@ end)
 MenuBridge._onStateChanged = function(mode)
 	local wasVisible = inventoryVisible
 	inventoryVisible = (mode ~= nil) -- visible in both "inventory" and "full" modes
+
+	-- Toggle inventory panel glass
+	if inventoryGlass then
+		inventoryGlass.setEnabled(inventoryVisible)
+	end
 
 	if inventoryVisible and not wasVisible then
 		refreshInventory()

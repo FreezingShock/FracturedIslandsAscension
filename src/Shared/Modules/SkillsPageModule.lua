@@ -682,29 +682,6 @@ local function updateSkillLevelBoxes(statKey)
 	end
 end
 
--- ===================== SKILL AVERAGE =====================
-local function updateSkillAverage()
-	local skillAverageLabel = shared.skillAverageFrame:FindFirstChild("skillAverageLabel")
-	if not skillAverageLabel then
-		return
-	end
-	local total = 0
-	for _, key in ipairs(SKILL_ORDER) do
-		local data = getSkillEntry(key)
-		total = total + (data.level or 1)
-	end
-	local avg = total / #SKILL_ORDER
-	if useRomanNumerals then
-		local rounded = math.clamp(math.floor(avg + 0.5), 1, 50)
-		skillAverageLabel.Text = 'Skill Average: <font color="#FFAA00" weight="900">' .. toRoman(rounded) .. "</font>"
-	else
-		local tenths = math.floor(avg * 10 + 0.5) / 10
-		skillAverageLabel.Text = 'Skill Average: <font color="#FFAA00" weight="900">'
-			.. string.format("%.1f", tenths)
-			.. "</font>"
-	end
-end
-
 -- ===================== STAT COLOR =====================
 local function applyStatColor(color)
 	statNameLabel.TextColor3 = color
@@ -993,7 +970,6 @@ function M.init(sharedRefs, frame)
 		SkillUpdated.OnClientEvent:Connect(function(data)
 			sanitizeSkillData(data)
 			latestSkillData = data
-			updateSkillAverage()
 			if activeStatKey then
 				updateSkillLevelBoxes(activeStatKey)
 			end
@@ -1034,8 +1010,6 @@ function M.open(statKey)
 			typewrite(descLabel, config.description, 0.025)
 		end
 	end)
-
-	updateSkillAverage()
 end
 
 function M.close()
@@ -1059,20 +1033,6 @@ end
 
 function M.navigateBack()
 	-- No internal navigation — controller handles grid return
-end
-
-function M.toggleRomanNumerals()
-	useRomanNumerals = not useRomanNumerals
-	if activeStatKey then
-		updateSkillLevelBoxes(activeStatKey)
-		local skillData = getSkillEntry(activeStatKey)
-		statValueLabel.Text = displayLevel(skillData.level or 1)
-	end
-	if tooltipFromLevels and activeTooltipSlot then
-		showLevelTooltip(activeTooltipSlot)
-	end
-	updateSkillAverage()
-	return useRomanNumerals
 end
 
 M.showGridSkillTooltip = showGridSkillTooltip

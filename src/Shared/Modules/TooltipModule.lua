@@ -16,6 +16,7 @@ local UserInputService = game:GetService("UserInputService")
 local GuiService = game:GetService("GuiService")
 local TweenService = game:GetService("TweenService")
 local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -37,6 +38,14 @@ local TT_ProgressFill = TT_ProgressBar:WaitForChild("Frame")
 local TT_ProgressBL = TT_ProgressOuter:WaitForChild("ProgressBarLabel")
 local TT_ProgressLabel = TooltipFrame:WaitForChild("ProgressLabel")
 local TT_Rewards = TooltipFrame:WaitForChild("RewardsLabel")
+
+-- ===================== LIQUID GLASS =====================
+local Modules = ReplicatedStorage:WaitForChild("Modules")
+local LiquidGlassHandler = require(Modules:WaitForChild("LiquidGlassHandler"))
+local glassHandle = LiquidGlassHandler.apply(TooltipFrame)
+if glassHandle then
+	glassHandle.setEnabled(false) -- tooltip starts hidden
+end
 
 -- ===================== CONFIG =====================
 local TT_OFFSET_X = 18
@@ -121,6 +130,10 @@ function API.show(data, source)
 	TT_Rewards.Visible = false
 
 	TooltipFrame.Visible = true
+
+	if glassHandle then
+		glassHandle.setEnabled(true)
+	end
 end
 
 --- Hide tooltip, but only if the caller is the current owner.
@@ -132,6 +145,10 @@ function API.hide(source)
 	TooltipFrame.Visible = false
 	following = false
 	activeSource = nil
+
+	if glassHandle then
+		glassHandle.setEnabled(false)
+	end
 
 	-- Reset visibility of optional elements
 	TT_ProgressOuter.Visible = false
@@ -145,6 +162,11 @@ function API.forceHide()
 	TooltipFrame.Visible = false
 	following = false
 	activeSource = nil
+
+	if glassHandle then
+		glassHandle.setEnabled(false)
+	end
+
 	TT_ProgressOuter.Visible = false
 	TT_ProgressLabel.Visible = false
 	TT_Rewards.Visible = false
@@ -158,6 +180,10 @@ function API.showRaw(source)
 	activeSource = source
 	following = true
 	TooltipFrame.Visible = true
+
+	if glassHandle then
+		glassHandle.setEnabled(true)
+	end
 end
 
 --- Check if a given source currently owns the tooltip.
