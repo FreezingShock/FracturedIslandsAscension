@@ -1283,6 +1283,8 @@ NexusBtn.MouseButton1Click:Connect(function()
 end)
 
 LiquidGlassHandler.apply(outerFrame)
-LiquidGlassHandler.apply(innerFrame)
+LiquidGlassHandler.apply(topBarFrame)
+LiquidGlassHandler.apply(inventoryPanel)
+LiquidGlassHandler.apply(menuClip)
 
 print("CentralizedMenuController: Ready ✓")

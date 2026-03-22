@@ -1,18 +1,32 @@
 --[[
-	LiquidGlassHandler 1.0
+	LiquidGlassHandler 3.1
 	Copyright (c) 2026 @7eoeb, @UNIVERSECORNUCOPIA
 
-	All rights reserved.
+	CHANGES FROM 3.0:
 
-	This code and its associated assets are the intellectual property of @7eoeb
-	and @UNIVERSECORNUCOPIA. Unauthorized copying, modification, distribution,
-	or use of this code, in whole or in part, without explicit permission is
-	strictly prohibited.
+	① SEAM FIX — ForceFlat mode
+	  Root cause: the 9-part rounded-corner grid (center + 4 edges + 4 corners)
+	  creates visible line artifacts where parts meet:
+	    a) Highlight.OutlineColor traces each disconnected part cluster separately,
+	       drawing internal borders where parts have sub-pixel gaps.
+	    b) Glass material refraction computes per-part — where two Glass parts
+	       overlap, refraction stacks creating a darker band; where they gap,
+	       the background bleeds through.
+	    c) With two overlapping glass instances (e.g. inventory over Nexus menu),
+	       the artifacts multiply: 4 layers × 9 parts = 36 potential seam sources.
 
-	Created: 2026
+	  Fix: Settings.ForceFlat = true (default). When active, buildLayerGrid()
+	  always takes the single-Center-part path regardless of UICorner presence.
+	  Result: 1 part per layer, 2 parts total, zero internal seams.
 
-	Extended with programmatic API for per-instance application,
-	setting overrides, enable/disable toggling, and batch operations.
+	  The frosted glass effect is subtle enough that the glass having square
+	  corners while the GuiObject has rounded corners is unnoticeable.
+
+	② ALL HIGHLIGHT OUTLINES DISABLED
+	  Both layers now have outlineTransparency = 1 in Settings. The UIStroke
+	  added in 3.0 provides the specular rim — the Highlight outline was
+	  redundant and was the primary source of the nested-rectangle artifacts
+	  visible when two glass instances overlap.
 ]]
 
 local LiquidGlassHandler = {}
@@ -20,11 +34,9 @@ local RunService = game:GetService("RunService")
 local CollectionService = game:GetService("CollectionService")
 local Players = game:GetService("Players")
 local GuiService = game:GetService("GuiService")
+local UserInputService = game:GetService("UserInputService")
 local HttpService = game:GetService("HttpService")
-
-if not RunService:IsStudio() then
-	print(require(script.Version))
-end
+local TweenService = game:GetService("TweenService")
 
 local VisibilityChecker = require(script.VisibilityChecker)
 local DefaultSettings = require(script.Settings)
@@ -38,14 +50,9 @@ parentFolder.Parent = workspace
 
 local rotationOffset = CFrame.Angles(0, math.rad(-90), 0)
 
--- ===================== INSTANCE REGISTRY =====================
--- guiObject → { handle, container, renderName, settings }
 local activeInstances = {}
 
--- ===================== SETTINGS MERGE =====================
-
---- Deep-merge overrides into a copy of DefaultSettings.
---- Only merges Highlight, Mesh, Padding, and Depth — Tag is always global.
+-- ── Settings merge ────────────────────────────────────────────────────────────
 local function mergeSettings(overrides)
 	if not overrides then
 		return DefaultSettings
@@ -55,9 +62,10 @@ local function mergeSettings(overrides)
 		Tag = DefaultSettings.Tag,
 		Padding = if overrides.Padding ~= nil then overrides.Padding else DefaultSettings.Padding,
 		Depth = if overrides.Depth ~= nil then overrides.Depth else (DefaultSettings.Depth or 2),
+		ForceFlat = if overrides.ForceFlat ~= nil then overrides.ForceFlat else DefaultSettings.ForceFlat,
 	}
 
-	-- Deep-merge Highlight
+	-- Highlight
 	merged.Highlight = {}
 	for k, v in pairs(DefaultSettings.Highlight) do
 		merged.Highlight[k] = v
@@ -68,7 +76,7 @@ local function mergeSettings(overrides)
 		end
 	end
 
-	-- Deep-merge Mesh
+	-- Mesh
 	merged.Mesh = {}
 	for k, v in pairs(DefaultSettings.Mesh) do
 		merged.Mesh[k] = v
@@ -79,163 +87,204 @@ local function mergeSettings(overrides)
 		end
 	end
 
+	-- Layers
+	merged.Layers = {}
+	for i, layerDef in ipairs(DefaultSettings.Layers) do
+		local ml = {}
+		for k, v in pairs(layerDef) do
+			ml[k] = v
+		end
+		if overrides.Layers and overrides.Layers[i] then
+			for k, v in pairs(overrides.Layers[i]) do
+				ml[k] = v
+			end
+		end
+		merged.Layers[i] = ml
+	end
+
+	-- Rim
+	merged.Rim = {}
+	for k, v in pairs(DefaultSettings.Rim) do
+		merged.Rim[k] = v
+	end
+	if overrides.Rim then
+		for k, v in pairs(overrides.Rim) do
+			merged.Rim[k] = v
+		end
+	end
+
+	-- Stroke
+	merged.Stroke = {}
+	for k, v in pairs(DefaultSettings.Stroke) do
+		merged.Stroke[k] = v
+	end
+	if overrides.Stroke then
+		for k, v in pairs(overrides.Stroke) do
+			merged.Stroke[k] = v
+		end
+	end
+
 	return merged
 end
 
--- ===================== HIGHLIGHT FACTORY =====================
-
-local function createHighlight(instanceSettings)
-	local h = Instance.new("Highlight")
-	for k, v in pairs(instanceSettings.Highlight) do
-		h[k] = v
-	end
-	return h
+-- ── Shortest-path angle lerp ──────────────────────────────────────────────────
+local function lerpAngle(current: number, target: number, alpha: number): number
+	local diff = ((target - current) + 180) % 360 - 180
+	return current + diff * alpha
 end
 
--- ===================== CORE INSTANCE CREATION =====================
-
+-- ── Core instance factory ─────────────────────────────────────────────────────
 local function createGlassInstance(guiObject, overrides)
 	if not guiObject:IsDescendantOf(Players.LocalPlayer) then
 		return nil
 	end
-
-	-- Prevent duplicates — return existing handle
 	if activeInstances[guiObject] then
 		return activeInstances[guiObject].handle
 	end
 
 	local instanceSettings = mergeSettings(overrides)
+	local forceFlat = instanceSettings.ForceFlat
 	local renderName = `LiquidGlass_{HttpService:GenerateGUID(false)}`
 
-	local container = Instance.new("Model")
-	container.Name = renderName
-	container.Parent = parentFolder
+	local masterFolder = Instance.new("Folder")
+	masterFolder.Name = renderName
+	masterFolder.Parent = parentFolder
 
-	local highlight = createHighlight(instanceSettings)
-	highlight.Parent = container
+	-- ── Layer containers ──────────────────────────────────────────────────
+	local layerContainers = {}
+	for i, layerDef in ipairs(instanceSettings.Layers) do
+		local container = Instance.new("Model")
+		container.Name = renderName .. "_L" .. i
+		container.Parent = masterFolder
 
-	local pixels = {}
+		local hl = Instance.new("Highlight")
+		hl.FillColor = layerDef.fillColor
+		hl.FillTransparency = layerDef.fillTransparency
+		hl.OutlineColor = layerDef.outlineColor
+		hl.OutlineTransparency = layerDef.outlineTransparency
+		hl.Parent = container
+
+		layerContainers[i] = {
+			container = container,
+			highlight = hl,
+			pixels = {},
+			depthOffset = layerDef.depthOffset,
+			baseFillT = layerDef.fillTransparency,
+			baseOutlineT = layerDef.outlineTransparency,
+			baseMeshT = layerDef.meshTransparency,
+			meshColor = layerDef.meshColor,
+		}
+	end
+
+	-- ── Geometry state ────────────────────────────────────────────────────
 	local lastSize = Vector2.zero
 	local lastRadius = -1
 	local currentLayoutMode = "None"
-	local depth = instanceSettings.Depth or 2
-	local localPadding = instanceSettings.Padding
 	local enabled = true
 	local destroyed = false
 
-	local function getCornerRadius()
-		local currentSize = guiObject.AbsoluteSize
+	local function getCornerRadius(): number
+		if forceFlat then
+			return 0 -- skip UICorner detection entirely
+		end
+		local sz = guiObject.AbsoluteSize
 		local uiCorner = guiObject:FindFirstChildWhichIsA("UICorner")
-		local radius = uiCorner
-				and (uiCorner.CornerRadius.Offset + (uiCorner.CornerRadius.Scale * math.min(
-					currentSize.X,
-					currentSize.Y
-				)))
-			or 0
-		local maxPossibleRadius = math.min(currentSize.X, currentSize.Y) / 2
-		radius = math.clamp(radius, 0, maxPossibleRadius)
-		return radius
+		if not uiCorner then
+			return 0
+		end
+		local r = uiCorner.CornerRadius.Offset + uiCorner.CornerRadius.Scale * math.min(sz.X, sz.Y)
+		return math.clamp(r, 0, math.min(sz.X, sz.Y) / 2)
 	end
 
-	local function rebuildGrid()
-		local currentSize = guiObject.AbsoluteSize
-		if currentSize.X < 1 or currentSize.Y < 1 then
-			return
+	local function makePart(lc, templateName: string)
+		local template = templateContainer:FindFirstChild(templateName)
+		if not template then
+			warn("[LiquidGlass] Missing overlay template: " .. templateName)
+			return nil
 		end
+		local p = template:Clone()
+		p.Material = Enum.Material.Glass
+		p.Color = lc.meshColor
+		p.Transparency = lc.baseMeshT
+		p.Anchored = true
+		p.CastShadow = false
+		p.CanCollide = false
+		p.CanTouch = false
+		p.CanQuery = false
+		pcall(function()
+			p.AudioCanCollide = false
+		end)
+		p.Parent = lc.container
+		return p
+	end
 
-		local radius = getCornerRadius()
-
-		if currentSize == lastSize and radius == lastRadius then
-			return
-		end
-		lastSize = currentSize
-		lastRadius = radius
-
-		local targetMode = (radius <= 0) and "Flat" or "Rounded"
-		local needsRebuild = (targetMode ~= currentLayoutMode)
-
-		if needsRebuild then
-			for _, data in pairs(pixels) do
-				data.Part:Destroy()
-			end
-			table.clear(pixels)
-			currentLayoutMode = targetMode
-		end
-
+	local function buildLayerGrid(lc, currentSize, needsRebuild, radius)
+		local pixels = lc.pixels
 		local partIndex = 1
-		local function updateOrAddPart(templateName, relX, relY, relSizeX, relSizeY, localRot, swapAxes)
+
+		local function addOrUpdate(name, relX, relY, relSizeX, relSizeY, localRot, swapAxes)
+			localRot = localRot or CFrame.new()
+			swapAxes = swapAxes or false
 			if needsRebuild then
-				local template = templateContainer:FindFirstChild(templateName)
-				if not template then
-					warn("[LiquidGlass] Missing overlay template: " .. templateName)
+				local p = makePart(lc, name)
+				if not p then
 					return
 				end
-				local p = template:Clone()
-				p.Parent = container
 				table.insert(pixels, {
 					Part = p,
 					RelX = relX,
 					RelY = relY,
 					RelSizeX = relSizeX,
 					RelSizeY = relSizeY,
-					LocalRot = localRot or CFrame.new(),
-					SwapAxes = swapAxes or false,
+					LocalRot = localRot,
+					SwapAxes = swapAxes,
 				})
 			else
 				local data = pixels[partIndex]
-				data.RelX = relX
-				data.RelY = relY
-				data.RelSizeX = relSizeX
-				data.RelSizeY = relSizeY
-				data.LocalRot = localRot or CFrame.new()
-				data.SwapAxes = swapAxes or false
+				if data then
+					data.RelX = relX
+					data.RelY = relY
+					data.RelSizeX = relSizeX
+					data.RelSizeY = relSizeY
+					data.LocalRot = localRot
+					data.SwapAxes = swapAxes
+				end
 			end
 			partIndex += 1
 		end
 
+		-- ForceFlat path OR no UICorner: single Center part per layer.
+		-- This eliminates ALL internal seams.
 		if radius <= 0 then
-			updateOrAddPart("Center", 0, 0, 1, 1)
+			addOrUpdate("Center", 0, 0, 1, 1)
 		else
+			-- 9-part rounded-corner grid (only used when ForceFlat = false
+			-- AND the GuiObject has a UICorner with radius > 0)
 			local relRadX = radius / currentSize.X
 			local relRadY = radius / currentSize.Y
 			local innerW = (currentSize.X - 2 * radius) / currentSize.X
 			local innerH = (currentSize.Y - 2 * radius) / currentSize.Y
-			local diamX = relRadX
-			local diamY = relRadY
-
-			updateOrAddPart("Center", 0, 0, innerW, innerH)
-
-			updateOrAddPart("Edge", 0, -0.5 + (relRadY / 2), innerW, relRadY, CFrame.Angles(0, 0, 0))
-			updateOrAddPart("Edge", 0, 0.5 - (relRadY / 2), innerW, relRadY, CFrame.Angles(0, 0, math.rad(180)))
-
-			updateOrAddPart("Edge", -0.5 + (relRadX / 2), 0, relRadX, innerH, CFrame.Angles(0, 0, math.rad(90)), true)
-			updateOrAddPart("Edge", 0.5 - (relRadX / 2), 0, relRadX, innerH, CFrame.Angles(0, 0, math.rad(-90)), true)
-
-			local halfDiamX = diamX / 2
-			local halfDiamY = diamY / 2
-
-			updateOrAddPart(
+			local diamX, diamY = relRadX, relRadY
+			addOrUpdate("Center", 0, 0, innerW, innerH, CFrame.new())
+			addOrUpdate("Edge", 0, -(0.5 - relRadY / 2), innerW, relRadY, CFrame.Angles(0, 0, 0))
+			addOrUpdate("Edge", 0, 0.5 - relRadY / 2, innerW, relRadY, CFrame.Angles(0, 0, math.rad(180)))
+			addOrUpdate("Edge", -(0.5 - relRadX / 2), 0, relRadX, innerH, CFrame.Angles(0, 0, math.rad(90)), true)
+			addOrUpdate("Edge", 0.5 - relRadX / 2, 0, relRadX, innerH, CFrame.Angles(0, 0, math.rad(-90)), true)
+			addOrUpdate(
 				"Corner",
-				-0.5 + halfDiamX,
-				-0.5 + halfDiamY,
+				-(0.5 - diamX / 2),
+				-(0.5 - diamY / 2),
 				diamX,
 				diamY,
 				CFrame.Angles(0, 0, math.rad(90)),
 				true
 			)
-			updateOrAddPart("Corner", 0.5 - halfDiamX, -0.5 + halfDiamY, diamX, diamY, CFrame.Angles(0, 0, 0))
-			updateOrAddPart(
+			addOrUpdate("Corner", 0.5 - diamX / 2, -(0.5 - diamY / 2), diamX, diamY, CFrame.Angles(0, 0, 0))
+			addOrUpdate("Corner", -(0.5 - diamX / 2), 0.5 - diamY / 2, diamX, diamY, CFrame.Angles(0, 0, math.rad(180)))
+			addOrUpdate(
 				"Corner",
-				-0.5 + halfDiamX,
-				0.5 - halfDiamY,
-				diamX,
-				diamY,
-				CFrame.Angles(0, 0, math.rad(180))
-			)
-			updateOrAddPart(
-				"Corner",
-				0.5 - halfDiamX,
-				0.5 - halfDiamY,
+				0.5 - diamX / 2,
+				0.5 - diamY / 2,
 				diamX,
 				diamY,
 				CFrame.Angles(0, 0, math.rad(-90)),
@@ -244,104 +293,207 @@ local function createGlassInstance(guiObject, overrides)
 		end
 	end
 
-	rebuildGrid()
+	local function rebuildAllLayers()
+		local currentSize = guiObject.AbsoluteSize
+		if currentSize.X < 1 or currentSize.Y < 1 then
+			return
+		end
+		local radius = getCornerRadius()
+		if currentSize == lastSize and radius == lastRadius then
+			return
+		end
+		local targetMode = if radius <= 0 then "Flat" else "Rounded"
+		local needsRebuild = targetMode ~= currentLayoutMode
+		if needsRebuild then
+			for _, lc in ipairs(layerContainers) do
+				for _, data in ipairs(lc.pixels) do
+					data.Part:Destroy()
+				end
+				table.clear(lc.pixels)
+			end
+			currentLayoutMode = targetMode
+		end
+		lastSize = currentSize
+		lastRadius = radius
+		for _, lc in ipairs(layerContainers) do
+			buildLayerGrid(lc, currentSize, needsRebuild, radius)
+		end
+	end
 
+	rebuildAllLayers()
+
+	-- ── Dynamic specular stroke ───────────────────────────────────────────
+
+	local ss = instanceSettings.Stroke
+	local stroke = nil
+	local strokeGradient = nil
+	local strokeHovering = false
+	local strokeCurrentRot = ss and ss.restingAngle or 135
+	local strokeHeartbeatConn = nil
+
+	local cachedInset = GuiService:GetGuiInset()
+
+	if ss and ss.enabled then
+		stroke = Instance.new("UIStroke")
+		stroke.Name = "LiquidGlassStroke"
+		stroke.Color = ss.color
+		stroke.Thickness = ss.thickness
+		stroke.Transparency = 0
+		stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+		stroke.Parent = guiObject
+
+		strokeGradient = Instance.new("UIGradient")
+		strokeGradient.Transparency = ss.transparency
+		strokeGradient.Color = ss.colorSequence
+		strokeGradient.Rotation = ss.restingAngle
+		strokeGradient.Parent = stroke
+
+		guiObject.MouseEnter:Connect(function()
+			if not enabled then
+				return
+			end
+			strokeHovering = true
+		end)
+
+		guiObject.MouseLeave:Connect(function()
+			strokeHovering = false
+		end)
+
+		strokeHeartbeatConn = RunService.Heartbeat:Connect(function(dt)
+			if destroyed or not strokeGradient then
+				return
+			end
+
+			local isVisible, _ = VisibilityChecker.check(guiObject)
+			if not isVisible then
+				return
+			end
+
+			local targetRot = ss.restingAngle
+
+			if strokeHovering then
+				local mouse = UserInputService:GetMouseLocation()
+				local absPos = guiObject.AbsolutePosition
+				local absSize = guiObject.AbsoluteSize
+				local cx = absPos.X + absSize.X * 0.5
+				local cy = absPos.Y + absSize.Y * 0.5
+				local mx = mouse.X - cachedInset.X
+				local my = mouse.Y - cachedInset.Y
+				local dx = mx - cx
+				local dy = my - cy
+				local cursorAngle = math.deg(math.atan2(-dy, dx))
+				targetRot = 180 - cursorAngle
+			end
+
+			local alpha = 1 - math.exp(-ss.lerpSpeed * dt)
+			strokeCurrentRot = lerpAngle(strokeCurrentRot, targetRot, alpha)
+			strokeGradient.Rotation = strokeCurrentRot
+		end)
+	end
+
+	-- ── RenderStepped — 3D glass geometry ────────────────────────────────
 	RunService:BindToRenderStep(renderName, Enum.RenderPriority.Camera.Value + 1, function()
 		if not enabled then
 			return
 		end
-
 		local camera = workspace.CurrentCamera
 		if not camera then
 			return
 		end
 
 		if guiObject.AbsoluteSize ~= lastSize or getCornerRadius() ~= lastRadius then
-			rebuildGrid()
+			rebuildAllLayers()
 		end
 
-		local isVisible = VisibilityChecker.isPotentiallyVisible(guiObject)
-		container.Parent = isVisible and parentFolder or nil
+		local isVisible, absTransparency = VisibilityChecker.check(guiObject)
+		masterFolder.Parent = if isVisible then parentFolder else nil
 		if not isVisible then
 			return
 		end
 
 		local visibleRect = VisibilityChecker.getTrueRenderBounds(guiObject)
-		local visibleSize = Vector2.new(visibleRect.Width, visibleRect.Height)
-
-		if visibleSize.X <= 0 or visibleSize.Y <= 0 then
-			container.Parent = nil
+		if visibleRect.IsFullyClipped then
+			masterFolder.Parent = nil
 			return
-		else
-			container.Parent = parentFolder
 		end
 
+		local visibleSize = Vector2.new(visibleRect.Width, visibleRect.Height)
 		local inset, _ = GuiService:GetGuiInset()
-		local centerScreenPos = visibleRect.Min + (visibleSize / 2) + inset
-
-		local function getPlanePos(pixelX, pixelY)
-			local ray = camera:ViewportPointToRay(pixelX, pixelY)
-			local dist = depth / ray.Direction:Dot(camera:GetRenderCFrame().LookVector)
-			return ray.Origin + ray.Direction * dist
-		end
-
-		local centerWorldPos = getPlanePos(centerScreenPos.X, centerScreenPos.Y)
-		local rightEdge = getPlanePos(centerScreenPos.X + (visibleSize.X / 2), centerScreenPos.Y)
-		local leftEdge = getPlanePos(centerScreenPos.X - (visibleSize.X / 2), centerScreenPos.Y)
-		local topEdge = getPlanePos(centerScreenPos.X, centerScreenPos.Y - (visibleSize.Y / 2))
-		local bottomEdge = getPlanePos(centerScreenPos.X, centerScreenPos.Y + (visibleSize.Y / 2))
-
-		local worldW = (rightEdge - leftEdge).Magnitude
-		local worldH = (topEdge - bottomEdge).Magnitude
+		local cx = visibleRect.Min.X + visibleSize.X * 0.5 + inset.X
+		local cy = visibleRect.Min.Y + visibleSize.Y * 0.5 + inset.Y
+		local hw = visibleSize.X * 0.5
+		local hh = visibleSize.Y * 0.5
 
 		local camCF = camera:GetRenderCFrame()
+		local camLookVec = camCF.LookVector
 		local guiRotCF = CFrame.Angles(0, 0, math.rad(-guiObject.AbsoluteRotation))
+		local baseDepth = instanceSettings.Depth
+		local localPadding = instanceSettings.Padding
 
-		local absTransparency = VisibilityChecker.getAbsoluteTransparency(guiObject)
+		local rCenter = camera:ViewportPointToRay(cx, cy)
+		local rRight = camera:ViewportPointToRay(cx + hw, cy)
+		local rLeft = camera:ViewportPointToRay(cx - hw, cy)
+		local rTop = camera:ViewportPointToRay(cx, cy - hh)
+		local rBottom = camera:ViewportPointToRay(cx, cy + hh)
 
-		local baseFillT = instanceSettings.Highlight.FillTransparency
-		local baseMeshT = instanceSettings.Mesh.Transparency
+		local function worldAtDepth(ray, depth)
+			return ray.Origin + ray.Direction * (depth / ray.Direction:Dot(camLookVec))
+		end
 
-		for _, data in ipairs(pixels) do
-			local localOffset = Vector3.new(data.RelX * worldW, -data.RelY * worldH, 0)
-			local rotatedOffset = guiRotCF * localOffset
+		for _, lc in ipairs(layerContainers) do
+			local depth = baseDepth + lc.depthOffset
+			local pCen = worldAtDepth(rCenter, depth)
+			local worldW = (worldAtDepth(rRight, depth) - worldAtDepth(rLeft, depth)).Magnitude
+			local worldH = (worldAtDepth(rTop, depth) - worldAtDepth(rBottom, depth)).Magnitude
 
-			local worldOffset = (camCF.RightVector * rotatedOffset.X) + (camCF.UpVector * rotatedOffset.Y)
+			lc.highlight.FillTransparency = lc.baseFillT + (1 - lc.baseFillT) * absTransparency
+			lc.highlight.OutlineTransparency = lc.baseOutlineT + (1 - lc.baseOutlineT) * absTransparency
 
-			if data.SwapAxes then
-				data.Part.Size =
-					Vector3.new(0.01, data.RelSizeX * worldW + localPadding, data.RelSizeY * worldH + localPadding)
-			else
-				data.Part.Size =
-					Vector3.new(0.01, data.RelSizeY * worldH + localPadding, data.RelSizeX * worldW + localPadding)
+			for _, data in ipairs(lc.pixels) do
+				local pw = data.RelSizeX * worldW + localPadding
+				local ph = data.RelSizeY * worldH + localPadding
+				if data.SwapAxes then
+					data.Part.Size = Vector3.new(0.01, pw, ph)
+				else
+					data.Part.Size = Vector3.new(0.01, ph, pw)
+				end
+				data.Part.Transparency = lc.baseMeshT + (1 - lc.baseMeshT) * absTransparency
+
+				local localOffset = Vector3.new(data.RelX * worldW, -data.RelY * worldH, 0)
+				local rotatedOffset = guiRotCF * localOffset
+				local worldOffset = camCF.RightVector * rotatedOffset.X + camCF.UpVector * rotatedOffset.Y
+				data.Part.CFrame = CFrame.new(pCen + worldOffset)
+					* camCF.Rotation
+					* guiRotCF
+					* data.LocalRot
+					* rotationOffset
 			end
-
-			highlight.FillTransparency = baseFillT + (1 - baseFillT) * absTransparency
-			data.Part.Transparency = baseMeshT + (1 - baseMeshT) * absTransparency
-
-			data.Part.CFrame = CFrame.new(centerWorldPos + worldOffset)
-				* camCF.Rotation
-				* guiRotCF
-				* data.LocalRot
-				* rotationOffset
 		end
 	end)
 
-	-- ── Cleanup ──
-
-	local function cleanup()
+	-- ── Cleanup ───────────────────────────────────────────────────────────
+	local function cleanup(): number
 		if destroyed then
 			return 0
 		end
 		destroyed = true
 		activeInstances[guiObject] = nil
-		container:Destroy()
 		RunService:UnbindFromRenderStep(renderName)
+		masterFolder:Destroy()
+		if strokeHeartbeatConn then
+			strokeHeartbeatConn:Disconnect()
+			strokeHeartbeatConn = nil
+		end
+		if stroke and stroke.Parent then
+			stroke:Destroy()
+		end
+		stroke = nil
+		strokeGradient = nil
 		return 1
 	end
 
-	guiObject.AncestryChanged:Connect(function(_, n)
-		if n then
+	guiObject.AncestryChanged:Connect(function(_, newParent)
+		if newParent then
 			return
 		end
 		cleanup()
@@ -354,52 +506,82 @@ local function createGlassInstance(guiObject, overrides)
 		cleanup()
 	end)
 
-	-- ── Handle (returned to caller) ──
-
+	-- ── Handle ────────────────────────────────────────────────────────────
 	local handle = {}
 
-	--- Destroy this glass instance permanently.
-	function handle.destroy()
+	function handle.destroy(): number
 		return cleanup()
 	end
 
-	--- Toggle rendering on/off without destroying. Useful for menu open/close.
 	function handle.setEnabled(state: boolean)
 		enabled = state
 		if not state then
-			container.Parent = nil
+			masterFolder.Parent = nil
+			if stroke then
+				stroke.Transparency = 1
+			end
+			strokeHovering = false
+		else
+			if stroke then
+				stroke.Transparency = 0
+			end
 		end
 	end
 
-	--- Check if this instance is currently enabled.
 	function handle.isEnabled(): boolean
 		return enabled
 	end
 
-	--- Hot-swap settings on this instance (merged with defaults).
-	--- Forces a grid rebuild on the next frame.
 	function handle.updateSettings(newOverrides)
 		instanceSettings = mergeSettings(newOverrides)
-		localPadding = instanceSettings.Padding
-		depth = instanceSettings.Depth or 2
+		forceFlat = instanceSettings.ForceFlat
 
-		-- Update highlight properties immediately
-		for k, v in pairs(instanceSettings.Highlight) do
-			pcall(function()
-				highlight[k] = v
-			end)
+		for i, lc in ipairs(layerContainers) do
+			local layerDef = instanceSettings.Layers[i]
+			if not layerDef then
+				continue
+			end
+			lc.depthOffset = layerDef.depthOffset
+			lc.baseFillT = layerDef.fillTransparency
+			lc.baseOutlineT = layerDef.outlineTransparency
+			lc.baseMeshT = layerDef.meshTransparency
+			lc.meshColor = layerDef.meshColor
+			lc.highlight.FillColor = layerDef.fillColor
+			lc.highlight.FillTransparency = layerDef.fillTransparency
+			lc.highlight.OutlineColor = layerDef.outlineColor
+			lc.highlight.OutlineTransparency = layerDef.outlineTransparency
+			for _, data in ipairs(lc.pixels) do
+				pcall(function()
+					data.Part.Color = layerDef.meshColor
+					data.Part.Transparency = layerDef.meshTransparency
+				end)
+			end
 		end
 
-		-- Invalidate cached size/radius to force rebuild
+		local nss = instanceSettings.Stroke
+		if nss and stroke and strokeGradient then
+			stroke.Color = nss.color
+			stroke.Thickness = nss.thickness
+			strokeGradient.Transparency = nss.transparency
+			strokeGradient.Color = nss.colorSequence
+			ss = nss
+			strokeCurrentRot = nss.restingAngle
+			if not nss.enabled then
+				stroke.Transparency = 1
+				strokeHovering = false
+			else
+				stroke.Transparency = 0
+			end
+		end
+
+		currentLayoutMode = "None"
 		lastSize = Vector2.zero
 		lastRadius = -1
 	end
 
-	-- ── Register ──
-
 	activeInstances[guiObject] = {
 		handle = handle,
-		container = container,
+		masterFolder = masterFolder,
 		renderName = renderName,
 		settings = instanceSettings,
 	}
@@ -407,26 +589,16 @@ local function createGlassInstance(guiObject, overrides)
 	return handle
 end
 
--- =====================================================================
---  PUBLIC API
--- =====================================================================
+-- ── Public API ────────────────────────────────────────────────────────────────
 
---- Original constructor — kept for backward compat with CollectionService.
 function LiquidGlassHandler.new(guiObject: GuiObject)
 	return createGlassInstance(guiObject, nil)
 end
 
---- Apply glass to a GuiObject programmatically.
---- @param guiObject  The GUI element to frost.
---- @param overrides  Optional table matching Settings shape for per-instance tuning.
----                   Example: { Depth = 3, Mesh = { Transparency = 2.5 }, Highlight = { FillTransparency = 0.85 } }
---- @return handle    Table with :destroy(), :setEnabled(bool), :isEnabled(), :updateSettings(overrides)
----                   Returns existing handle if already applied (no duplicate).
 function LiquidGlassHandler.apply(guiObject: GuiObject, overrides: { [string]: any }?)
 	return createGlassInstance(guiObject, overrides)
 end
 
---- Remove glass from a specific GuiObject. Returns true if found and removed.
 function LiquidGlassHandler.remove(guiObject: GuiObject): boolean
 	local instance = activeInstances[guiObject]
 	if not instance then
@@ -436,7 +608,6 @@ function LiquidGlassHandler.remove(guiObject: GuiObject): boolean
 	return true
 end
 
---- Toggle glass rendering without destroying. No-op if not applied.
 function LiquidGlassHandler.setEnabled(guiObject: GuiObject, state: boolean)
 	local instance = activeInstances[guiObject]
 	if not instance then
@@ -445,18 +616,15 @@ function LiquidGlassHandler.setEnabled(guiObject: GuiObject, state: boolean)
 	instance.handle.setEnabled(state)
 end
 
---- Check if a GuiObject currently has glass applied.
 function LiquidGlassHandler.has(guiObject: GuiObject): boolean
 	return activeInstances[guiObject] ~= nil
 end
 
---- Get the handle for a specific GuiObject (nil if not applied).
 function LiquidGlassHandler.get(guiObject: GuiObject)
 	local instance = activeInstances[guiObject]
 	return instance and instance.handle or nil
 end
 
---- Apply glass to multiple GuiObjects at once. Returns array of handles.
 function LiquidGlassHandler.applyBatch(guiObjects: { GuiObject }, overrides: { [string]: any }?)
 	local handles = {}
 	for _, obj in ipairs(guiObjects) do
@@ -468,9 +636,7 @@ function LiquidGlassHandler.applyBatch(guiObjects: { GuiObject }, overrides: { [
 	return handles
 end
 
---- Remove all active glass instances.
 function LiquidGlassHandler.removeAll()
-	-- Snapshot keys to avoid mutation-during-iteration
 	local objects = {}
 	for guiObject in pairs(activeInstances) do
 		table.insert(objects, guiObject)
@@ -480,7 +646,6 @@ function LiquidGlassHandler.removeAll()
 	end
 end
 
---- Get count of active glass instances.
 function LiquidGlassHandler.getActiveCount(): number
 	local count = 0
 	for _ in pairs(activeInstances) do
@@ -489,7 +654,6 @@ function LiquidGlassHandler.getActiveCount(): number
 	return count
 end
 
--- ===================== COLLECTION SERVICE AUTO-APPLY =====================
 CollectionService:GetInstanceAddedSignal(tag):Connect(LiquidGlassHandler.new)
 for _, v in ipairs(CollectionService:GetTagged(tag)) do
 	LiquidGlassHandler.new(v)

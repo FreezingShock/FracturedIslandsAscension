@@ -1,8 +1,21 @@
+--[[
+	VisibilityChecker.lua — LiquidGlassHandler 2.1
+
+	Improvements over 1.0:
+	  • check() performs a single ancestor walk returning both visibility state
+	    and accumulated GroupTransparency simultaneously. Eliminates the double
+	    traversal (isPotentiallyVisible + getAbsoluteTransparency) that ran every
+	    RenderStepped frame per instance.
+	  • GroupTransparency early-exit: if a CanvasGroup has faded the element to
+	    effectively zero opacity, we bail before any world-space math runs.
+	  • Legacy public functions preserved for backward compatibility.
+]]
+
 local VisibilityChecker = {}
-local Players = game:GetService("Players")
 local GuiService = game:GetService("GuiService")
 
-local function areAncestorsVisible(guiObject)
+-- ── Internal: Visible / Enabled flag walk ────────────────────────────────────
+local function areAncestorsVisible(guiObject): boolean
 	local current = guiObject
 	while current do
 		if current:IsA("GuiObject") and not current.Visible then
@@ -15,14 +28,9 @@ local function areAncestorsVisible(guiObject)
 	return true
 end
 
-function VisibilityChecker.isPotentiallyVisible(guiObject)
-	if not guiObject or not guiObject.Parent then
-		return false
-	end
-	return areAncestorsVisible(guiObject)
-end
-
-function VisibilityChecker.getAbsoluteTransparency(guiObject)
+-- ── Internal: GroupTransparency accumulation ──────────────────────────────────
+-- Returns absTransparency in [0,1] where 1 = fully invisible.
+local function computeAbsoluteTransparency(guiObject): number
 	local current = guiObject
 	local combinedOpacity = 1
 	while current do
@@ -34,6 +42,43 @@ function VisibilityChecker.getAbsoluteTransparency(guiObject)
 	return math.round((1 - combinedOpacity) * 1000) / 1000
 end
 
+-- ── PUBLIC: single-pass combined check ───────────────────────────────────────
+-- Use this in RenderStepped.  Returns (isVisible: boolean, absTransparency: number).
+--
+-- Exit order:
+--   1. nil / unparented → false, 1
+--   2. Any ancestor Visible=false or ScreenGui Enabled=false → false, 1
+--   3. Accumulated GroupTransparency ≥ 0.999 → false, 1  (skips all render work)
+--   4. Otherwise → true, absTransparency
+function VisibilityChecker.check(guiObject: GuiObject): (boolean, number)
+	if not guiObject or not guiObject.Parent then
+		return false, 1
+	end
+	if not areAncestorsVisible(guiObject) then
+		return false, 1
+	end
+	local absT = computeAbsoluteTransparency(guiObject)
+	if absT >= 0.999 then
+		return false, 1
+	end
+	return true, absT
+end
+
+-- ── PUBLIC: legacy wrappers (backward compat) ─────────────────────────────────
+function VisibilityChecker.isPotentiallyVisible(guiObject: GuiObject): boolean
+	local visible, _ = VisibilityChecker.check(guiObject)
+	return visible
+end
+
+function VisibilityChecker.getAbsoluteTransparency(guiObject: GuiObject): number
+	return computeAbsoluteTransparency(guiObject)
+end
+
+-- ── PUBLIC: clipped render bounds ─────────────────────────────────────────────
+-- Returns the actually-visible screen rect after walking ClipsDescendants ancestors.
+-- Skips clip walk when the element has non-zero AbsoluteRotation (clip math is
+-- non-trivial for rotated elements).
+-- Returns: { Min, Max, Width, Height, IsFullyClipped }
 function VisibilityChecker.getTrueRenderBounds(guiObject: GuiObject)
 	local absPos = guiObject.AbsolutePosition
 	local absSize = guiObject.AbsoluteSize

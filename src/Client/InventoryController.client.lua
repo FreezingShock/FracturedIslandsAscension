@@ -86,19 +86,6 @@ local transferFrame = transferContainer:WaitForChild("TransferFrame")
 local transferLabel = transferFrame:WaitForChild("TransferLabel")
 local transferBG = transferFrame:WaitForChild("BG")
 
--- ===================== LIQUID GLASS — BACKGROUND FRAMES =====================
-local inventoryGlass = LiquidGlassHandler.apply(inventoryPanel)
-local transferGlass = LiquidGlassHandler.apply(transferFrame)
-
--- Inventory panel starts hidden; disable glass until opened
-if inventoryGlass then
-	inventoryGlass.setEnabled(false)
-end
--- Transfer frame starts hidden
-if transferGlass then
-	transferGlass.setEnabled(false)
-end
-
 -- ===================== TWEEN CONFIG =====================
 local TWEEN_QUINT = TweenInfo.new(0.4, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
 
@@ -162,10 +149,6 @@ local function _showTransferFrame()
 	end
 	transferSlideTween = TweenService:Create(transferFrame, transferTweenIn, { Position = TRANSFER_POS_SHOWN })
 	transferSlideTween:Play()
-
-	if transferGlass then
-		transferGlass.setEnabled(true)
-	end
 end
 
 local function _hideTransferFrame()
@@ -184,10 +167,6 @@ local function _hideTransferFrame()
 		end
 	end)
 	transferSlideTween:Play()
-
-	if transferGlass then
-		transferGlass.setEnabled(false)
-	end
 end
 
 local function _isOverTransferFrame(screenPos)
@@ -608,8 +587,8 @@ local function isOverInventoryArea(screenPos)
 	if not inventoryVisible then
 		return false
 	end
-	local absPos = inventoryFrame.AbsolutePosition
-	local absSize = inventoryFrame.AbsoluteSize
+	local absPos = boundingBox.AbsolutePosition
+	local absSize = boundingBox.AbsoluteSize
 	return screenPos.X >= absPos.X
 		and screenPos.X <= absPos.X + absSize.X
 		and screenPos.Y >= absPos.Y
@@ -1039,11 +1018,6 @@ end)
 MenuBridge._onStateChanged = function(mode)
 	local wasVisible = inventoryVisible
 	inventoryVisible = (mode ~= nil) -- visible in both "inventory" and "full" modes
-
-	-- Toggle inventory panel glass
-	if inventoryGlass then
-		inventoryGlass.setEnabled(inventoryVisible)
-	end
 
 	if inventoryVisible and not wasVisible then
 		refreshInventory()
