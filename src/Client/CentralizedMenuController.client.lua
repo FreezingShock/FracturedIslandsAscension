@@ -33,6 +33,7 @@ local topBarFrame = innerFrame:WaitForChild("topBarFrame")
 local menuTitleLabel = topBarFrame:WaitForChild("MenuTitleLabel")
 local inventoryPanel = innerFrame:WaitForChild("Inventory")
 local inventoryFrame = inventoryPanel:WaitForChild("InventoryFrame")
+local inventoryGridLayout = inventoryFrame:WaitForChild("UIGridLayout")
 
 local TemporaryMenus = CentralizedMenu:WaitForChild("TemporaryMenus")
 local Sidebar = playerGui:WaitForChild("Sidebar")
@@ -46,6 +47,7 @@ local TooltipModule = require(Modules:WaitForChild("TooltipModule")) :: any
 local GridMenuModule = require(Modules:WaitForChild("GridMenuModule")) :: any
 local SkillsPageModule = require(Modules:WaitForChild("SkillsPageModule")) :: any
 local ProfilePageModule = require(Modules:WaitForChild("ProfilePageModule")) :: any
+local ProfileConfig = require(Modules:WaitForChild("ProfileConfig")) :: any
 local SettingsPageModule = require(Modules:WaitForChild("SettingsPageModule")) :: any
 local StatisticsPageModule = require(Modules:WaitForChild("StatisticsPageModule")) :: any
 local CollectionsPageModule = require(Modules:WaitForChild("CollectionsPageModule")) :: any
@@ -83,6 +85,22 @@ local menuPanelTween = nil
 local INVFRAME_SIZE_DEFAULT = UDim2.new(1, 0, 0, 190)
 local INVFRAME_SIZE_NEXUS = UDim2.new(1, 0, 0, 130)
 local invFrameTweenInfo = TweenInfo.new(0.35, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
+
+local GRID_CELL_FULL = UDim2.fromOffset(50, 50)
+local GRID_CELL_NORMAL = UDim2.fromOffset(65, 65)
+local gridCellTween = nil
+
+local function tweenGridCell(toFull)
+	if gridCellTween then
+		gridCellTween:Cancel()
+	end
+	gridCellTween = TweenService:Create(
+		inventoryGridLayout,
+		TweenInfo.new(0.3, Enum.EasingStyle.Quint, Enum.EasingDirection.Out),
+		{ CellSize = toFull and GRID_CELL_FULL or GRID_CELL_NORMAL }
+	)
+	gridCellTween:Play()
+end
 
 -- ===================== STATE =====================
 local menuOpen = false
@@ -209,13 +227,11 @@ local NEXUS_BUTTONS = {
 	Profile = {
 		tooltipData = {
 			title = '<font color="#55FF55"><b>Your Profile</b></font>',
-			desc = '<font color="#AAAAAA">View your equipment, playtime, and other stats.</font>',
+			desc = '<font color="#AAAAAA">View your equipment, attributes, and more.</font>',
 			click = '<font color="#FFFF55">Click to view!</font>',
 		},
-		action = "page",
-		module = ProfilePageModule,
-		menuTitle = "Your Profile",
-		menuChild = "ProfileMenu",
+		action = "grid",
+		targetGrid = "ProfileGrid",
 	},
 	Settings = {
 		tooltipData = {
@@ -715,6 +731,99 @@ local SKILLS_BUTTONS = {
 	},
 }
 
+-- ===================== PROFILE GRID BUTTON CONFIGS =====================
+local PROFILE_BUTTONS = {
+	MyProfile = {
+		tooltipData = {
+			title = '<font color="#55FF55"><b>Your Profile</b></font>',
+			desc = '<font color="#AAAAAA">View your player level, equipment, and attributes.</font>',
+			click = "",
+		},
+		action = nil,
+	},
+	Helmet = {
+		tooltipData = {
+			title = '<font color="#AAAAAA"><b>Helmet Slot</b></font>',
+			desc = '<font color="#555555">Empty</font>',
+			click = "",
+		},
+		action = nil,
+	},
+	Chestplate = {
+		tooltipData = {
+			title = '<font color="#AAAAAA"><b>Chestplate Slot</b></font>',
+			desc = '<font color="#555555">Empty</font>',
+			click = "",
+		},
+		action = nil,
+	},
+	Leggings = {
+		tooltipData = {
+			title = '<font color="#AAAAAA"><b>Leggings Slot</b></font>',
+			desc = '<font color="#555555">Empty</font>',
+			click = "",
+		},
+		action = nil,
+	},
+	Boots = {
+		tooltipData = {
+			title = '<font color="#AAAAAA"><b>Boots Slot</b></font>',
+			desc = '<font color="#555555">Empty</font>',
+			click = "",
+		},
+		action = nil,
+	},
+	AethericNexus = {
+		tooltipData = {
+			title = '<font color="#FF55FF"><b>Aetheric Nexus Level</b></font>',
+			desc = '<font color="#AAAAAA">Your combined power level across all skills.</font>',
+			click = '<font color="#555555">Coming Soon</font>',
+		},
+		action = nil,
+	},
+	FarmingAttributes = { action = nil },
+	ForagingAttributes = { action = nil },
+	MiningAttributes = { action = nil },
+	CombatAttributes = { action = nil },
+	FishingAttributes = { action = nil },
+	GeneralAttributes = { action = nil },
+	Milestones = {
+		tooltipData = {
+			title = '<font color="#AA00AA"><b>Milestones</b></font>',
+			desc = '<font color="#AAAAAA">View your completed milestones and achievements.</font>',
+			click = '<font color="#555555">Coming Soon</font>',
+		},
+		action = nil,
+	},
+	Bank = {
+		tooltipData = {
+			title = '<font color="#00AA00"><b>Bank</b></font>',
+			desc = '<font color="#AAAAAA">Store and manage your coins and valuables.</font>',
+			click = '<font color="#555555">Coming Soon</font>',
+		},
+		action = nil,
+	},
+	BackButton = {
+		tooltipData = {
+			title = '<font color="#55FF55"><b>Go back</b></font>',
+			desc = '<font color="#AAAAAA">Return to the previous menu.</font>',
+			click = "",
+		},
+		action = "callback",
+		callback = function()
+			GridMenuModule.navigateBack()
+		end,
+	},
+	CloseSlot = {
+		tooltipData = {
+			title = '<font color="#FF5555"><b>Close Menu</b></font>',
+			desc = "",
+			click = "",
+		},
+		action = "close",
+	},
+}
+
 -- ===================== NEXUS GRID LAYOUT CONFIG =====================
 local NEXUS_BLANK_GROUPS = {
 	{ layoutOrder = 1, count = 13 },
@@ -977,6 +1086,7 @@ local function openMenu(mode)
 			navigateToRoot(true)
 			MenuBridge.notifyStateChanged("full")
 			tweenObject(inventoryFrame, { Size = INVFRAME_SIZE_NEXUS }, invFrameTweenInfo)
+			tweenGridCell(true)
 			task.delay(0.15, function()
 				if menuOpen and openMode == "full" then
 					_openMenuPanel()
@@ -995,6 +1105,7 @@ local function openMenu(mode)
 		inventoryPanel.Visible = true
 		navigateToRoot(true)
 		tweenObject(inventoryFrame, { Size = INVFRAME_SIZE_NEXUS }, invFrameTweenInfo)
+		tweenGridCell(true)
 		task.delay(0.5, function()
 			if menuOpen and openMode == "full" then
 				_openMenuPanel()
@@ -1009,6 +1120,7 @@ local function openMenu(mode)
 		GridMenuModule.reset()
 		setTitleInstant("Your Inventory")
 		inventoryFrame.Size = INVFRAME_SIZE_DEFAULT
+		inventoryGridLayout.CellSize = GRID_CELL_NORMAL
 	end
 
 	BoundingBox.Position = MENU_CLOSED
@@ -1039,6 +1151,7 @@ local function closeMenu()
 	tw.Completed:Once(function(state)
 		if state == Enum.PlaybackState.Completed and not menuOpen then
 			inventoryFrame.Size = INVFRAME_SIZE_DEFAULT
+			inventoryGridLayout.CellSize = GRID_CELL_NORMAL
 			CentralizedMenu.Enabled = false
 			inventoryPanel.Visible = false
 			inventoryFrame.Active = false
@@ -1084,6 +1197,7 @@ closeNexusPanel = function()
 	task.delay(0.3, function()
 		if openMode == "inventory" then
 			GridMenuModule.reset()
+			tweenGridCell(false)
 		end
 	end)
 
@@ -1155,12 +1269,14 @@ local SkillsGrid = menuFrame:WaitForChild("SkillsMenu1")
 local StatisticsMenu2 = menuFrame:WaitForChild("StatisticsMenu2")
 local CollectionsMenu2 = menuFrame:WaitForChild("CollectionsMenu2")
 local CollectionsMenu3 = menuFrame:WaitForChild("CollectionsMenu3")
+local ProfileGrid = menuFrame:WaitForChild("ProfileMenu1")
 
 applyGridLayout(NexusMenu, NEXUS_BLANK_GROUPS, NEXUS_ITEM_ORDERS)
 applyGridLayout(CollectionsGrid, COLLECTION_BLANK_GROUPS, {})
 applyGridLayout(SettingsGrid, SETTINGS_BLANK_GROUPS, {})
 applyGridLayout(SkillsGrid, SKILL_BLANK_GROUPS, {})
 applyGridLayout(StatisticsGrid, STATISTICS_BLANK_GROUPS, {})
+applyGridLayout(ProfileGrid, ProfileConfig.PROFILE_BLANK_GROUPS, ProfileConfig.PROFILE_ITEM_ORDERS)
 
 GridMenuModule.registerGrid("CollectionsGrid", CollectionsGrid, COLLECTION_BUTTONS, { title = "Collections" })
 GridMenuModule.registerGrid("StatisticsGrid", StatisticsGrid, STATISTICS_BUTTONS, { title = "Statistics" })
@@ -1169,6 +1285,7 @@ GridMenuModule.registerGrid("SkillsGrid", SkillsGrid, SKILLS_BUTTONS, { title = 
 GridMenuModule.registerGrid("StatisticsMenu2", StatisticsMenu2, STATS_MENU2_BUTTONS, { title = "Statistics" })
 GridMenuModule.registerGrid("CollectionsMenu2", CollectionsMenu2, COLLECTION_MENU2_BUTTONS, { title = "Collections" })
 GridMenuModule.registerGrid("CollectionsMenu3", CollectionsMenu3, COLLECTION_MENU3_BUTTONS, { title = "Collection" })
+GridMenuModule.registerGrid("ProfileGrid", ProfileGrid, PROFILE_BUTTONS, { title = "Your Profile" })
 
 -- ===================== WIRE DYNAMIC SKILL GRID TOOLTIPS =====================
 local SKILLGRID_STAT_MAP = {
@@ -1193,13 +1310,31 @@ for buttonName, statKey in pairs(SKILLGRID_STAT_MAP) do
 	end
 end
 
+-- ===================== WIRE DYNAMIC PROFILE ATTRIBUTE TOOLTIPS =====================
+for skillName, buttonName in pairs(ProfileConfig.SKILL_BUTTON_MAP) do
+	local btn = ProfileGrid:FindFirstChild(buttonName)
+	if btn then
+		local capturedSkill = skillName
+		btn.MouseEnter:Connect(function()
+			UIClick3:Play()
+			ProfilePageModule.showSkillAttributeTooltip(capturedSkill)
+		end)
+		btn.MouseLeave:Connect(function()
+			ProfilePageModule.hideSkillAttributeTooltip()
+		end)
+	else
+		warn("[ProfileGridTooltips] Missing button: " .. buttonName)
+	end
+end
+
 -- ===================== INITIALIZE PAGE MODULES =====================
 SkillsPageModule.init(sharedRefs, menuChildFrames["SkillsMenu"])
-ProfilePageModule.init(sharedRefs, menuChildFrames["ProfileMenu"])
+ProfilePageModule.init(sharedRefs)
 SettingsPageModule.init(sharedRefs, menuChildFrames["SettingsMenu"])
 StatisticsPageModule.init(sharedRefs, StatisticsMenu2)
 CollectionsPageModule.init(sharedRefs, CollectionsMenu2, CollectionsMenu3)
 sharedRefs.SkillsPageModule = SkillsPageModule
+sharedRefs.ProfilePageModule = ProfilePageModule
 
 -- ===================== INITIAL STATE =====================
 CentralizedMenu.Enabled = false
@@ -1212,6 +1347,7 @@ menuClip.Visible = false
 BoundingBox.Position = MENU_CLOSED
 menuTitleLabel.Text = "Your Nexus Menu"
 SidebarBB.Position = SIDEBAR_VISIBLE
+inventoryGridLayout.CellSize = GRID_CELL_NORMAL
 
 for _, frame in pairs(menuChildFrames) do
 	frame.Position = SLIDE_RIGHT
@@ -1282,9 +1418,37 @@ NexusBtn.MouseButton1Click:Connect(function()
 	end
 end)
 
-LiquidGlassHandler.apply(outerFrame)
-LiquidGlassHandler.apply(topBarFrame)
-LiquidGlassHandler.apply(inventoryPanel)
-LiquidGlassHandler.apply(menuClip)
+LiquidGlassHandler.apply(outerFrame, {
+	SeparatedBorderOutline = {
+		enabled = true,
+		offset = 5,
+		thickness = 3,
+		color = Color3.fromRGB(255, 255, 255),
+	},
+})
+LiquidGlassHandler.apply(topBarFrame, {
+	SeparatedBorderOutline = {
+		enabled = true,
+		offset = 5,
+		thickness = 3,
+		color = Color3.fromRGB(255, 255, 255),
+	},
+})
+LiquidGlassHandler.apply(inventoryPanel, {
+	SeparatedBorderOutline = {
+		enabled = true,
+		offset = 5,
+		thickness = 3,
+		color = Color3.fromRGB(255, 255, 255),
+	},
+})
+LiquidGlassHandler.apply(menuClip, {
+	SeparatedBorderOutline = {
+		enabled = true,
+		offset = 5,
+		thickness = 3,
+		color = Color3.fromRGB(255, 255, 255),
+	},
+})
 
 print("CentralizedMenuController: Ready ✓")

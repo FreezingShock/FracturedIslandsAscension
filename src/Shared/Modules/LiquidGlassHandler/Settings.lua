@@ -1,20 +1,15 @@
 --[[
-	Settings.lua — LiquidGlassHandler 3.1
+	Settings.lua — LiquidGlassHandler 3.2
 
 	Two Glass layers (Back + Front) — frosted body.
 	Dynamic UIStroke + UIGradient — cursor-tracking specular highlight.
+	SeparatedBorderOutline — hover-activated offset outline via UIStroke.BorderOffset.
 
-	CHANGES FROM 3.0:
-	  ① ALL Highlight outlineTransparency set to 1 (disabled).
-	    The UIStroke now provides the specular rim. Highlight outlines on
-	    individual Glass parts caused visible line artifacts where parts
-	    met, especially with overlapping glass instances.
-	  ② ForceFlat = true added. Uses 1 Center part per layer regardless of
-	    UICorner presence, eliminating ALL internal seams from the 9-part
-	    rounded-corner grid. The frosted glass effect is subtle enough that
-	    square-cornered glass on a rounded frame is unnoticeable.
-	  ③ Padding reduced to 0.001 (single-part mode has no seams to close;
-	    this is just a minor safety margin).
+	CHANGES FROM 3.1:
+	  ① SeparatedBorderOutline section added. Creates a third UIStroke on
+	    the GuiObject that tweens its BorderOffset outward on hover, producing
+	    a Fortnite-style separated outline effect. Toggled per-instance via
+	    LiquidGlassHandler.apply() overrides.
 
 	meshTransparency must stay 0.30–0.65 for Glass refraction to be active.
 ]]
@@ -99,5 +94,22 @@ return {
 			ColorSequenceKeypoint.new(0.5, Color3.fromRGB(195, 212, 238)),
 			ColorSequenceKeypoint.new(1, Color3.fromRGB(220, 232, 252)),
 		}),
+	},
+
+	-- ── Separated border outline (hover-activated offset stroke) ──────────
+	-- Creates a UIStroke that sits flush at rest (invisible) and tweens its
+	-- BorderOffset outward on hover to produce a separated outline effect.
+	-- Toggled per-instance via .apply() overrides.
+	SeparatedBorderOutline = {
+		enabled = false, -- off by default; enable per-instance
+		offset = 7, -- px gap at full hover (BorderOffset.X and .Y)
+		thickness = 3, -- stroke weight
+		color = Color3.fromRGB(213, 229, 255), -- pastel liquid-glass blue
+		restTransparency = 1, -- invisible at rest
+		hoverTransparency = 0.15, -- slight translucency for glassy feel
+		tweenInTime = 0.25,
+		tweenOutTime = 0.2,
+		easingIn = Enum.EasingStyle.Quint,
+		easingOut = Enum.EasingStyle.Quint,
 	},
 }

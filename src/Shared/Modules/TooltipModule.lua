@@ -42,10 +42,23 @@ local TT_Rewards = TooltipFrame:WaitForChild("RewardsLabel")
 -- ===================== LIQUID GLASS =====================
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local LiquidGlassHandler = require(Modules:WaitForChild("LiquidGlassHandler"))
-local glassHandle = LiquidGlassHandler.apply(TooltipFrame)
+local glassHandle = LiquidGlassHandler.apply(TooltipFrame, {
+	Stroke = { enabled = false },
+	SeparatedBorderOutline = { enabled = false },
+})
 if glassHandle then
 	glassHandle.setEnabled(false) -- tooltip starts hidden
 end
+-- Static separated outline — always visible when tooltip is shown
+local staticOutline = Instance.new("UIStroke")
+staticOutline.Name = "TooltipOutline"
+staticOutline.ApplyStrokeMode = Enum.ApplyStrokeMode.Contextual
+staticOutline.LineJoinMode = Enum.LineJoinMode.Round
+staticOutline.Thickness = 3
+staticOutline.Color = Color3.fromRGB(213, 229, 255)
+staticOutline.Transparency = 1 -- starts hidden
+staticOutline.BorderOffset = UDim.new(0, 7)
+staticOutline.Parent = TooltipFrame
 
 -- ===================== CONFIG =====================
 local TT_OFFSET_X = 18
@@ -66,7 +79,7 @@ RunService.RenderStepped:Connect(function()
 	local fs = TooltipFrame.AbsoluteSize
 
 	local fx = mousePos.X + TT_OFFSET_X
-	local fy = mousePos.Y - inset.Y + TT_OFFSET_Y
+	local fy = mousePos.Y + TT_OFFSET_Y
 
 	if fs.X > 0 and fs.Y > 0 then
 		fx = math.clamp(fx, 0, vp.X - fs.X)
@@ -134,6 +147,7 @@ function API.show(data, source)
 	if glassHandle then
 		glassHandle.setEnabled(true)
 	end
+	staticOutline.Transparency = 0.15
 end
 
 --- Hide tooltip, but only if the caller is the current owner.
@@ -166,7 +180,7 @@ function API.forceHide()
 	if glassHandle then
 		glassHandle.setEnabled(false)
 	end
-
+	staticOutline.Transparency = 1
 	TT_ProgressOuter.Visible = false
 	TT_ProgressLabel.Visible = false
 	TT_Rewards.Visible = false
@@ -184,6 +198,7 @@ function API.showRaw(source)
 	if glassHandle then
 		glassHandle.setEnabled(true)
 	end
+	staticOutline.Transparency = 0.15
 end
 
 --- Check if a given source currently owns the tooltip.

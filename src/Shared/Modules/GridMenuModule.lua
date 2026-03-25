@@ -168,7 +168,7 @@ function M.registerGrid(gridKey, gridFrame, buttonConfigs, options)
 				TooltipModule.show(btnConfig.tooltipData)
 			end)
 			child.MouseLeave:Connect(function()
-				TooltipModule.hide()
+				TooltipModule.hide("generic")
 			end)
 		end
 	end
@@ -214,7 +214,7 @@ function M.navigateToGrid(gridKey)
 		warn("GridMenuModule: Unknown grid '" .. tostring(gridKey) .. "'")
 		return
 	end
-
+	TooltipModule.forceHide()
 	-- Push current onto stack
 	if activeGrid then
 		table.insert(gridStack, activeGrid)
@@ -242,6 +242,7 @@ function M.navigateBack()
 	if #gridStack == 0 then
 		return false
 	end
+	TooltipModule.forceHide()
 
 	local oldData = grids[activeGrid]
 

@@ -335,7 +335,14 @@ local function createHotbarSlots()
 			hovered = false,
 		}
 		hotbarSlots[i] = slotData
-		LiquidGlassHandler.apply(newSlot)
+		LiquidGlassHandler.apply(newSlot, {
+			SeparatedBorderOutline = {
+				enabled = true,
+				offset = 4,
+				thickness = 2,
+				color = Color3.fromRGB(255, 255, 255),
+			},
+		})
 		if i == MENU_SLOT then
 			-- ── Menu button: always visible, special styling ──
 			setupMenuSlot(newSlot)
@@ -429,7 +436,14 @@ local function getOrCreateInventorySlot(index)
 		inUse = false,
 	}
 	inventoryPool[index] = slotData
-	LiquidGlassHandler.apply(newSlot)
+	LiquidGlassHandler.apply(newSlot, {
+		SeparatedBorderOutline = {
+			enabled = true,
+			offset = 4,
+			thickness = 2,
+			color = Color3.fromRGB(255, 255, 255),
+		},
+	})
 
 	newSlot.MouseEnter:Connect(function()
 		slotData.hovered = true

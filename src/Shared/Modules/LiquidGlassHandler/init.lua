@@ -1,32 +1,24 @@
 --[[
-	LiquidGlassHandler 3.1
+	LiquidGlassHandler 3.2
 	Copyright (c) 2026 @7eoeb, @UNIVERSECORNUCOPIA
 
-	CHANGES FROM 3.0:
+	CHANGES FROM 3.1:
 
-	① SEAM FIX — ForceFlat mode
-	  Root cause: the 9-part rounded-corner grid (center + 4 edges + 4 corners)
-	  creates visible line artifacts where parts meet:
-	    a) Highlight.OutlineColor traces each disconnected part cluster separately,
-	       drawing internal borders where parts have sub-pixel gaps.
-	    b) Glass material refraction computes per-part — where two Glass parts
-	       overlap, refraction stacks creating a darker band; where they gap,
-	       the background bleeds through.
-	    c) With two overlapping glass instances (e.g. inventory over Nexus menu),
-	       the artifacts multiply: 4 layers × 9 parts = 36 potential seam sources.
+	① SEPARATED BORDER OUTLINE
+	  New per-instance toggle: SeparatedBorderOutline.enabled
+	  Creates a third UIStroke on the GuiObject using the new BorderOffset
+	  property. On hover, BorderOffset tweens outward from (0,0) to the
+	  configured offset while Transparency tweens from invisible to the
+	  target. On leave, both reverse (shrink + fade). Cancel-safe tweens.
 
-	  Fix: Settings.ForceFlat = true (default). When active, buildLayerGrid()
-	  always takes the single-Center-part path regardless of UICorner presence.
-	  Result: 1 part per layer, 2 parts total, zero internal seams.
+	② SPECULAR STROKE TOGGLE
+	  Stroke.enabled is now respected per-instance — if false, no specular
+	  UIStroke or Heartbeat connection is created. (Was already partially
+	  implemented; now fully gated.)
 
-	  The frosted glass effect is subtle enough that the glass having square
-	  corners while the GuiObject has rounded corners is unnoticeable.
-
-	② ALL HIGHLIGHT OUTLINES DISABLED
-	  Both layers now have outlineTransparency = 1 in Settings. The UIStroke
-	  added in 3.0 provides the specular rim — the Highlight outline was
-	  redundant and was the primary source of the nested-rectangle artifacts
-	  visible when two glass instances overlap.
+	PRIOR CHANGES (3.1):
+	  • ForceFlat mode — single Center part per layer, zero internal seams
+	  • All Highlight outlines disabled — UIStroke provides specular rim
 ]]
 
 local LiquidGlassHandler = {}
@@ -121,6 +113,17 @@ local function mergeSettings(overrides)
 	if overrides.Stroke then
 		for k, v in pairs(overrides.Stroke) do
 			merged.Stroke[k] = v
+		end
+	end
+
+	-- SeparatedBorderOutline
+	merged.SeparatedBorderOutline = {}
+	for k, v in pairs(DefaultSettings.SeparatedBorderOutline) do
+		merged.SeparatedBorderOutline[k] = v
+	end
+	if overrides.SeparatedBorderOutline then
+		for k, v in pairs(overrides.SeparatedBorderOutline) do
+			merged.SeparatedBorderOutline[k] = v
 		end
 	end
 
@@ -391,6 +394,96 @@ local function createGlassInstance(guiObject, overrides)
 		end)
 	end
 
+	-- ── Separated border outline ──────────────────────────────────────────
+	-- A third UIStroke using BorderOffset to create a hover-activated
+	-- separated outline effect (Fortnite item shop style).
+
+	local sbo = instanceSettings.SeparatedBorderOutline
+	local outlineStroke = nil
+	local outlineTweenIn1 = nil -- BorderOffset tween
+	local outlineTweenIn2 = nil -- Transparency tween
+	local outlineTweenOut1 = nil
+	local outlineTweenOut2 = nil
+	local outlineHoverEnterConn = nil
+	local outlineHoverLeaveConn = nil
+
+	local function cancelOutlineTweens()
+		if outlineTweenIn1 then
+			outlineTweenIn1:Cancel()
+			outlineTweenIn1 = nil
+		end
+		if outlineTweenIn2 then
+			outlineTweenIn2:Cancel()
+			outlineTweenIn2 = nil
+		end
+		if outlineTweenOut1 then
+			outlineTweenOut1:Cancel()
+			outlineTweenOut1 = nil
+		end
+		if outlineTweenOut2 then
+			outlineTweenOut2:Cancel()
+			outlineTweenOut2 = nil
+		end
+	end
+
+	local function outlineHoverIn()
+		if not enabled or not outlineStroke then
+			return
+		end
+		cancelOutlineTweens()
+
+		local tweenInfoIn = TweenInfo.new(sbo.tweenInTime, sbo.easingIn, Enum.EasingDirection.Out)
+
+		outlineTweenIn1 = TweenService:Create(outlineStroke, tweenInfoIn, {
+			BorderOffset = UDim.new(0, sbo.offset),
+		})
+		outlineTweenIn2 = TweenService:Create(outlineStroke, tweenInfoIn, {
+			Transparency = sbo.hoverTransparency,
+		})
+
+		outlineTweenIn1:Play()
+		outlineTweenIn2:Play()
+	end
+
+	local function outlineHoverOut()
+		if not outlineStroke then
+			return
+		end
+		cancelOutlineTweens()
+
+		local tweenInfoOut = TweenInfo.new(sbo.tweenOutTime, sbo.easingOut, Enum.EasingDirection.Out)
+
+		outlineTweenOut1 = TweenService:Create(outlineStroke, tweenInfoOut, {
+			BorderOffset = UDim.new(0, 0),
+		})
+		outlineTweenOut2 = TweenService:Create(outlineStroke, tweenInfoOut, {
+			Transparency = sbo.restTransparency,
+		})
+
+		outlineTweenOut1:Play()
+		outlineTweenOut2:Play()
+	end
+
+	if sbo and sbo.enabled then
+		outlineStroke = Instance.new("UIStroke")
+		outlineStroke.Name = "LiquidGlassOutline"
+		outlineStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Contextual
+		outlineStroke.LineJoinMode = Enum.LineJoinMode.Round
+		outlineStroke.Thickness = sbo.thickness
+		outlineStroke.Color = sbo.color
+		outlineStroke.Transparency = sbo.restTransparency
+		outlineStroke.BorderOffset = UDim.new(0, 0)
+		outlineStroke.Parent = guiObject
+
+		outlineHoverEnterConn = guiObject.MouseEnter:Connect(function()
+			outlineHoverIn()
+		end)
+
+		outlineHoverLeaveConn = guiObject.MouseLeave:Connect(function()
+			outlineHoverOut()
+		end)
+	end
+
 	-- ── RenderStepped — 3D glass geometry ────────────────────────────────
 	RunService:BindToRenderStep(renderName, Enum.RenderPriority.Camera.Value + 1, function()
 		if not enabled then
@@ -480,6 +573,8 @@ local function createGlassInstance(guiObject, overrides)
 		activeInstances[guiObject] = nil
 		RunService:UnbindFromRenderStep(renderName)
 		masterFolder:Destroy()
+
+		-- Specular stroke cleanup
 		if strokeHeartbeatConn then
 			strokeHeartbeatConn:Disconnect()
 			strokeHeartbeatConn = nil
@@ -489,6 +584,22 @@ local function createGlassInstance(guiObject, overrides)
 		end
 		stroke = nil
 		strokeGradient = nil
+
+		-- Separated outline cleanup
+		cancelOutlineTweens()
+		if outlineHoverEnterConn then
+			outlineHoverEnterConn:Disconnect()
+			outlineHoverEnterConn = nil
+		end
+		if outlineHoverLeaveConn then
+			outlineHoverLeaveConn:Disconnect()
+			outlineHoverLeaveConn = nil
+		end
+		if outlineStroke and outlineStroke.Parent then
+			outlineStroke:Destroy()
+		end
+		outlineStroke = nil
+
 		return 1
 	end
 
@@ -517,14 +628,26 @@ local function createGlassInstance(guiObject, overrides)
 		enabled = state
 		if not state then
 			masterFolder.Parent = nil
+
+			-- Specular stroke
 			if stroke then
 				stroke.Transparency = 1
 			end
 			strokeHovering = false
+
+			-- Separated outline — snap to rest state
+			if outlineStroke then
+				cancelOutlineTweens()
+				outlineStroke.Transparency = sbo.restTransparency
+				outlineStroke.BorderOffset = UDim.new(0, 0)
+			end
 		else
+			-- Specular stroke
 			if stroke then
 				stroke.Transparency = 0
 			end
+
+			-- Outline stays at rest until next hover — no action needed
 		end
 	end
 
@@ -536,6 +659,7 @@ local function createGlassInstance(guiObject, overrides)
 		instanceSettings = mergeSettings(newOverrides)
 		forceFlat = instanceSettings.ForceFlat
 
+		-- Update glass layers
 		for i, lc in ipairs(layerContainers) do
 			local layerDef = instanceSettings.Layers[i]
 			if not layerDef then
@@ -558,6 +682,7 @@ local function createGlassInstance(guiObject, overrides)
 			end
 		end
 
+		-- Update specular stroke
 		local nss = instanceSettings.Stroke
 		if nss and stroke and strokeGradient then
 			stroke.Color = nss.color
@@ -571,6 +696,20 @@ local function createGlassInstance(guiObject, overrides)
 				strokeHovering = false
 			else
 				stroke.Transparency = 0
+			end
+		end
+
+		-- Update separated outline
+		local nsbo = instanceSettings.SeparatedBorderOutline
+		if nsbo and outlineStroke then
+			outlineStroke.Color = nsbo.color
+			outlineStroke.Thickness = nsbo.thickness
+			sbo = nsbo
+
+			if not nsbo.enabled then
+				cancelOutlineTweens()
+				outlineStroke.Transparency = 1
+				outlineStroke.BorderOffset = UDim.new(0, 0)
 			end
 		end
 
