@@ -13,6 +13,19 @@
 	                      add to SKILL_DISPLAY_ORDER,
 	                      add grid button to CentralizedMenuController
 	  • New armor slot → append to ARMOR_SLOTS + update grid layout
+
+	ICON SPRITESHEET COORDINATES:
+	  Icons use {col, row} tables referencing the stat icon spritesheet.
+	  Each cell is 300×300. (0,0) = top-left, (5,1) = bottom-right.
+	  The spritesheet asset ID lives in TooltipModule.STAT_SPRITESHEET.
+
+	  Current spritesheet layout (6 cols × 2 rows):
+	    Row 0: (0,0) Starburst   (1,0) Diamond   (2,0) SmallStar   (3,0) Cross   (4,0) Grid     (5,0) Round
+	    Row 1: (0,1) Heart       (1,1) Shield     (2,1) Swords      (3,1) Chest   (4,1) ArrowUp  (5,1) Swirl
+
+	  To add more icons: expand the spritesheet PNG, re-upload,
+	  update TooltipModule.STAT_SPRITESHEET.assetId, and add new
+	  coordinates here.
 --]]
 
 local ProfileConfig = {}
@@ -25,7 +38,7 @@ ProfileConfig.SKILL_COLORS = {
 	Fishing = "#00AAAA",
 	Mining = "#5555FF",
 	Combat = "#FF5555",
-	General = "#FFFF55",
+	General = "#555555",
 }
 
 -- ===================== SKILL DISPLAY ORDER =====================
@@ -38,7 +51,7 @@ ProfileConfig.SKILL_DISPLAY_ORDER = { "Farming", "Foraging", "Mining", "Fishing"
 --   key         : unique string identifier (data key / ProfileService key)
 --   name        : display name shown in UI
 --   color       : hex color for per-attribute theming
---   icon        : rbxassetid string (empty = placeholder)
+--   icon        : {col, row} spritesheet coordinates (see header comment)
 --   description : one-line tooltip description
 --
 -- To add a new attribute: append an entry to the skill's array.
@@ -52,22 +65,29 @@ ProfileConfig.ATTRIBUTE_CATEGORIES = {
 			key = "FarmingFortune",
 			name = "Farming Fortune",
 			color = "#FFAA00",
-			icon = "",
+			icon = { 0, 2 }, -- Diamond
 			description = "Increases bonus crop yield per harvest.",
 		},
 		{
 			key = "FarmingSpeed",
 			name = "Farming Speed",
-			color = "#55FF55",
-			icon = "",
+			color = "#FFFF55",
+			icon = { 2, 0 }, -- SmallStar
 			description = "Increases farming action speed.",
 		},
 		{
 			key = "FarmingCritChance",
 			name = "Farming Crit Chance",
 			color = "#5555FF",
-			icon = "",
+			icon = { 4, 1 }, -- Starburst
 			description = "Chance to trigger a critical harvest.",
+		},
+		{
+			key = "FarmingCritIncrease",
+			name = "Farming Crit Increase",
+			color = "#5555FF",
+			icon = { 3, 0 },
+			description = "Increases critical harvest amount.",
 		},
 	},
 
@@ -76,23 +96,30 @@ ProfileConfig.ATTRIBUTE_CATEGORIES = {
 		{
 			key = "ForagingFortune",
 			name = "Foraging Fortune",
-			color = "#00AA00",
-			icon = "",
+			color = "#FFAA00",
+			icon = { 0, 2 }, -- Diamond
 			description = "Increases bonus log yield per chop.",
 		},
 		{
 			key = "ForagingSpeed",
 			name = "Foraging Speed",
-			color = "#55FF55",
-			icon = "",
+			color = "#FFFF55",
+			icon = { 2, 0 }, -- SmallStar
 			description = "Increases foraging action speed.",
 		},
 		{
 			key = "ForagingCritChance",
 			name = "Foraging Crit Chance",
 			color = "#5555FF",
-			icon = "",
+			icon = { 4, 1 }, -- Starburst
 			description = "Chance to trigger a critical chop.",
+		},
+		{
+			key = "ForagingCritIncrease",
+			name = "Foraging Crit Increase",
+			color = "#5555FF",
+			icon = { 3, 0 },
+			description = "Increases critical chop amount.",
 		},
 	},
 
@@ -101,23 +128,30 @@ ProfileConfig.ATTRIBUTE_CATEGORIES = {
 		{
 			key = "MiningFortune",
 			name = "Mining Fortune",
-			color = "#5555FF",
-			icon = "",
+			color = "#FFAA00",
+			icon = { 0, 2 }, -- Diamond
 			description = "Increases bonus ore yield per break.",
 		},
 		{
 			key = "MiningSpeed",
 			name = "Mining Speed",
-			color = "#55FF55",
-			icon = "",
+			color = "#FFFF55",
+			icon = { 2, 0 }, -- SmallStar
 			description = "Increases mining action speed.",
 		},
 		{
 			key = "MiningCritChance",
 			name = "Mining Crit Chance",
-			color = "#55FFFF",
-			icon = "",
+			color = "#5555FF",
+			icon = { 4, 1 }, -- Starburst
 			description = "Chance to trigger a critical break.",
+		},
+		{
+			key = "MiningCritIncrease",
+			name = "Mining Crit Increase",
+			color = "#5555FF",
+			icon = { 3, 0 },
+			description = "Increases critical mining amount.",
 		},
 	},
 
@@ -126,23 +160,30 @@ ProfileConfig.ATTRIBUTE_CATEGORIES = {
 		{
 			key = "FishingFortune",
 			name = "Fishing Fortune",
-			color = "#00AAAA",
-			icon = "",
+			color = "#FFAA00",
+			icon = { 0, 2 }, -- Diamond
 			description = "Increases bonus catch yield per cast.",
 		},
 		{
 			key = "FishingSpeed",
 			name = "Fishing Speed",
-			color = "#55FF55",
-			icon = "",
+			color = "#FFFF55",
+			icon = { 2, 0 }, -- SmallStar
 			description = "Reduces cast and reel time.",
 		},
 		{
 			key = "FishingCritChance",
 			name = "Fishing Crit Chance",
 			color = "#5555FF",
-			icon = "",
+			icon = { 4, 1 }, -- Starburst
 			description = "Chance to trigger a critical catch.",
+		},
+		{
+			key = "FishingCritIncrease",
+			name = "Fishing Crit Increase",
+			color = "#5555FF",
+			icon = { 3, 0 },
+			description = "Increases critical catch amount.",
 		},
 	},
 
@@ -151,69 +192,90 @@ ProfileConfig.ATTRIBUTE_CATEGORIES = {
 		{
 			key = "CombatFortune",
 			name = "Combat Fortune",
-			color = "#FF5555",
-			icon = "",
+			color = "#FFAA00",
+			icon = { 0, 2 }, -- Diamond
 			description = "Increases bonus loot from combat encounters.",
 		},
 		{
 			key = "CombatSpeed",
 			name = "Combat Speed",
-			color = "#55FF55",
-			icon = "",
+			color = "#FFFF55",
+			icon = { 2, 0 }, -- Swords
 			description = "Increases attack speed in combat.",
 		},
 		{
 			key = "CombatCritChance",
 			name = "Combat Crit Chance",
 			color = "#5555FF",
-			icon = "",
+			icon = { 4, 1 }, -- Starburst
 			description = "Chance to land a critical hit.",
+		},
+		{
+			key = "CombatCritIncrease",
+			name = "Combat Crit Increase",
+			color = "#5555FF",
+			icon = { 3, 0 },
+			description = "Increases critical hit damage.",
 		},
 	},
 
 	-- ═════════════════ GENERAL ═════════════════
 	General = {
 		{
-			key = "PressSpeed",
-			name = "Press Speed",
-			color = "#FFAA00",
-			icon = "",
-			description = "Increases button presses per second.",
+			key = "Health",
+			name = "Health",
+			color = "#FF5555",
+			icon = { 0, 1 }, -- Heart
+			description = "Increases maximum health.",
 		},
 		{
-			key = "Walkspeed",
-			name = "Walkspeed",
+			key = "Defense",
+			name = "Defense",
+			color = "#55FF55",
+			icon = { 1, 1 }, -- Shield
+			description = "Increases maximum defense.",
+		},
+		{
+			key = "Speed",
+			name = "Speed",
 			color = "#FFFFFF",
-			icon = "",
+			icon = { 2, 0 }, -- SmallStar
 			description = "Increases movement speed.",
 		},
 		{
 			key = "JumpHeight",
 			name = "Jump Height",
 			color = "#55FF55",
-			icon = "",
+			icon = { 0, 0 }, -- ArrowUp
 			description = "Increases jump height.",
+		},
+		{
+			key = "PressSpeed",
+			name = "Press Speed",
+			color = "#FFAA00",
+			icon = { 3, 1 }, -- Cross
+			description = "Increases button presses per second.",
 		},
 		{
 			key = "MagicFind",
 			name = "Magic Find",
 			color = "#55FFFF",
-			icon = "",
+			icon = { 2, 1 }, -- Swirl
 			description = "Boosts rare drop chance across all skills.",
 		},
 		{
-			key = "Health",
-			name = "Health",
-			color = "#FF5555",
-			icon = "",
-			description = "Increases maximum health.",
+			key = "CritChance",
+			name = "Crit Chance",
+			color = "#5555FF",
+			icon = { 4, 1 }, -- Starburst
+			description = "Chance to land a critical hit.",
 		},
 		{
-			key = "Stamina",
-			name = "Stamina",
-			color = "#FFFF55",
-			icon = "",
-			description = "Increases maximum stamina for sustained actions.",
+			key = "CritIncrease",
+			name = "Crit Increase",
+			color = "#5555FF",
+			icon = { 3, 0 }, -- Starburst
+			description = "Increases critical hit damage.",
 		},
 	},
 }
@@ -260,16 +322,16 @@ ProfileConfig.PROFILE_ITEM_ORDERS = {
 	-- Row 2: armor + skills top row
 	Chestplate = 19,
 	AethericNexus = 22,
-	FarmingAttributes = 23,
-	ForagingAttributes = 24,
-	MiningAttributes = 25,
+	GeneralAttributes = 23,
+	FarmingAttributes = 24,
+	ForagingAttributes = 25,
 
 	-- Row 3: armor + skills bottom row
 	Leggings = 28,
 	Milestones = 31,
-	CombatAttributes = 32,
-	FishingAttributes = 33,
-	GeneralAttributes = 34,
+	MiningAttributes = 32,
+	CombatAttributes = 33,
+	FishingAttributes = 34,
 
 	-- Row 4: armor end
 	Boots = 37,

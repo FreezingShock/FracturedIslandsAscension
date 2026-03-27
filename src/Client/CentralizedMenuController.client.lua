@@ -82,25 +82,9 @@ local menuPanelTweenOut = TweenInfo.new(0.3, Enum.EasingStyle.Quint, Enum.Easing
 local menuPanelTween = nil
 
 -- InventoryFrame size tween (shrinks when nexus grid is visible)
-local INVFRAME_SIZE_DEFAULT = UDim2.new(1, 0, 0, 190)
-local INVFRAME_SIZE_NEXUS = UDim2.new(1, 0, 0, 130)
+local INVFRAME_SIZE_DEFAULT = UDim2.new(1, 0, 0, 205)
+local INVFRAME_SIZE_NEXUS = UDim2.new(1, 0, 0, 140)
 local invFrameTweenInfo = TweenInfo.new(0.35, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
-
-local GRID_CELL_FULL = UDim2.fromOffset(50, 50)
-local GRID_CELL_NORMAL = UDim2.fromOffset(65, 65)
-local gridCellTween = nil
-
-local function tweenGridCell(toFull)
-	if gridCellTween then
-		gridCellTween:Cancel()
-	end
-	gridCellTween = TweenService:Create(
-		inventoryGridLayout,
-		TweenInfo.new(0.3, Enum.EasingStyle.Quint, Enum.EasingDirection.Out),
-		{ CellSize = toFull and GRID_CELL_FULL or GRID_CELL_NORMAL }
-	)
-	gridCellTween:Play()
-end
 
 -- ===================== STATE =====================
 local menuOpen = false
@@ -225,11 +209,6 @@ local NEXUS_BUTTONS = {
 		menuChild = "SkillsMenu",
 	},
 	Profile = {
-		tooltipData = {
-			title = '<font color="#55FF55"><b>Your Profile</b></font>',
-			desc = '<font color="#AAAAAA">View your equipment, attributes, and more.</font>',
-			click = '<font color="#FFFF55">Click to view!</font>',
-		},
 		action = "grid",
 		targetGrid = "ProfileGrid",
 	},
@@ -734,11 +713,6 @@ local SKILLS_BUTTONS = {
 -- ===================== PROFILE GRID BUTTON CONFIGS =====================
 local PROFILE_BUTTONS = {
 	MyProfile = {
-		tooltipData = {
-			title = '<font color="#55FF55"><b>Your Profile</b></font>',
-			desc = '<font color="#AAAAAA">View your player level, equipment, and attributes.</font>',
-			click = "",
-		},
 		action = nil,
 	},
 	Helmet = {
@@ -1086,7 +1060,6 @@ local function openMenu(mode)
 			navigateToRoot(true)
 			MenuBridge.notifyStateChanged("full")
 			tweenObject(inventoryFrame, { Size = INVFRAME_SIZE_NEXUS }, invFrameTweenInfo)
-			tweenGridCell(true)
 			task.delay(0.15, function()
 				if menuOpen and openMode == "full" then
 					_openMenuPanel()
@@ -1105,7 +1078,6 @@ local function openMenu(mode)
 		inventoryPanel.Visible = true
 		navigateToRoot(true)
 		tweenObject(inventoryFrame, { Size = INVFRAME_SIZE_NEXUS }, invFrameTweenInfo)
-		tweenGridCell(true)
 		task.delay(0.5, function()
 			if menuOpen and openMode == "full" then
 				_openMenuPanel()
@@ -1120,7 +1092,6 @@ local function openMenu(mode)
 		GridMenuModule.reset()
 		setTitleInstant("Your Inventory")
 		inventoryFrame.Size = INVFRAME_SIZE_DEFAULT
-		inventoryGridLayout.CellSize = GRID_CELL_NORMAL
 	end
 
 	BoundingBox.Position = MENU_CLOSED
@@ -1151,7 +1122,6 @@ local function closeMenu()
 	tw.Completed:Once(function(state)
 		if state == Enum.PlaybackState.Completed and not menuOpen then
 			inventoryFrame.Size = INVFRAME_SIZE_DEFAULT
-			inventoryGridLayout.CellSize = GRID_CELL_NORMAL
 			CentralizedMenu.Enabled = false
 			inventoryPanel.Visible = false
 			inventoryFrame.Active = false
@@ -1197,7 +1167,6 @@ closeNexusPanel = function()
 	task.delay(0.3, function()
 		if openMode == "inventory" then
 			GridMenuModule.reset()
-			tweenGridCell(false)
 		end
 	end)
 
@@ -1327,6 +1296,38 @@ for skillName, buttonName in pairs(ProfileConfig.SKILL_BUTTON_MAP) do
 	end
 end
 
+-- ===================== WIRE DYNAMIC PROFILE SUMMARY TOOLTIP (Nexus) =====================
+do
+	local profileBtn = NexusMenu:FindFirstChild("Profile")
+	if profileBtn then
+		profileBtn.MouseEnter:Connect(function()
+			UIClick3:Play()
+			ProfilePageModule.showProfileSummaryTooltip()
+		end)
+		profileBtn.MouseLeave:Connect(function()
+			ProfilePageModule.hideProfileSummaryTooltip()
+		end)
+	else
+		warn("[ProfileTooltips] Missing 'Profile' button in NexusMenu")
+	end
+end
+
+-- ===================== WIRE DYNAMIC FULL PROFILE TOOLTIP (MyProfile) =====================
+do
+	local myProfileBtn = ProfileGrid:FindFirstChild("MyProfile")
+	if myProfileBtn then
+		myProfileBtn.MouseEnter:Connect(function()
+			UIClick3:Play()
+			ProfilePageModule.showFullProfileTooltip()
+		end)
+		myProfileBtn.MouseLeave:Connect(function()
+			ProfilePageModule.hideFullProfileTooltip()
+		end)
+	else
+		warn("[ProfileTooltips] Missing 'MyProfile' button in ProfileGrid")
+	end
+end
+
 -- ===================== INITIALIZE PAGE MODULES =====================
 SkillsPageModule.init(sharedRefs, menuChildFrames["SkillsMenu"])
 ProfilePageModule.init(sharedRefs)
@@ -1347,7 +1348,6 @@ menuClip.Visible = false
 BoundingBox.Position = MENU_CLOSED
 menuTitleLabel.Text = "Your Nexus Menu"
 SidebarBB.Position = SIDEBAR_VISIBLE
-inventoryGridLayout.CellSize = GRID_CELL_NORMAL
 
 for _, frame in pairs(menuChildFrames) do
 	frame.Position = SLIDE_RIGHT

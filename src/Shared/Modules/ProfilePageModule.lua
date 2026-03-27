@@ -4,7 +4,7 @@
 --
 --  Grid-aware data & tooltip module for the Profile system.
 --  GridMenuModule owns grid visibility — this module provides:
---    • Dynamic rich-text tooltips for skill attribute categories
+--    • Dynamic icon-based tooltips for skill attribute categories
 --    • Armor slot tooltip builders (display-only for now)
 --    • Cached attribute data from StatUpdated RemoteEvent
 --    • Computed final attribute values (flat × multiplier)
@@ -149,18 +149,12 @@ local function resolveDataKey(attrKey)
 	return ATTR_TO_DATA_KEY[attrKey] or attrKey
 end
 
--- ===================== TOOLTIP BUILDERS =====================
+-- ===================== LEGACY TOOLTIP BUILDERS =====================
+-- Kept for reference / non-icon tooltip contexts.  Profile skill
+-- attribute tooltips now use icon stat lines via showSkillAttributeTooltip().
 
 --- Build the compact rich-text attribute list for a skill category.
 --- Returns a string suitable for TooltipModule's `stats` field.
----
---- Format per line (mirrors SkyBlock profile tooltip):
----   ‣ <colored attr name> <white value>
----
---- Example:
----   ‣ Mining Fortune 108
----   ‣ Mining Speed 140
----   ‣ Mining Crit Chance 21%
 local function buildAttributeListText(skillName)
 	local attrs = ATTRIBUTE_CATEGORIES[skillName]
 	if not attrs or #attrs == 0 then
@@ -173,7 +167,6 @@ local function buildAttributeListText(skillName)
 		local finalVal = computeFinalValue(dataKey)
 		local valStr = formatNumber(finalVal)
 
-		-- Append % for crit chance attributes
 		local isCrit = string.find(attr.key, "CritChance") ~= nil
 		if isCrit then
 			valStr = valStr .. "%"
@@ -196,7 +189,7 @@ local function buildAttributeListText(skillName)
 end
 
 --- Build tooltip data table for a skill attribute category button.
---- Used by showSkillAttributeTooltip().
+--- Legacy path — used only if icon tooltips are not desired.
 local function buildSkillCategoryTooltipData(skillName)
 	local skillColor = SKILL_COLORS[skillName] or "#FFFFFF"
 
@@ -211,7 +204,6 @@ local function buildSkillCategoryTooltipData(skillName)
 
 	local stats = buildAttributeListText(skillName)
 
-	-- No click action yet — sub-grids deferred
 	local click = ""
 
 	return {
@@ -220,6 +212,81 @@ local function buildSkillCategoryTooltipData(skillName)
 		stats = stats,
 		click = click,
 	}
+end
+
+-- ===================== SUMMARY TOOLTIP CONFIG =====================
+-- Keys shown in the Nexus "Profile" button tooltip (top 5 overview).
+-- Each entry references a skill + key from ATTRIBUTE_CATEGORIES.
+local SUMMARY_STAT_KEYS = {
+	{ skill = "General", key = "Health" },
+	{ skill = "General", key = "Defense" },
+	{ skill = "General", key = "PressSpeed" },
+	{ skill = "General", key = "CritChance" },
+	{ skill = "General", key = "CritIncrease" },
+}
+
+--- Check if a stat key should display a % suffix.
+local function needsPercentSuffix(key)
+	return string.find(key, "CritChance") ~= nil or string.find(key, "CritIncrease") ~= nil
+end
+
+--- Build icon stat lines from an array of attribute config entries.
+--- Handles icon, color, name, value, suffix, and layout order.
+--- Returns the number of lines created.
+local function buildIconLines(attrList, startLO)
+	local count = 0
+	for i, attr in ipairs(attrList) do
+		local dataKey = resolveDataKey(attr.key)
+		local finalVal = computeFinalValue(dataKey)
+		local valStr = formatNumber(finalVal)
+
+		if needsPercentSuffix(attr.key) then
+			valStr = valStr .. "%"
+		end
+
+		local clone = TooltipModule.createIconStatLine({
+			icon = attr.icon,
+			color = attr.color or "#FFFFFF",
+			name = attr.name or "???",
+			value = valStr,
+			layoutOrder = startLO + (i - 1),
+		})
+
+		-- Caller-side belt-and-suspenders
+		local statLabel = clone:FindFirstChild("StatLabel", true)
+		if statLabel then
+			statLabel.RichText = true
+			statLabel.TextColor3 = Color3.fromHex(attr.color or "#FFFFFF")
+			statLabel.Text = string.format('%s <font color="#FFFFFF">%s</font>', attr.name or "???", valStr)
+		end
+
+		local img = clone:FindFirstChild("ImageLabel", true)
+		if img then
+			local iconData = attr.icon
+			if type(iconData) == "table" then
+				local sheet = TooltipModule.STAT_SPRITESHEET
+				local col = iconData[1] or 0
+				local row = iconData[2] or 0
+				local cs = sheet.cellSize
+				img.Image = sheet.assetId
+				img.ImageRectSize = Vector2.new(cs, cs)
+				img.ImageRectOffset = Vector2.new(col * cs, row * cs)
+				img.ImageColor3 = Color3.fromHex(attr.color or "#FFFFFF")
+				img.ImageTransparency = 0
+			elseif type(iconData) == "string" and iconData ~= "" then
+				img.Image = iconData
+				img.ImageRectSize = Vector2.new(0, 0)
+				img.ImageRectOffset = Vector2.new(0, 0)
+				img.ImageColor3 = Color3.fromHex(attr.color or "#FFFFFF")
+				img.ImageTransparency = 0
+			else
+				img.ImageTransparency = 1
+			end
+		end
+
+		count = count + 1
+	end
+	return count
 end
 
 -- ===================== MODULE API =====================
@@ -237,8 +304,6 @@ function M.init(sharedRefs)
 	TooltipModule = sharedRefs.TooltipModule
 
 	-- ── Listen for StatUpdated ──
-	-- The server fires this with the full stat snapshot.
-	-- We cache it for tooltip value computation.
 	if StatUpdated then
 		StatUpdated.OnClientEvent:Connect(function(data)
 			sanitizeStatData(data)
@@ -258,15 +323,127 @@ function M.init(sharedRefs)
 	print("ProfilePageModule: Initialized ✓")
 end
 
---- Show the dynamic tooltip for a skill attribute category button.
---- Called from CentralizedMenuController's profile tooltip wiring.
+--- Show the dynamic icon tooltip for a skill attribute category button.
 function M.showSkillAttributeTooltip(skillName)
-	local tooltipData = buildSkillCategoryTooltipData(skillName)
-	TooltipModule.show(tooltipData, TOOLTIP_SOURCE)
+	TooltipModule.clearIconStats()
+	TooltipModule.resetTailOrders()
+
+	local refs = TooltipModule.refs
+	local skillColor = SKILL_COLORS[skillName] or "#FFFFFF"
+
+	refs.Title.Text = string.format(
+		'<font color="%s"><b>%s</b></font> <font color="%s">Attributes</font>',
+		skillColor,
+		skillName,
+		TOOLTIP_COLORS.label
+	)
+	refs.Desc.Text =
+		string.format('<font color="%s">Your %s attribute bonuses.</font>', TOOLTIP_COLORS.label, skillName)
+	refs.Desc.Visible = true
+	refs.Divider1.Visible = true
+	refs.Divider2.Visible = false
+	refs.Divider3.Visible = false
+	refs.Stats.Visible = false
+	refs.Rewards.Visible = false
+	refs.ProgressOuter.Visible = false
+	refs.ProgressLabel.Visible = false
+	refs.Click.Visible = false
+
+	local attrs = ATTRIBUTE_CATEGORIES[skillName]
+	if attrs and #attrs > 0 then
+		local count = buildIconLines(attrs, TooltipModule.ICON_STATS_BASE_LO)
+		TooltipModule.adjustForIconCount(count)
+	end
+
+	TooltipModule.showRaw(TOOLTIP_SOURCE)
 end
 
 --- Hide the skill attribute tooltip (only if we own it).
 function M.hideSkillAttributeTooltip()
+	TooltipModule.hide(TOOLTIP_SOURCE)
+end
+
+--- Show a summary profile tooltip (top 5 stats) on the Nexus "Profile" button.
+function M.showProfileSummaryTooltip()
+	TooltipModule.clearIconStats()
+	TooltipModule.resetTailOrders()
+
+	local refs = TooltipModule.refs
+
+	refs.Title.Text = '<font color="#55FF55"><b>Your Profile</b></font>'
+	refs.Desc.Text =
+		string.format('<font color="%s">View your equipment, stats, and more.</font>', TOOLTIP_COLORS.label)
+	refs.Desc.Visible = true
+	refs.Divider1.Visible = true
+	refs.Divider2.Visible = false
+	refs.Divider3.Visible = true
+	refs.Stats.Visible = false
+	refs.Rewards.Visible = false
+	refs.ProgressOuter.Visible = false
+	refs.ProgressLabel.Visible = false
+	refs.Click.Text = '<font color="#FFFF55">Click to view!</font>'
+	refs.Click.Visible = true
+
+	-- Resolve config entries from SUMMARY_STAT_KEYS
+	local attrList = {}
+	for _, ref in ipairs(SUMMARY_STAT_KEYS) do
+		local skillAttrs = ATTRIBUTE_CATEGORIES[ref.skill]
+		if skillAttrs then
+			for _, attr in ipairs(skillAttrs) do
+				if attr.key == ref.key then
+					table.insert(attrList, attr)
+					break
+				end
+			end
+		end
+	end
+
+	if #attrList > 0 then
+		local count = buildIconLines(attrList, TooltipModule.ICON_STATS_BASE_LO)
+		TooltipModule.adjustForIconCount(count)
+	end
+
+	TooltipModule.showRaw(TOOLTIP_SOURCE)
+end
+
+--- Hide the summary profile tooltip.
+function M.hideProfileSummaryTooltip()
+	TooltipModule.hide(TOOLTIP_SOURCE)
+end
+
+--- Show the full profile tooltip (ALL stats from all skills) on the "MyProfile" button.
+--- Stats are grouped by skill in SKILL_DISPLAY_ORDER but not visually separated.
+function M.showFullProfileTooltip()
+	TooltipModule.clearIconStats()
+	TooltipModule.resetTailOrders()
+
+	local refs = TooltipModule.refs
+
+	refs.Title.Text = '<font color="#55FF55"><b>Your Profile</b></font>'
+	refs.Desc.Text =
+		string.format('<font color="%s">View your equipment, attributes, and more.</font>', TOOLTIP_COLORS.label)
+	refs.Desc.Visible = true
+	refs.Divider1.Visible = true
+	refs.Divider2.Visible = false
+	refs.Divider3.Visible = false
+	refs.Stats.Visible = false
+	refs.Rewards.Visible = false
+	refs.ProgressOuter.Visible = false
+	refs.ProgressLabel.Visible = false
+	refs.Click.Visible = false
+
+	-- General attributes only
+	local attrs = ATTRIBUTE_CATEGORIES["General"]
+	if attrs and #attrs > 0 then
+		local count = buildIconLines(attrs, TooltipModule.ICON_STATS_BASE_LO)
+		TooltipModule.adjustForIconCount(count)
+	end
+
+	TooltipModule.showRaw(TOOLTIP_SOURCE)
+end
+
+--- Hide the full profile tooltip.
+function M.hideFullProfileTooltip()
 	TooltipModule.hide(TOOLTIP_SOURCE)
 end
 

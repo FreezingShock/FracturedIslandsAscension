@@ -9,8 +9,10 @@
 --
 --  Handles:
 --    - Loading saved inventory → spawning Tool clones in Backpack
---    - Building client payloads (hotbar + overflow inventory)
+--    - Building client payloads (hotbar + 27-slot grid + overflow)
 --    - Hotbar assignment, swapping, unassignment
+--    - Grid slot assignment (27 persistent slots, Minecraft-style)
+--    - Auto-fill: overflow items auto-condense into empty grid slots
 --    - Equip/unequip via Humanoid
 --    - Drop to world (entire stack, Tool clones at character pos)
 --    - Saving on PlayerRemoving (Tool instances → profile data)
@@ -38,6 +40,7 @@ local InventoryDataManager = {}
 
 -- ===================== CONSTANTS =====================
 local MAX_HOTBAR_SLOTS = 9
+local GRID_SLOTS = 27
 local MAX_STACK = 999
 local DROP_FORWARD_OFFSET = 5 -- studs in front of character when dropping
 
@@ -60,13 +63,13 @@ local EquipToolFunc = ensureRemote("RemoteFunction", "EquipTool")
 local EquipToolByNameFunc = ensureRemote("RemoteFunction", "EquipToolByName")
 local SwapItemsFunc = ensureRemote("RemoteFunction", "SwapItems")
 local AssignHotbarFunc = ensureRemote("RemoteFunction", "AssignHotbar")
+local AssignGridSlotFunc = ensureRemote("RemoteFunction", "AssignGridSlot")
 local DropItemFunc = ensureRemote("RemoteFunction", "DropItem")
 local MoveToEndFunc = ensureRemote("RemoteFunction", "MoveToEnd")
 
 -- ===================== PER-PLAYER RUNTIME STATE =====================
 -- Mirrors _Inventory profile data at runtime for fast access.
--- toolOrder and hotbarSlots are live references into profile.Data._Inventory.
-local playerState = {} -- [userId] = { toolOrder, nextOrderIndex, hotbarSlots }
+local playerState = {} -- [userId] = { toolOrder, nextOrderIndex, hotbarSlots, gridSlots }
 
 -- ===================== HELPERS =====================
 
@@ -116,111 +119,209 @@ function InventoryDataManager.GetTotalItems(player): number
 	return total
 end
 
---- Build the sorted inventory list (respecting toolOrder).
-local function buildSortedInventory(player)
+--- Build rich toolInfo from a toolName and count info.
+local function buildToolInfo(toolName, info)
+	local regItem = ItemRegistry.getByToolName(toolName)
+	local itemId = regItem and regItem.id or toolName
+	local displayName = regItem and regItem.displayName or toolName
+	local rarity = regItem and regItem.rarity or info.rarity
+	local description = regItem and regItem.description or ""
+
+	return {
+		name = toolName, -- Tool.Name (used for equip/swap/drop)
+		itemId = itemId, -- registry key
+		displayName = displayName,
+		count = math.min(info.count, MAX_STACK),
+		rarity = rarity,
+		description = description,
+	}
+end
+
+--- Find the first empty grid slot index (1-27), or nil if all full.
+local function findFirstEmptyGridSlot(state)
+	for i = 1, GRID_SLOTS do
+		if not state.gridSlots[i] then
+			return i
+		end
+	end
+	return nil
+end
+
+--- Find which grid slot a toolName occupies, or nil.
+local function findGridSlotForTool(state, toolName)
+	for i = 1, GRID_SLOTS do
+		if state.gridSlots[i] == toolName then
+			return i
+		end
+	end
+	return nil
+end
+
+--- Find which hotbar slot a toolName occupies, or nil.
+local function findHotbarSlotForTool(state, toolName)
+	for i = 1, MAX_HOTBAR_SLOTS do
+		if state.hotbarSlots[i] == toolName then
+			return i
+		end
+	end
+	return nil
+end
+
+--- Auto-fill empty grid slots from overflow items.
+--- Call this before building the client payload.
+--- Uses toolOrder for priority when multiple overflow items exist.
+local function autoFillGrid(player)
 	local state = playerState[player.UserId]
 	if not state then
-		return {}
+		return
 	end
 
 	local toolInfo = countTools(player)
 
-	-- Assign order indices to new tool types
+	-- Build set of tool names already placed (hotbar or grid)
+	local placed = {}
+	for i = 1, MAX_HOTBAR_SLOTS do
+		if state.hotbarSlots[i] then
+			placed[state.hotbarSlots[i]] = true
+		end
+	end
+	for i = 1, GRID_SLOTS do
+		if state.gridSlots[i] then
+			placed[state.gridSlots[i]] = true
+		end
+	end
+
+	-- Collect unplaced tools (overflow), sorted by toolOrder
+	local unplaced = {}
 	for name, _ in pairs(toolInfo) do
-		if not state.toolOrder[name] then
-			state.toolOrder[name] = state.nextOrderIndex
-			state.nextOrderIndex = state.nextOrderIndex + 1
-			-- Keep profile in sync
-			local invData = SkillsDataManager.GetInventoryData(player)
-			if invData then
-				invData.nextOrderIndex = state.nextOrderIndex
-			end
+		if not placed[name] then
+			table.insert(unplaced, name)
 		end
 	end
-
-	-- Build sorted array
-	local sorted = {}
-	for name, info in pairs(toolInfo) do
-		if info.count > 0 then
-			-- Resolve registry data for richer client info
-			local regItem = ItemRegistry.getByToolName(name)
-			local itemId = regItem and regItem.id or name
-			local displayName = regItem and regItem.displayName or name
-			local rarity = regItem and regItem.rarity or info.rarity
-			local description = regItem and regItem.description or ""
-
-			table.insert(sorted, {
-				name = name, -- Tool.Name (used for equip/swap/drop)
-				itemId = itemId, -- registry key
-				displayName = displayName,
-				count = math.min(info.count, MAX_STACK),
-				rarity = rarity,
-				description = description,
-			})
-		end
-	end
-
-	table.sort(sorted, function(a, b)
-		return (state.toolOrder[a.name] or math.huge) < (state.toolOrder[b.name] or math.huge)
+	table.sort(unplaced, function(a, b)
+		return (state.toolOrder[a] or math.huge) < (state.toolOrder[b] or math.huge)
 	end)
 
-	return sorted
+	-- Fill empty grid slots with unplaced items
+	local unplacedIdx = 1
+	for i = 1, GRID_SLOTS do
+		if not state.gridSlots[i] and unplacedIdx <= #unplaced then
+			state.gridSlots[i] = unplaced[unplacedIdx]
+			unplacedIdx = unplacedIdx + 1
+		end
+	end
+end
+
+--- Clean up grid/hotbar slots that reference tools no longer in inventory.
+local function pruneStaleSlots(player)
+	local state = playerState[player.UserId]
+	if not state then
+		return
+	end
+
+	local toolInfo = countTools(player)
+
+	for i = 1, GRID_SLOTS do
+		if state.gridSlots[i] and not toolInfo[state.gridSlots[i]] then
+			state.gridSlots[i] = nil
+		end
+	end
+
+	for i = 1, MAX_HOTBAR_SLOTS do
+		if state.hotbarSlots[i] and not toolInfo[state.hotbarSlots[i]] then
+			state.hotbarSlots[i] = nil
+		end
+	end
 end
 
 -- ===================== SEND UPDATE TO CLIENT =====================
---- Fires UpdateInventory with hotbar + overflow inventory data.
+--- Fires UpdateInventory with hotbar + grid slots + overflow data.
 function InventoryDataManager.SendUpdate(player)
 	local state = playerState[player.UserId]
 	if not state then
 		return
 	end
 
-	local fullInventory = buildSortedInventory(player)
+	-- Prune stale references, then auto-fill grid from overflow
+	pruneStaleSlots(player)
+	autoFillGrid(player)
+
+	local toolInfo = countTools(player)
 	local invData = SkillsDataManager.GetInventoryData(player)
 	local maxCapacity = invData and invData.maxCapacity or 1000
+
+	-- Ensure toolOrder indices exist for all tools
+	for name, _ in pairs(toolInfo) do
+		if not state.toolOrder[name] then
+			state.toolOrder[name] = state.nextOrderIndex
+			state.nextOrderIndex = state.nextOrderIndex + 1
+			if invData then
+				invData.nextOrderIndex = state.nextOrderIndex
+			end
+		end
+	end
 
 	-- Build hotbar payload: { [1..9] = toolInfoOrFalse }
 	local hotbarTools = {}
 	for i = 1, MAX_HOTBAR_SLOTS do
 		hotbarTools[i] = false
 		local toolName = state.hotbarSlots[i]
-		if toolName then
-			for _, info in ipairs(fullInventory) do
-				if info.name == toolName then
-					hotbarTools[i] = info
-					break
-				end
-			end
-			-- If tool no longer exists, clear the slot
-			if hotbarTools[i] == false then
-				state.hotbarSlots[i] = nil
+		if toolName and toolInfo[toolName] then
+			hotbarTools[i] = buildToolInfo(toolName, toolInfo[toolName])
+		else
+			state.hotbarSlots[i] = nil
+		end
+	end
+
+	-- Build grid payload: { [1..27] = toolInfoOrFalse }
+	-- CRITICAL: every index must be explicit (false for blanks) so Roblox
+	-- serializes a dense array. Sparse tables (nil gaps) get truncated
+	-- at the first nil by RemoteEvent serialization.
+	local gridTools = {}
+	local inHotbarOrGrid = {}
+
+	-- Mark hotbar items
+	for i = 1, MAX_HOTBAR_SLOTS do
+		if state.hotbarSlots[i] then
+			inHotbarOrGrid[state.hotbarSlots[i]] = true
+		end
+	end
+
+	for i = 1, GRID_SLOTS do
+		gridTools[i] = false -- default: blank
+		local toolName = state.gridSlots[i]
+		if toolName and toolInfo[toolName] and not inHotbarOrGrid[toolName] then
+			gridTools[i] = buildToolInfo(toolName, toolInfo[toolName])
+			inHotbarOrGrid[toolName] = true
+		else
+			-- Clear invalid grid slot (tool in hotbar or doesn't exist)
+			if toolName and (inHotbarOrGrid[toolName] or not toolInfo[toolName]) then
+				state.gridSlots[i] = nil
 			end
 		end
 	end
 
-	-- Build overflow inventory: everything NOT in hotbar
-	local inventoryTools = {}
-	for _, info in ipairs(fullInventory) do
-		local inHotbar = false
-		for _, hb in pairs(hotbarTools) do
-			if type(hb) == "table" and hb.name == info.name then
-				inHotbar = true
-				break
-			end
-		end
-		if not inHotbar then
-			table.insert(inventoryTools, info)
+	-- Build overflow: everything not in hotbar or grid, sorted by toolOrder
+	local overflowTools = {}
+	for name, info in pairs(toolInfo) do
+		if not inHotbarOrGrid[name] then
+			table.insert(overflowTools, buildToolInfo(name, info))
 		end
 	end
+	table.sort(overflowTools, function(a, b)
+		return (state.toolOrder[a.name] or math.huge) < (state.toolOrder[b.name] or math.huge)
+	end)
 
+	-- Total items across all tools
 	local totalItems = 0
-	for _, info in ipairs(fullInventory) do
+	for _, info in pairs(toolInfo) do
 		totalItems = totalItems + info.count
 	end
 
 	UpdateInventoryEvent:FireClient(player, {
 		hotbar = hotbarTools,
-		inventory = inventoryTools,
+		gridSlots = gridTools,
+		overflow = overflowTools,
 		max_capacity = maxCapacity,
 		total_items = totalItems,
 	})
@@ -267,6 +368,18 @@ function InventoryDataManager.AddItem(player, toolName: string, count: number): 
 		clone.Parent = backpack
 	end
 
+	-- Auto-assign to first empty grid slot if this is a new tool type
+	local state = playerState[player.UserId]
+	if state and not existing[toolName] then
+		-- New tool type — assign grid slot if not already placed
+		if not findGridSlotForTool(state, toolName) and not findHotbarSlotForTool(state, toolName) then
+			local emptySlot = findFirstEmptyGridSlot(state)
+			if emptySlot then
+				state.gridSlots[emptySlot] = toolName
+			end
+		end
+	end
+
 	-- Update is fired by ChildAdded listener, but force one to be safe
 	InventoryDataManager.SendUpdate(player)
 	return canAdd
@@ -290,6 +403,25 @@ function InventoryDataManager.RemoveItem(player, toolName: string, count: number
 		if child:IsA("Tool") and child.Name == toolName then
 			child:Destroy()
 			removed = removed + 1
+		end
+	end
+
+	-- If tool type is fully gone, clear grid slot
+	-- (pruneStaleSlots in SendUpdate handles this, but do it eagerly)
+	if removed > 0 then
+		local remaining = countTools(player)
+		if not remaining[toolName] then
+			local state = playerState[player.UserId]
+			if state then
+				local gridIdx = findGridSlotForTool(state, toolName)
+				if gridIdx then
+					state.gridSlots[gridIdx] = nil
+				end
+				local hotbarIdx = findHotbarSlotForTool(state, toolName)
+				if hotbarIdx then
+					state.hotbarSlots[hotbarIdx] = nil
+				end
+			end
 		end
 	end
 
@@ -345,14 +477,16 @@ local function dropItem(player, toolName: string): boolean
 		end
 	end
 
-	-- Clear hotbar slot if this tool was assigned
+	-- Clear hotbar and grid slots for this tool
 	local state = playerState[player.UserId]
 	if state then
-		for i = 1, MAX_HOTBAR_SLOTS do
-			if state.hotbarSlots[i] == toolName then
-				state.hotbarSlots[i] = nil
-				break
-			end
+		local hotbarIdx = findHotbarSlotForTool(state, toolName)
+		if hotbarIdx then
+			state.hotbarSlots[hotbarIdx] = nil
+		end
+		local gridIdx = findGridSlotForTool(state, toolName)
+		if gridIdx then
+			state.gridSlots[gridIdx] = nil
 		end
 	end
 
@@ -440,32 +574,61 @@ local function swapItems(player, sourceName: string, targetName: string): boolea
 		return false
 	end
 
-	local slotA, slotB
-	for i = 1, MAX_HOTBAR_SLOTS do
-		if state.hotbarSlots[i] == sourceName then
-			slotA = i
-		end
-		if state.hotbarSlots[i] == targetName then
-			slotB = i
-		end
+	-- Validate both tools exist
+	local tools = countTools(player)
+	if not tools[sourceName] or not tools[targetName] then
+		return false
 	end
+
+	-- Locate each tool: hotbar, grid, or overflow (nil for both)
+	local srcHotbar = findHotbarSlotForTool(state, sourceName)
+	local srcGrid = findGridSlotForTool(state, sourceName)
+	local tgtHotbar = findHotbarSlotForTool(state, targetName)
+	local tgtGrid = findGridSlotForTool(state, targetName)
 
 	local swapped = false
 
-	if slotA and slotB then
-		-- Both in hotbar → swap slots
-		state.hotbarSlots[slotA], state.hotbarSlots[slotB] = state.hotbarSlots[slotB], state.hotbarSlots[slotA]
+	-- Case: both in hotbar
+	if srcHotbar and tgtHotbar then
+		state.hotbarSlots[srcHotbar], state.hotbarSlots[tgtHotbar] =
+			state.hotbarSlots[tgtHotbar], state.hotbarSlots[srcHotbar]
 		swapped = true
-	elseif slotA then
-		-- Source in hotbar, target in inventory → replace source with target
-		state.hotbarSlots[slotA] = targetName
+
+	-- Case: both in grid
+	elseif srcGrid and tgtGrid then
+		state.gridSlots[srcGrid], state.gridSlots[tgtGrid] = state.gridSlots[tgtGrid], state.gridSlots[srcGrid]
 		swapped = true
-	elseif slotB then
-		-- Target in hotbar, source in inventory → replace target with source
-		state.hotbarSlots[slotB] = sourceName
+
+	-- Case: hotbar ↔ grid (both have items)
+	elseif srcHotbar and tgtGrid then
+		state.hotbarSlots[srcHotbar] = targetName
+		state.gridSlots[tgtGrid] = sourceName
 		swapped = true
+	elseif srcGrid and tgtHotbar then
+		state.gridSlots[srcGrid] = targetName
+		state.hotbarSlots[tgtHotbar] = sourceName
+		swapped = true
+
+	-- Case: one in hotbar, other in overflow
+	elseif srcHotbar and not tgtGrid then
+		-- Target is overflow → put target in hotbar, source becomes overflow
+		state.hotbarSlots[srcHotbar] = targetName
+		swapped = true
+	elseif tgtHotbar and not srcGrid then
+		state.hotbarSlots[tgtHotbar] = sourceName
+		swapped = true
+
+	-- Case: one in grid, other in overflow
+	elseif srcGrid and not tgtHotbar then
+		-- Target is overflow → put target in grid slot, source becomes overflow
+		state.gridSlots[srcGrid] = targetName
+		swapped = true
+	elseif tgtGrid and not srcHotbar then
+		state.gridSlots[tgtGrid] = sourceName
+		swapped = true
+
+	-- Case: both in overflow → swap display order
 	else
-		-- Both in inventory → swap display order
 		local orderA = state.toolOrder[sourceName]
 		local orderB = state.toolOrder[targetName]
 		if orderA and orderB then
@@ -510,36 +673,83 @@ local function assignHotbar(player, slotIndex: number, toolName: string): boolea
 		end
 	end
 
+	-- Remove from any grid slot (item moves to hotbar)
+	local gridIdx = findGridSlotForTool(state, toolName)
+	if gridIdx then
+		state.gridSlots[gridIdx] = nil
+	end
+
 	state.hotbarSlots[slotIndex] = toolName
 	InventoryDataManager.SendUpdate(player)
 	return true
 end
 
+-- ===================== ASSIGN GRID SLOT =====================
+--- Place a tool into a specific grid slot (1-27).
+--- Clears the tool from hotbar/other grid slot if it was there.
+--- Target grid slot must be empty.
+local function assignGridSlot(player, gridIndex: number, toolName: string): boolean
+	local state = playerState[player.UserId]
+	if not state then
+		return false
+	end
+
+	-- Validate grid index
+	if type(gridIndex) ~= "number" or gridIndex < 1 or gridIndex > GRID_SLOTS or math.floor(gridIndex) ~= gridIndex then
+		return false
+	end
+
+	-- Validate tool exists
+	local tools = countTools(player)
+	if not tools[toolName] then
+		return false
+	end
+
+	-- Target must be empty
+	if state.gridSlots[gridIndex] then
+		return false
+	end
+
+	-- Clear from hotbar if present
+	local hotbarIdx = findHotbarSlotForTool(state, toolName)
+	if hotbarIdx then
+		state.hotbarSlots[hotbarIdx] = nil
+	end
+
+	-- Clear from any other grid slot
+	local oldGridIdx = findGridSlotForTool(state, toolName)
+	if oldGridIdx then
+		state.gridSlots[oldGridIdx] = nil
+	end
+
+	state.gridSlots[gridIndex] = toolName
+	InventoryDataManager.SendUpdate(player)
+	return true
+end
+
+-- ===================== MOVE TO END (hotbar → grid/overflow) =====================
+--- Remove tool from hotbar and auto-assign to first empty grid slot.
+--- If no empty grid slot, tool becomes overflow.
 local function moveToEnd(player, toolName: string): boolean
 	local state = playerState[player.UserId]
 	if not state then
 		return false
 	end
 
-	-- Find the hotbar slot
-	local slot
-	for i = 1, MAX_HOTBAR_SLOTS do
-		if state.hotbarSlots[i] == toolName then
-			slot = i
-			break
-		end
-	end
-
-	if not slot then
+	-- Find and clear the hotbar slot
+	local hotbarIdx = findHotbarSlotForTool(state, toolName)
+	if not hotbarIdx then
 		return false
 	end
 
-	-- Remove and shift left
-	state.hotbarSlots[slot] = nil
-	for i = slot, MAX_HOTBAR_SLOTS - 1 do
-		state.hotbarSlots[i] = state.hotbarSlots[i + 1]
+	state.hotbarSlots[hotbarIdx] = nil
+
+	-- Auto-assign to first empty grid slot
+	local emptySlot = findFirstEmptyGridSlot(state)
+	if emptySlot then
+		state.gridSlots[emptySlot] = toolName
 	end
-	state.hotbarSlots[MAX_HOTBAR_SLOTS] = nil
+	-- If no empty slot, tool becomes overflow (autoFillGrid in SendUpdate handles edge cases)
 
 	InventoryDataManager.SendUpdate(player)
 	return true
@@ -571,6 +781,7 @@ local function saveInventoryToProfile(player)
 
 	invData.items = items
 	invData.hotbarSlots = state.hotbarSlots
+	invData.gridSlots = state.gridSlots
 	invData.toolOrder = state.toolOrder
 	invData.nextOrderIndex = state.nextOrderIndex
 end
@@ -587,6 +798,7 @@ local function loadInventoryFromProfile(player)
 		toolOrder = invData.toolOrder or {},
 		nextOrderIndex = invData.nextOrderIndex or 1,
 		hotbarSlots = invData.hotbarSlots or {},
+		gridSlots = invData.gridSlots or {},
 	}
 
 	-- Spawn Tool clones from saved items
@@ -603,6 +815,22 @@ local function loadInventoryFromProfile(player)
 		else
 			warn("[InventoryDataManager] Saved tool not found in ServerStorage: " .. tostring(toolName))
 		end
+	end
+
+	-- ── Migration: existing players without gridSlots ──
+	-- If gridSlots is empty but items exist, auto-assign them in toolOrder.
+	local state = playerState[player.UserId]
+	local hasAnyGridSlot = false
+	for i = 1, GRID_SLOTS do
+		if state.gridSlots[i] then
+			hasAnyGridSlot = true
+			break
+		end
+	end
+
+	if not hasAnyGridSlot then
+		-- Auto-fill grid from all non-hotbar items
+		autoFillGrid(player)
 	end
 end
 
@@ -691,6 +919,13 @@ AssignHotbarFunc.OnServerInvoke = function(player, slotIndex, toolName)
 		return false
 	end
 	return assignHotbar(player, slotIndex, toolName)
+end
+
+AssignGridSlotFunc.OnServerInvoke = function(player, gridIndex, toolName)
+	if type(gridIndex) ~= "number" or type(toolName) ~= "string" then
+		return false
+	end
+	return assignGridSlot(player, gridIndex, toolName)
 end
 
 DropItemFunc.OnServerInvoke = function(player, toolName)

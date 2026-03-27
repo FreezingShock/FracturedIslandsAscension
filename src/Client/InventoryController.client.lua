@@ -4,10 +4,16 @@
 --
 --  Client-side inventory system for Fractured Islands: Ascension.
 --
---  REWRITTEN: Inventory slots now live inside the CentralizedMenu's
---  Inventory frame (innerFrame > Inventory > InventoryFrame).
---  Hotbar stays in CustomInventory ScreenGui.
---  Slot 9 is a permanent "Menu" button that opens the full Nexus menu.
+--  REWRITTEN: 27-slot grid system (Minecraft-style).
+--  - 27 permanent blank slots always visible in inventory panel
+--  - Items fill grid slots; blanks show where items CAN go
+--  - Overflow items (28+) appear below the grid when all 27 full
+--  - Drag item onto blank = place it there (server-persisted)
+--  - Blank slots cannot be dragged
+--  - Auto-condense: overflow auto-fills empty grid slots server-side
+--
+--  Hotbar stays in CustomInventory ScreenGui (unchanged).
+--  Slot 9 is a permanent "Menu" button.
 --  E key toggles inventory-only mode.
 --  Drag works cross-ScreenGui via AbsolutePosition hit testing.
 -- ============================================================
@@ -61,6 +67,7 @@ local EquipToolFunc = ReplicatedStorage:WaitForChild("EquipTool")
 local EquipToolByNameFunc = ReplicatedStorage:WaitForChild("EquipToolByName")
 local SwapItemsFunc = ReplicatedStorage:WaitForChild("SwapItems")
 local AssignHotbarFunc = ReplicatedStorage:WaitForChild("AssignHotbar")
+local AssignGridSlotFunc = ReplicatedStorage:WaitForChild("AssignGridSlot")
 local DropItemFunc = ReplicatedStorage:WaitForChild("DropItem")
 local MoveToEndFunc = ReplicatedStorage:WaitForChild("MoveToEnd")
 
@@ -85,6 +92,11 @@ local transferContainer = hotbarGui:WaitForChild("Transfer")
 local transferFrame = transferContainer:WaitForChild("TransferFrame")
 local transferLabel = transferFrame:WaitForChild("TransferLabel")
 local transferBG = transferFrame:WaitForChild("BG")
+
+-- ===================== CONSTANTS =====================
+local GRID_SLOTS = 27
+local MAX_HOTBAR = 9
+local MENU_SLOT = 9 -- Slot 9 is permanently "Menu"
 
 -- ===================== TWEEN CONFIG =====================
 local TWEEN_QUINT = TweenInfo.new(0.4, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
@@ -116,6 +128,10 @@ local DARKEN_FACTOR = 0.7
 local LIGHTEN_FACTOR = 0.7
 local BLACK = Color3.new(0, 0, 0)
 local WHITE = Color3.new(1, 1, 1)
+
+-- ===================== BLANK SLOT CONFIG =====================
+local BLANK_TRANSPARENCY = 0.6
+local BLANK_RARITY = ItemRegistry.getRarity(0) -- Common gray
 
 -- ===================== TRANSFER FRAME FUNCTIONS =====================
 local function _setTransferColors(frameColor, textColor, instant)
@@ -199,9 +215,10 @@ end
 local inventoryVisible = false
 local currentEquippedTool = nil
 
--- Data from server
+-- Data from server (new payload format)
 local currentHotbarData = {} -- { [1..9] = toolInfo or false }
-local currentInventoryData = {} -- { toolInfo, ... }
+local currentGridData = {} -- { [1..27] = toolInfo or nil } (sparse)
+local currentOverflowData = {} -- { toolInfo, ... } (dense)
 local currentTotalItems = 0
 local currentMaxCapacity = 1000
 
@@ -216,9 +233,8 @@ local mobileSelectedSlot = nil
 
 -- Slot pools
 local hotbarSlots = {} -- [1..9] = { frame, toolInfo, hovered }
-local inventoryPool = {} -- array of { frame, toolInfo, hovered, inUse }
-local MAX_HOTBAR = 9
-local MENU_SLOT = 9 -- Slot 9 is permanently "Menu"
+local gridPool = {} -- [1..27] = { frame, toolInfo, hovered, isBlank }
+local overflowPool = {} -- array of { frame, toolInfo, hovered, inUse }
 
 -- Active highlight during drag
 local highlightedSlot = nil
@@ -302,6 +318,32 @@ local function updateSlotVisual(slotFrame, toolInfo, isEquipped, isHovered)
 		baseColor = baseColor:Lerp(WHITE, LIGHTEN_FACTOR)
 	end
 	slotFrame.BackgroundColor3 = baseColor
+end
+
+--- Render a grid slot as blank (empty placeholder).
+local function renderSlotBlank(slotFrame)
+	slotFrame.ToolName.Text = ""
+	slotFrame.StackNum.Text = ""
+	slotFrame.RarityLabel.Text = ""
+	slotFrame.UIStroke.Color = BLANK_RARITY.color
+	slotFrame.BackgroundColor3 = BLANK_RARITY.bgColor
+	slotFrame.BackgroundTransparency = BLANK_TRANSPARENCY
+	slotFrame.Visible = true
+	slotFrame.Swap.Visible = false
+end
+
+--- Render a grid/overflow slot as filled with an item.
+local function renderSlotFilled(slotFrame, toolInfo, isHovered)
+	local rarityConf = ItemRegistry.getRarity(toolInfo.rarity or 0)
+	slotFrame.ToolName.Text = toolInfo.displayName or toolInfo.name
+	slotFrame.StackNum.Text = tostring(toolInfo.count) .. "x"
+	slotFrame.RarityLabel.Text = rarityConf.display
+	slotFrame.RarityLabel.TextColor3 = rarityConf.color
+	slotFrame.UIStroke.Color = rarityConf.color
+	slotFrame.BackgroundColor3 = isHovered and rarityConf.bgColor:Lerp(WHITE, LIGHTEN_FACTOR) or rarityConf.bgColor
+	slotFrame.BackgroundTransparency = 0.3
+	slotFrame.Visible = true
+	slotFrame.Swap.Visible = false
 end
 
 -- ===================== SLOT 9 — PERMANENT MENU BUTTON =====================
@@ -416,14 +458,67 @@ if dropShadow then
 	hotbarBB:GetPropertyChangedSignal("AbsoluteSize"):Connect(tweenDropShadow)
 end
 
--- ===================== INVENTORY SLOT POOL =====================
-local function getOrCreateInventorySlot(index)
-	if inventoryPool[index] then
-		return inventoryPool[index]
+-- ===================== GRID SLOT CREATION (27 slots, once at init) =====================
+local function createGridSlots()
+	for i = 1, GRID_SLOTS do
+		local newSlot = slotTemplate:Clone()
+		newSlot.Name = "GridSlot" .. i
+		newSlot.LayoutOrder = i
+		newSlot.SlotNum.Visible = false
+		newSlot.Parent = inventoryFrame
+		newSlot.Swap.Visible = false
+
+		local slotData = {
+			frame = newSlot,
+			toolInfo = nil,
+			hovered = false,
+			isBlank = true,
+		}
+		gridPool[i] = slotData
+
+		LiquidGlassHandler.apply(newSlot, {
+			SeparatedBorderOutline = {
+				enabled = true,
+				offset = 4,
+				thickness = 2,
+				color = Color3.fromRGB(255, 255, 255),
+			},
+		})
+
+		-- Start as blank
+		renderSlotBlank(newSlot)
+
+		-- ── Hover connections (wired once, never re-wired) ──
+		newSlot.MouseEnter:Connect(function()
+			slotData.hovered = true
+			if slotData.toolInfo then
+				local rarityConf = ItemRegistry.getRarity(slotData.toolInfo.rarity or 0)
+				newSlot.BackgroundColor3 = rarityConf.bgColor:Lerp(WHITE, LIGHTEN_FACTOR)
+				showItemTooltip(slotData.toolInfo)
+			end
+			-- Blank slots: no hover visual change, no tooltip
+		end)
+
+		newSlot.MouseLeave:Connect(function()
+			slotData.hovered = false
+			if slotData.toolInfo then
+				local rarityConf = ItemRegistry.getRarity(slotData.toolInfo.rarity or 0)
+				newSlot.BackgroundColor3 = rarityConf.bgColor
+			end
+			hideItemTooltip()
+		end)
+	end
+end
+
+-- ===================== OVERFLOW SLOT POOL =====================
+local function getOrCreateOverflowSlot(index)
+	if overflowPool[index] then
+		return overflowPool[index]
 	end
 
 	local newSlot = slotTemplate:Clone()
-	newSlot.Name = "InventorySlot" .. index
+	newSlot.Name = "OverflowSlot" .. index
+	newSlot.LayoutOrder = GRID_SLOTS + index -- after grid slots
 	newSlot.SlotNum.Visible = false
 	newSlot.Parent = inventoryFrame
 	newSlot.Visible = false
@@ -435,7 +530,8 @@ local function getOrCreateInventorySlot(index)
 		hovered = false,
 		inUse = false,
 	}
-	inventoryPool[index] = slotData
+	overflowPool[index] = slotData
+
 	LiquidGlassHandler.apply(newSlot, {
 		SeparatedBorderOutline = {
 			enabled = true,
@@ -466,6 +562,13 @@ local function getOrCreateInventorySlot(index)
 	return slotData
 end
 
+-- ===================== SCROLLING LOGIC =====================
+local function updateScrolling()
+	local mode = MenuBridge.getMode()
+	local hasOverflow = #currentOverflowData > 0
+	inventoryFrame.ScrollingEnabled = (mode == "full") or hasOverflow
+end
+
 -- ===================== REFRESH DISPLAY =====================
 local function refreshHotbar()
 	for i = 1, MAX_HOTBAR do
@@ -493,34 +596,47 @@ local function refreshInventory()
 		return
 	end
 
-	-- Update pool slots
-	for i, toolInfo in ipairs(currentInventoryData) do
-		local slotData = getOrCreateInventorySlot(i)
-		slotData.toolInfo = toolInfo
-		slotData.inUse = true
+	-- ── Grid slots 1-27 ──
+	for i = 1, GRID_SLOTS do
+		local slotData = gridPool[i]
+		-- Server sends false for blanks (dense array); normalize to nil
+		local toolInfo = currentGridData[i]
+		if toolInfo == false then
+			toolInfo = nil
+		end
 
-		local rarityConf = ItemRegistry.getRarity(toolInfo.rarity or 0)
-		slotData.frame.ToolName.Text = toolInfo.displayName or toolInfo.name
-		slotData.frame.StackNum.Text = tostring(toolInfo.count) .. "x"
-		slotData.frame.RarityLabel.Text = rarityConf.display
-		slotData.frame.RarityLabel.TextColor3 = rarityConf.color
-		slotData.frame.UIStroke.Color = rarityConf.color
-		slotData.frame.BackgroundColor3 = slotData.hovered and rarityConf.bgColor:Lerp(WHITE, LIGHTEN_FACTOR)
-			or rarityConf.bgColor
-		slotData.frame.BackgroundTransparency = 0.3
-		slotData.frame.Visible = true
-		slotData.frame.Swap.Visible = false
+		slotData.toolInfo = toolInfo
+
+		if toolInfo then
+			slotData.isBlank = false
+			renderSlotFilled(slotData.frame, toolInfo, slotData.hovered)
+		else
+			slotData.isBlank = true
+			renderSlotBlank(slotData.frame)
+		end
 	end
 
-	-- Hide unused pool slots
-	for i = #currentInventoryData + 1, #inventoryPool do
-		local slotData = inventoryPool[i]
+	-- ── Overflow slots (28+) ──
+	for i, toolInfo in ipairs(currentOverflowData) do
+		local slotData = getOrCreateOverflowSlot(i)
+		slotData.toolInfo = toolInfo
+		slotData.inUse = true
+		renderSlotFilled(slotData.frame, toolInfo, slotData.hovered)
+	end
+
+	-- Hide unused overflow pool slots
+	for i = #currentOverflowData + 1, #overflowPool do
+		local slotData = overflowPool[i]
 		slotData.toolInfo = nil
 		slotData.inUse = false
 		slotData.frame.Visible = false
 	end
 
+	-- ── Capacity label ──
 	capacityLabel.Text = tostring(currentTotalItems) .. "/" .. tostring(currentMaxCapacity)
+
+	-- ── Scrolling ──
+	updateScrolling()
 end
 
 local function refreshAll()
@@ -558,6 +674,8 @@ player.CharacterAdded:Connect(setupCharacterEquipTracking)
 
 -- ===================== DRAG SYSTEM =====================
 
+--- Find a slot at the given screen position.
+--- Returns: slotData, location ("hotbar"|"grid"|"overflow"|nil), index, isBlank
 local function findSlotAtPosition(screenPos)
 	-- Check hotbar slots (1-8, skip menu slot 9)
 	for i = 1, MAX_HOTBAR - 1 do
@@ -571,14 +689,31 @@ local function findSlotAtPosition(screenPos)
 				and screenPos.Y >= absPos.Y
 				and screenPos.Y <= absPos.Y + absSize.Y
 			then
-				return slotData, true, i
+				return slotData, "hotbar", i, false
 			end
 		end
 	end
 
-	-- Check inventory slots (only when visible)
+	-- Check grid slots (always visible when inventory is open)
 	if inventoryVisible then
-		for i, slotData in ipairs(inventoryPool) do
+		for i = 1, GRID_SLOTS do
+			local slotData = gridPool[i]
+			if slotData.frame.Visible then
+				local absPos = slotData.frame.AbsolutePosition
+				local absSize = slotData.frame.AbsoluteSize
+				if
+					screenPos.X >= absPos.X
+					and screenPos.X <= absPos.X + absSize.X
+					and screenPos.Y >= absPos.Y
+					and screenPos.Y <= absPos.Y + absSize.Y
+				then
+					return slotData, "grid", i, slotData.isBlank
+				end
+			end
+		end
+
+		-- Check overflow slots
+		for i, slotData in ipairs(overflowPool) do
 			if slotData.inUse and slotData.frame.Visible then
 				local absPos = slotData.frame.AbsolutePosition
 				local absSize = slotData.frame.AbsoluteSize
@@ -588,13 +723,13 @@ local function findSlotAtPosition(screenPos)
 					and screenPos.Y >= absPos.Y
 					and screenPos.Y <= absPos.Y + absSize.Y
 				then
-					return slotData, false, i
+					return slotData, "overflow", i, false
 				end
 			end
 		end
 	end
 
-	return nil, nil, nil
+	return nil, nil, nil, false
 end
 
 local function isOverInventoryArea(screenPos)
@@ -655,6 +790,8 @@ end
 local function _cleanupDrag()
 	if dragState then
 		if dragState.sourceFrame then
+			-- Restore appropriate transparency based on whether source was grid-blank
+			-- (filled slots = 0.3, but refreshAll will correct this anyway)
 			dragState.sourceFrame.BackgroundTransparency = 0.3
 		end
 		if dragState.ghost then
@@ -667,15 +804,14 @@ local function _cleanupDrag()
 	refreshHotbar()
 end
 
-local function _startDragOnSlot(toolInfo, slotFrame, isHotbar, slotIndex, mousePos)
+local function _startDragOnSlot(toolInfo, slotFrame, location, slotIndex, mousePos)
 	if not toolInfo then
 		return
 	end
 
 	-- Block drag when inventory panel is closed — click-to-equip only
-	-- Exception: hotbar drag in inventory-only mode shows transfer frame
 	if not inventoryVisible then
-		if isHotbar and slotIndex then
+		if location == "hotbar" and slotIndex then
 			EquipToolFunc:InvokeServer(slotIndex)
 		else
 			EquipToolByNameFunc:InvokeServer(toolInfo.name)
@@ -686,7 +822,7 @@ local function _startDragOnSlot(toolInfo, slotFrame, isHotbar, slotIndex, mouseP
 
 	-- Show transfer frame when dragging from hotbar in inventory-only mode (no nexus grid)
 	local currentMode = MenuBridge.getMode()
-	if isHotbar and currentMode == "inventory" then
+	if location == "hotbar" and currentMode == "inventory" then
 		_showTransferFrame()
 	end
 
@@ -696,7 +832,7 @@ local function _startDragOnSlot(toolInfo, slotFrame, isHotbar, slotIndex, mouseP
 	dragState = {
 		toolName = toolInfo.name,
 		sourceFrame = slotFrame,
-		isHotbar = isHotbar,
+		sourceLocation = location, -- "hotbar", "grid", "overflow"
 		slotIndex = slotIndex,
 		ghost = nil,
 		startPos = mousePos,
@@ -729,7 +865,7 @@ local function onDragMove(mousePos)
 
 	-- Hit test uses viewport-relative coords (matches AbsolutePosition)
 	local screenPos = Vector2.new(mousePos.X, mousePos.Y)
-	local targetSlot, _, _ = findSlotAtPosition(screenPos)
+	local targetSlot, _, _, _ = findSlotAtPosition(screenPos)
 	if targetSlot and targetSlot.frame ~= dragState.sourceFrame then
 		_setDragHighlight(targetSlot.frame, true)
 		_updateTransferHover(false)
@@ -750,16 +886,16 @@ local function onDragEnd(mousePos)
 
 	local wasDragging = dragState.isDragging
 	local toolName = dragState.toolName
-	local sourceIsHotbar = dragState.isHotbar
+	local sourceLocation = dragState.sourceLocation
 	local sourceSlotIndex = dragState.slotIndex
 
 	-- Hit test BEFORE cleanup (cleanup hides empty hotbar slots)
-	local targetSlot, targetIsHotbar, targetSlotIndex
+	local targetSlot, targetLocation, targetSlotIndex, targetIsBlank
 	local overInventory = false
 	local overTransfer = false
 	if wasDragging then
 		local adjustedPos = Vector2.new(mousePos.X, mousePos.Y)
-		targetSlot, targetIsHotbar, targetSlotIndex = findSlotAtPosition(adjustedPos)
+		targetSlot, targetLocation, targetSlotIndex, targetIsBlank = findSlotAtPosition(adjustedPos)
 		overInventory = isOverInventoryArea(adjustedPos)
 		overTransfer = _isOverTransferFrame(adjustedPos)
 	end
@@ -768,8 +904,9 @@ local function onDragEnd(mousePos)
 	_hideTransferFrame()
 	suppressTooltip = false
 
+	-- ── Click (no drag) → equip/toggle ──
 	if not wasDragging then
-		if sourceIsHotbar and sourceSlotIndex then
+		if sourceLocation == "hotbar" and sourceSlotIndex then
 			EquipToolFunc:InvokeServer(sourceSlotIndex)
 		else
 			EquipToolByNameFunc:InvokeServer(toolName)
@@ -778,32 +915,61 @@ local function onDragEnd(mousePos)
 		return
 	end
 
+	-- ── Drag completed → determine action ──
+
+	-- Dropped on transfer frame → move hotbar item to inventory
 	if overTransfer then
 		MoveToEndFunc:InvokeServer(toolName)
 		if selectSound2 then
 			selectSound2:Play()
 		end
-	elseif targetSlot and targetSlot.toolInfo then
+		return
+	end
+
+	-- Dropped on a blank grid slot → assign to that grid position
+	if targetSlot and targetIsBlank and targetLocation == "grid" then
+		AssignGridSlotFunc:InvokeServer(targetSlotIndex, toolName)
+		if selectSound2 then
+			selectSound2:Play()
+		end
+		return
+	end
+
+	-- Dropped on a filled slot (grid, overflow, or hotbar with item) → swap
+	if targetSlot and targetSlot.toolInfo then
+		-- Hotbar target with item → swap via SwapItemsFunc
+		-- Grid target with item → swap via SwapItemsFunc
+		-- Overflow target with item → swap via SwapItemsFunc
 		SwapItemsFunc:InvokeServer(toolName, targetSlot.toolInfo.name)
 		if selectSound2 then
 			selectSound2:Play()
 		end
-	elseif targetSlot and targetIsHotbar and not targetSlot.toolInfo then
+		return
+	end
+
+	-- Dropped on empty hotbar slot → assign to hotbar
+	if targetSlot and targetLocation == "hotbar" and not targetSlot.toolInfo then
 		AssignHotbarFunc:InvokeServer(targetSlotIndex, toolName)
 		if selectSound2 then
 			selectSound2:Play()
 		end
-	elseif overInventory then
-		if sourceIsHotbar then
+		return
+	end
+
+	-- Dropped over inventory area (not on a specific slot) → hotbar item transfers
+	if overInventory then
+		if sourceLocation == "hotbar" then
 			MoveToEndFunc:InvokeServer(toolName)
 			if selectSound2 then
 				selectSound2:Play()
 			end
 		end
-	else
-		DropItemFunc:InvokeServer(toolName)
-		UIClick:Play()
+		return
 	end
+
+	-- Dropped outside everything → drop item to world
+	DropItemFunc:InvokeServer(toolName)
+	UIClick:Play()
 end
 
 -- ===================== MOBILE TAP SYSTEM =====================
@@ -815,9 +981,26 @@ local function clearMobileSelection()
 	mobileSelectedSlot = nil
 end
 
-local function handleMobileTap(toolInfo, slotFrame, isHotbar, slotIndex)
+local function handleMobileTap(toolInfo, slotFrame, location, slotIndex, isBlank)
+	-- Tapping a blank slot with a selection → assign to that grid slot
+	if isBlank and location == "grid" and mobileSelectedName then
+		AssignGridSlotFunc:InvokeServer(slotIndex, mobileSelectedName)
+		if selectSound2 then
+			selectSound2:Play()
+		end
+		clearMobileSelection()
+		return
+	end
+
+	-- Tapping a blank slot without selection → do nothing
+	if isBlank then
+		clearMobileSelection()
+		return
+	end
+
+	-- Tapping empty hotbar slot with selection → assign to hotbar
 	if not toolInfo then
-		if mobileSelectedName and isHotbar and slotIndex then
+		if mobileSelectedName and location == "hotbar" and slotIndex then
 			AssignHotbarFunc:InvokeServer(slotIndex, mobileSelectedName)
 			if selectSound2 then
 				selectSound2:Play()
@@ -829,6 +1012,7 @@ local function handleMobileTap(toolInfo, slotFrame, isHotbar, slotIndex)
 		return
 	end
 
+	-- Tapping a filled slot
 	if mobileSelectedName then
 		if mobileSelectedName == toolInfo.name then
 			clearMobileSelection()
@@ -876,19 +1060,52 @@ local function wireHotbarSlotInput(slotIndex)
 		end
 
 		if isMobile then
-			handleMobileTap(slotData.toolInfo, slotData.frame, true, slotIndex)
+			handleMobileTap(slotData.toolInfo, slotData.frame, "hotbar", slotIndex, false)
 			return
 		end
 
 		local rawMouse = UserInputService:GetMouseLocation()
 		local inset = GuiService:GetGuiInset()
 		local mousePos = Vector2.new(rawMouse.X, rawMouse.Y - inset.Y)
-		_startDragOnSlot(slotData.toolInfo, slotData.frame, true, slotIndex, mousePos)
+		_startDragOnSlot(slotData.toolInfo, slotData.frame, "hotbar", slotIndex, mousePos)
 	end)
 end
 
-local function wireInventorySlotInput(poolIndex)
-	local slotData = inventoryPool[poolIndex]
+local function wireGridSlotInput(gridIndex)
+	local slotData = gridPool[gridIndex]
+	local selectBtn = slotData.frame:WaitForChild("Select")
+
+	selectBtn.MouseButton1Down:Connect(function()
+		-- Blank slots: not drag sources, but can receive mobile selection
+		if slotData.isBlank then
+			if isMobile and mobileSelectedName then
+				AssignGridSlotFunc:InvokeServer(gridIndex, mobileSelectedName)
+				if selectSound2 then
+					selectSound2:Play()
+				end
+				clearMobileSelection()
+			end
+			return
+		end
+
+		if not slotData.toolInfo then
+			return
+		end
+
+		if isMobile then
+			handleMobileTap(slotData.toolInfo, slotData.frame, "grid", gridIndex, false)
+			return
+		end
+
+		local rawMouse = UserInputService:GetMouseLocation()
+		local inset = GuiService:GetGuiInset()
+		local mousePos = Vector2.new(rawMouse.X, rawMouse.Y - inset.Y)
+		_startDragOnSlot(slotData.toolInfo, slotData.frame, "grid", gridIndex, mousePos)
+	end)
+end
+
+local function wireOverflowSlotInput(poolIndex)
+	local slotData = overflowPool[poolIndex]
 	local selectBtn = slotData.frame:WaitForChild("Select")
 
 	selectBtn.MouseButton1Down:Connect(function()
@@ -897,24 +1114,24 @@ local function wireInventorySlotInput(poolIndex)
 		end
 
 		if isMobile then
-			handleMobileTap(slotData.toolInfo, slotData.frame, false, poolIndex)
+			handleMobileTap(slotData.toolInfo, slotData.frame, "overflow", poolIndex, false)
 			return
 		end
 
 		local rawMouse = UserInputService:GetMouseLocation()
 		local inset = GuiService:GetGuiInset()
 		local mousePos = Vector2.new(rawMouse.X, rawMouse.Y - inset.Y)
-		_startDragOnSlot(slotData.toolInfo, slotData.frame, false, poolIndex, mousePos)
+		_startDragOnSlot(slotData.toolInfo, slotData.frame, "overflow", poolIndex, mousePos)
 	end)
 end
 
--- Patch getOrCreateInventorySlot to wire input on creation
-local _originalGetOrCreate = getOrCreateInventorySlot
-getOrCreateInventorySlot = function(index)
-	local existed = inventoryPool[index] ~= nil
-	local slotData = _originalGetOrCreate(index)
+-- Patch getOrCreateOverflowSlot to wire input on creation
+local _originalGetOrCreateOverflow = getOrCreateOverflowSlot
+getOrCreateOverflowSlot = function(index)
+	local existed = overflowPool[index] ~= nil
+	local slotData = _originalGetOrCreateOverflow(index)
 	if not existed then
-		wireInventorySlotInput(index)
+		wireOverflowSlotInput(index)
 	end
 	return slotData
 end
@@ -946,7 +1163,7 @@ UserInputService.InputEnded:Connect(function(input)
 		local rawMouse = UserInputService:GetMouseLocation()
 		local inset = GuiService:GetGuiInset()
 		local adjustedPos = Vector2.new(rawMouse.X, rawMouse.Y - inset.Y)
-		local slotData = findSlotAtPosition(adjustedPos)
+		local slotData, _, _, _ = findSlotAtPosition(adjustedPos)
 		if slotData and slotData.toolInfo and not dragState then
 			showItemTooltip(slotData.toolInfo)
 		end
@@ -956,7 +1173,8 @@ end)
 -- ===================== SERVER DATA HANDLER =====================
 UpdateInventoryEvent.OnClientEvent:Connect(function(data)
 	currentHotbarData = data.hotbar or {}
-	currentInventoryData = data.inventory or {}
+	currentGridData = data.gridSlots or {}
+	currentOverflowData = data.overflow or {}
 	currentTotalItems = data.total_items or 0
 	currentMaxCapacity = data.max_capacity or 1000
 
@@ -1037,6 +1255,11 @@ MenuBridge._onStateChanged = function(mode)
 		refreshInventory()
 	end
 
+	-- Update scrolling when mode changes (inventory → full or vice versa)
+	if inventoryVisible then
+		updateScrolling()
+	end
+
 	-- Cleanup drag if menu closes mid-drag
 	if not inventoryVisible and dragState then
 		_cleanupDrag()
@@ -1059,6 +1282,11 @@ end
 createHotbarSlots()
 for i = 1, MAX_HOTBAR do
 	wireHotbarSlotInput(i)
+end
+
+createGridSlots()
+for i = 1, GRID_SLOTS do
+	wireGridSlotInput(i)
 end
 
 hotbarFrame.Visible = true

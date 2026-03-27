@@ -5,10 +5,17 @@
 --  Provides a shared tooltip API used by:
 --    - CentralizedMenuController (grid icon hover)
 --    - SkillsPageModule (skill card + level box hover)
+--    - ProfilePageModule (skill attribute icon tooltips)
 --    - Future page modules
 --
 --  The tooltip follows the cursor via RenderStepped and supports
 --  multiple "sources" so different systems don't clobber each other.
+--
+--  Icon stat lines:
+--    Callers create icon stat lines via API.createIconStatLine().
+--    All clones are auto-destroyed on hide/forceHide/show.
+--    Tail elements (StatsLabel, RewardsLabel, Divider3, ClickLabel)
+--    are bumped via API.adjustForIconCount(n) and reset on cleanup.
 -- ============================================================
 
 local RunService = game:GetService("RunService")
@@ -39,6 +46,9 @@ local TT_ProgressBL = TT_ProgressOuter:WaitForChild("ProgressBarLabel")
 local TT_ProgressLabel = TooltipFrame:WaitForChild("ProgressLabel")
 local TT_Rewards = TooltipFrame:WaitForChild("RewardsLabel")
 
+-- ===================== ICON STAT TEMPLATE =====================
+local IconStatsTemplate = ReplicatedStorage:WaitForChild("IconStatsLabelTemplate")
+
 -- ===================== LIQUID GLASS =====================
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local LiquidGlassHandler = require(Modules:WaitForChild("LiquidGlassHandler"))
@@ -64,9 +74,56 @@ staticOutline.Parent = TooltipFrame
 local TT_OFFSET_X = 18
 local TT_OFFSET_Y = 12
 
+-- ===================== LAYOUT ORDER CONSTANTS =====================
+-- Base LayoutOrders when zero icon stat lines are present.
+-- Icon clones occupy LO 6..6+N-1; tail elements shift by N.
+local ICON_STATS_BASE_LO = 6
+
+local DEFAULT_TAIL_ORDERS = {
+	StatsLabel = 6,
+	RewardsLabel = 7,
+	Divider3 = 8,
+	ClickLabel = 9,
+}
+
+-- ===================== STAT ICON SPRITESHEET =====================
+-- Single spritesheet for all stat/attribute icons.
+-- Icons are arranged in a grid of cellSize × cellSize px cells.
+-- Callers pass { col, row } coordinates to createIconStatLine().
+-- Upload the spritesheet PNG to Roblox and paste the asset ID here.
+local STAT_SPRITESHEET = {
+	assetId = "rbxassetid://85259289985835", -- TODO: replace with uploaded spritesheet asset ID
+	cellSize = 170,
+}
+
 -- ===================== STATE =====================
 local following = false
 local activeSource = nil -- string key identifying who "owns" the tooltip right now
+
+-- ===================== INTERNAL CLEANUP =====================
+
+--- Destroy all IconStatsLabel clones parented to TooltipFrame.
+local function clearIconStats()
+	for _, child in ipairs(TooltipFrame:GetChildren()) do
+		if child.Name == "IconStatsLabel" then
+			child:Destroy()
+		end
+	end
+end
+
+--- Reset tail element LayoutOrders to their defaults (no icon offset).
+local function resetTailOrders()
+	TT_Stats.LayoutOrder = DEFAULT_TAIL_ORDERS.StatsLabel
+	TT_Rewards.LayoutOrder = DEFAULT_TAIL_ORDERS.RewardsLabel
+	TT_Divider3.LayoutOrder = DEFAULT_TAIL_ORDERS.Divider3
+	TT_Click.LayoutOrder = DEFAULT_TAIL_ORDERS.ClickLabel
+end
+
+--- Full icon cleanup — called by hide / forceHide / show.
+local function cleanupIcons()
+	clearIconStats()
+	resetTailOrders()
+end
 
 -- ===================== CURSOR FOLLOW =====================
 RunService.RenderStepped:Connect(function()
@@ -92,6 +149,12 @@ end)
 -- ===================== API =====================
 local API = {}
 
+-- Exposed constant so callers know where icon LOs start.
+API.ICON_STATS_BASE_LO = ICON_STATS_BASE_LO
+
+-- Exposed spritesheet config so callers can reference it directly.
+API.STAT_SPRITESHEET = STAT_SPRITESHEET
+
 -- References to the tooltip frame children, exposed so page modules
 -- can manipulate layout order, visibility, etc. directly when needed.
 API.refs = {
@@ -111,9 +174,93 @@ API.refs = {
 	Rewards = TT_Rewards,
 }
 
+-- ===================== ICON STAT LINE API =====================
+
+--- Clone the IconStatsLabelTemplate, configure it, and parent it
+--- to TooltipFrame.  Returns the clone.
+---
+--- config fields:
+---   icon        : table {col, row} for spritesheet OR string rbxassetid (legacy)
+---   color       : string  — hex color (e.g. "#FF5555")
+---   name        : string  — stat display name
+---   value       : string  — formatted stat value
+---   layoutOrder : number  — LayoutOrder in TooltipFrame
+function API.createIconStatLine(config)
+	local clone = IconStatsTemplate:Clone()
+	clone.Name = "IconStatsLabel"
+	clone.LayoutOrder = config.layoutOrder or ICON_STATS_BASE_LO
+
+	-- Icon image + tint (recursive find as safety net)
+	local img = clone:FindFirstChild("ImageLabel", true)
+	if img then
+		local iconData = config.icon
+		local hexColor = config.color or "#FFFFFF"
+
+		if type(iconData) == "table" then
+			-- Spritesheet coordinates: { col, row }
+			local col = iconData[1] or 0
+			local row = iconData[2] or 0
+			local cs = STAT_SPRITESHEET.cellSize
+			img.Image = STAT_SPRITESHEET.assetId
+			img.ImageRectSize = Vector2.new(cs, cs)
+			img.ImageRectOffset = Vector2.new(col * cs, row * cs)
+			img.ImageColor3 = Color3.fromHex(hexColor)
+			img.ImageTransparency = 0
+		elseif type(iconData) == "string" and iconData ~= "" then
+			-- Legacy direct asset ID
+			img.Image = iconData
+			img.ImageRectSize = Vector2.new(0, 0)
+			img.ImageRectOffset = Vector2.new(0, 0)
+			img.ImageColor3 = Color3.fromHex(hexColor)
+			img.ImageTransparency = 0
+		else
+			-- No icon — hide
+			img.ImageTransparency = 1
+		end
+	end
+
+	-- Stat name + value text (recursive find as safety net)
+	local statLabel = clone:FindFirstChild("StatLabel", true)
+	if statLabel then
+		statLabel.RichText = true
+		statLabel.TextColor3 = Color3.fromHex(config.color or "#FFFFFF")
+		statLabel.Text = string.format('%s <font color="#FFFFFF">%s</font>', config.name or "", config.value or "0")
+	else
+		warn("[TooltipModule] StatLabel not found in IconStatsLabelTemplate clone — check template hierarchy")
+	end
+
+	clone.Parent = TooltipFrame
+	return clone
+end
+
+--- Shift tail elements (StatsLabel, RewardsLabel, Divider3, ClickLabel)
+--- down by `n` to make room for `n` icon stat line clones.
+function API.adjustForIconCount(n)
+	TT_Stats.LayoutOrder = DEFAULT_TAIL_ORDERS.StatsLabel + n
+	TT_Rewards.LayoutOrder = DEFAULT_TAIL_ORDERS.RewardsLabel + n
+	TT_Divider3.LayoutOrder = DEFAULT_TAIL_ORDERS.Divider3 + n
+	TT_Click.LayoutOrder = DEFAULT_TAIL_ORDERS.ClickLabel + n
+end
+
+--- Manually clear all icon stat clones (callers rarely need this
+--- directly — hide/forceHide/show handle it automatically).
+function API.clearIconStats()
+	clearIconStats()
+end
+
+--- Manually reset tail LayoutOrders to defaults.
+function API.resetTailOrders()
+	resetTailOrders()
+end
+
+-- ===================== SHOW / HIDE API =====================
+
 --- Show a simple tooltip (grid icons, sidebar, etc.)
 --- data = { title, desc, stats?, click?, divider? (1 or 2) }
 function API.show(data, source)
+	-- Clean up any icon clones from a previous tooltip owner
+	cleanupIcons()
+
 	source = source or "generic"
 	activeSource = source
 	following = true
@@ -164,6 +311,9 @@ function API.hide(source)
 		glassHandle.setEnabled(false)
 	end
 
+	-- Clean up icon clones and reset layout
+	cleanupIcons()
+
 	-- Reset visibility of optional elements
 	TT_ProgressOuter.Visible = false
 	TT_ProgressLabel.Visible = false
@@ -181,6 +331,10 @@ function API.forceHide()
 		glassHandle.setEnabled(false)
 	end
 	staticOutline.Transparency = 1
+
+	-- Clean up icon clones and reset layout
+	cleanupIcons()
+
 	TT_ProgressOuter.Visible = false
 	TT_ProgressLabel.Visible = false
 	TT_Rewards.Visible = false
