@@ -37,13 +37,13 @@ ProfileConfig.SKILL_COLORS = {
 	Foraging = "#00AA00",
 	Fishing = "#00AAAA",
 	Mining = "#5555FF",
-	Combat = "#FF5555",
-	General = "#555555",
+	Misc = "#FFFF55",
+	General = "#FFFFFF",
 }
 
 -- ===================== SKILL DISPLAY ORDER =====================
 -- Controls iteration order for tooltip summaries and sub-grid lists.
-ProfileConfig.SKILL_DISPLAY_ORDER = { "Farming", "Foraging", "Mining", "Fishing", "Combat", "General" }
+ProfileConfig.SKILL_DISPLAY_ORDER = { "General", "Farming", "Foraging", "Mining", "Fishing", "Misc" }
 
 -- ===================== ATTRIBUTE CATEGORIES =====================
 -- Each skill maps to an ordered array of attribute definitions.
@@ -188,34 +188,27 @@ ProfileConfig.ATTRIBUTE_CATEGORIES = {
 	},
 
 	-- ═════════════════ COMBAT ═════════════════
-	Combat = {
+	Misc = {
 		{
-			key = "CombatFortune",
-			name = "Combat Fortune",
-			color = "#FFAA00",
-			icon = { 0, 2 }, -- Diamond
-			description = "Increases bonus loot from combat encounters.",
+			key = "Speed",
+			name = "Speed",
+			color = "#FFFFFF",
+			icon = { 2, 0 }, -- SmallStar
+			description = "Increases movement speed.",
 		},
 		{
-			key = "CombatSpeed",
-			name = "Combat Speed",
-			color = "#FFFF55",
-			icon = { 2, 0 }, -- Swords
-			description = "Increases attack speed in combat.",
+			key = "JumpHeight",
+			name = "Jump Height",
+			color = "#55FF55",
+			icon = { 0, 0 }, -- ArrowUp
+			description = "Increases jump height.",
 		},
 		{
-			key = "CombatCritChance",
-			name = "Combat Crit Chance",
-			color = "#5555FF",
-			icon = { 4, 1 }, -- Starburst
-			description = "Chance to land a critical hit.",
-		},
-		{
-			key = "CombatCritIncrease",
-			name = "Combat Crit Increase",
-			color = "#5555FF",
-			icon = { 3, 0 },
-			description = "Increases critical hit damage.",
+			key = "MagicFind",
+			name = "Magic Find",
+			color = "#55FFFF",
+			icon = { 2, 1 }, -- Swirl
+			description = "Boosts rare drop chance across all skills.",
 		},
 	},
 
@@ -236,32 +229,18 @@ ProfileConfig.ATTRIBUTE_CATEGORIES = {
 			description = "Increases maximum defense.",
 		},
 		{
-			key = "Speed",
-			name = "Speed",
+			key = "TrueDefense",
+			name = "True Defense",
 			color = "#FFFFFF",
-			icon = { 2, 0 }, -- SmallStar
-			description = "Increases movement speed.",
+			icon = { 5, 0 }, -- Shield
+			description = "Increases true defense.",
 		},
 		{
-			key = "JumpHeight",
-			name = "Jump Height",
-			color = "#55FF55",
-			icon = { 0, 0 }, -- ArrowUp
-			description = "Increases jump height.",
-		},
-		{
-			key = "PressSpeed",
-			name = "Press Speed",
-			color = "#FFAA00",
-			icon = { 3, 1 }, -- Cross
-			description = "Increases button presses per second.",
-		},
-		{
-			key = "MagicFind",
-			name = "Magic Find",
-			color = "#55FFFF",
-			icon = { 2, 1 }, -- Swirl
-			description = "Boosts rare drop chance across all skills.",
+			key = "Strength",
+			name = "Strength",
+			color = "#FF5555",
+			icon = { 4, 0 }, -- Heart
+			description = "Increases maximum strength.",
 		},
 		{
 			key = "CritChance",
@@ -276,6 +255,13 @@ ProfileConfig.ATTRIBUTE_CATEGORIES = {
 			color = "#5555FF",
 			icon = { 3, 0 }, -- Starburst
 			description = "Increases critical hit damage.",
+		},
+		{
+			key = "PressSpeed",
+			name = "Bonus Press Speed",
+			color = "#FFFF55",
+			icon = { 3, 1 }, -- Cross
+			description = "Increases button presses per second.",
 		},
 	},
 }
@@ -301,7 +287,7 @@ ProfileConfig.ARMOR_SLOTS = {
 -- Row 0: [B][B][B][B][MyProfile][B][B][B][B]
 -- Row 1: [B][Helmet][B][B][B][B][B][B][B]
 -- Row 2: [B][Chestplate][B][B][AethericNexus][Farming][Foraging][Mining][B]
--- Row 3: [B][Leggings][B][B][Milestones][Combat][Fishing][General][B]
+-- Row 3: [B][Leggings][B][B][Milestones][Misc][Fishing][General][B]
 -- Row 4: [B][Boots][B][B][B][B][B][B][B]
 -- Row 5: [B][B][B][BackButton][CloseSlot][Bank][B][B][B]
 --
@@ -329,8 +315,8 @@ ProfileConfig.PROFILE_ITEM_ORDERS = {
 	-- Row 3: armor + skills bottom row
 	Leggings = 28,
 	Milestones = 31,
-	MiningAttributes = 32,
-	CombatAttributes = 33,
+	MiningAttributes = 33,
+	MiscAttributes = 32,
 	FishingAttributes = 34,
 
 	-- Row 4: armor end
@@ -381,7 +367,7 @@ ProfileConfig.SKILL_BUTTON_MAP = {
 	Foraging = "ForagingAttributes",
 	Mining = "MiningAttributes",
 	Fishing = "FishingAttributes",
-	Combat = "CombatAttributes",
+	Misc = "MiscAttributes",
 	General = "GeneralAttributes",
 }
 
