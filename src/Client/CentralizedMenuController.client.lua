@@ -28,7 +28,6 @@ local outerFrame = BoundingBox:WaitForChild("outerFrame")
 local innerFrame = outerFrame:WaitForChild("innerFrame")
 local menuClip = innerFrame:WaitForChild("MenuClip")
 local menuFrame = innerFrame:WaitForChild("MenuClip"):WaitForChild("Menu")
-local NexusMenu = menuFrame:WaitForChild("NexusMenu")
 local topBarFrame = innerFrame:WaitForChild("topBarFrame")
 local menuTitleLabel = topBarFrame:WaitForChild("MenuTitleLabel")
 local inventoryPanel = innerFrame:WaitForChild("Inventory")
@@ -36,6 +35,8 @@ local inventoryFrame = inventoryPanel:WaitForChild("InventoryFrame")
 local inventoryGridLayout = inventoryFrame:WaitForChild("UIGridLayout")
 
 local TemporaryMenus = CentralizedMenu:WaitForChild("TemporaryMenus")
+local GridTemplates = ReplicatedStorage:WaitForChild("GridTemplates")
+statSlotTemplate = TemporaryMenus:FindFirstChild("StatSlot")
 local Sidebar = playerGui:WaitForChild("Sidebar")
 local SidebarBB = Sidebar:WaitForChild("SidebarBB")
 local NexusBtn = SidebarBB:WaitForChild("Nexus")
@@ -158,9 +159,10 @@ local function typewriteTitle(text, speed)
 	speed = speed or 0.03
 	local token = {}
 	titleTypewriteToken = token
+	menuTitleLabel.RichText = true
 	menuTitleLabel.Text = text
 	menuTitleLabel.MaxVisibleGraphemes = 0
-	local length = utf8.len(text) or #text
+	local length = utf8.len(menuTitleLabel.ContentText) or #menuTitleLabel.ContentText
 	task.spawn(function()
 		for i = 1, length do
 			if titleTypewriteToken ~= token then
@@ -178,6 +180,7 @@ end
 
 local function setTitleInstant(text)
 	titleTypewriteToken = nil
+	menuTitleLabel.RichText = true
 	menuTitleLabel.Text = text
 	menuTitleLabel.MaxVisibleGraphemes = -1
 end
@@ -755,12 +758,54 @@ local PROFILE_BUTTONS = {
 		},
 		action = nil,
 	},
-	FarmingAttributes = { action = nil },
-	ForagingAttributes = { action = nil },
-	MiningAttributes = { action = nil },
-	CombatAttributes = { action = nil },
-	FishingAttributes = { action = nil },
-	GeneralAttributes = { action = nil },
+	FarmingAttributes = {
+		action = "callback",
+		callback = function()
+			ProfilePageModule.openAttributeGrid("Farming")
+			GridMenuModule.navigateToGrid("ProfileMenu2")
+			typewriteTitle('<font color="#FFAA00">Farming</font> Attributes')
+		end,
+	},
+	ForagingAttributes = {
+		action = "callback",
+		callback = function()
+			ProfilePageModule.openAttributeGrid("Foraging")
+			GridMenuModule.navigateToGrid("ProfileMenu2")
+			typewriteTitle('<font color="#00AA00">Foraging</font> Attributes')
+		end,
+	},
+	MiningAttributes = {
+		action = "callback",
+		callback = function()
+			ProfilePageModule.openAttributeGrid("Mining")
+			GridMenuModule.navigateToGrid("ProfileMenu2")
+			typewriteTitle('<font color="#5555FF">Mining</font> Attributes')
+		end,
+	},
+	MiscAttributes = {
+		action = "callback",
+		callback = function()
+			ProfilePageModule.openAttributeGrid("Misc")
+			GridMenuModule.navigateToGrid("ProfileMenu2")
+			typewriteTitle('<font color="#FFFF55">Misc</font> Attributes')
+		end,
+	},
+	FishingAttributes = {
+		action = "callback",
+		callback = function()
+			ProfilePageModule.openAttributeGrid("Fishing")
+			GridMenuModule.navigateToGrid("ProfileMenu2")
+			typewriteTitle('<font color="#00AAAA">Fishing</font> Attributes')
+		end,
+	},
+	GeneralAttributes = {
+		action = "callback",
+		callback = function()
+			ProfilePageModule.openAttributeGrid("General")
+			GridMenuModule.navigateToGrid("ProfileMenu2")
+			typewriteTitle('<font color="#FFFFFF">General</font> Attributes')
+		end,
+	},
 	Milestones = {
 		tooltipData = {
 			title = '<font color="#AA00AA"><b>Milestones</b></font>',
@@ -785,6 +830,37 @@ local PROFILE_BUTTONS = {
 		},
 		action = "callback",
 		callback = function()
+			GridMenuModule.navigateBack()
+		end,
+	},
+	CloseSlot = {
+		tooltipData = {
+			title = '<font color="#FF5555"><b>Close Menu</b></font>',
+			desc = "",
+			click = "",
+		},
+		action = "close",
+	},
+}
+
+local PROFILE_MENU2_BUTTONS = {
+	Category = {
+		tooltipData = {
+			title = '<font color="#FFFFFF"><b>Attribute Category</b></font>',
+			desc = '<font color="#AAAAAA">Currently viewing this skill\'s attributes.</font>',
+			click = "",
+		},
+		action = nil,
+	},
+	BackButton = {
+		tooltipData = {
+			title = '<font color="#55FF55"><b>Go back</b></font>',
+			desc = '<font color="#AAAAAA">Return to the previous menu.</font>',
+			click = "",
+		},
+		action = "callback",
+		callback = function()
+			ProfilePageModule.closeAttributeGrid()
 			GridMenuModule.navigateBack()
 		end,
 	},
@@ -1228,8 +1304,40 @@ MenuBridge._getMode = function()
 	return openMode
 end
 
--- ===================== REGISTER NexusMenu AS ROOT GRID =====================
-GridMenuModule.registerGrid(ROOT_GRID, NexusMenu, NEXUS_BUTTONS, { title = "Your Nexus Menu" })
+-- ===================== INITIALIZE DOUBLE-BUFFER SYSTEM =====================
+GridMenuModule.initBuffers(
+	menuFrame:WaitForChild("GridBufferA"),
+	menuFrame:WaitForChild("GridBufferB"),
+	blankSlotTemplate
+)
+
+-- ===================== REGISTER NexusMenu AS POOLED ROOT GRID =====================
+GridMenuModule.registerPooledGrid(ROOT_GRID, GridTemplates:WaitForChild("NexusMenu"), NEXUS_BUTTONS, {
+	title = "Your Nexus Menu",
+	blankGroups = NEXUS_BLANK_GROUPS,
+	itemOrders = NEXUS_ITEM_ORDERS,
+	onWireTooltips = function(clonedButtons)
+		-- Dynamic Profile tooltip (moved from manual wiring section below)
+		local conns = {}
+		local profileBtn = clonedButtons["Profile"]
+		if profileBtn then
+			table.insert(
+				conns,
+				profileBtn.MouseEnter:Connect(function()
+					UIClick3:Play()
+					ProfilePageModule.showProfileSummaryTooltip()
+				end)
+			)
+			table.insert(
+				conns,
+				profileBtn.MouseLeave:Connect(function()
+					ProfilePageModule.hideProfileSummaryTooltip()
+				end)
+			)
+		end
+		return conns
+	end,
+})
 
 local CollectionsGrid = menuFrame:WaitForChild("CollectionsMenu1")
 local StatisticsGrid = menuFrame:WaitForChild("StatisticsMenu1")
@@ -1239,13 +1347,14 @@ local StatisticsMenu2 = menuFrame:WaitForChild("StatisticsMenu2")
 local CollectionsMenu2 = menuFrame:WaitForChild("CollectionsMenu2")
 local CollectionsMenu3 = menuFrame:WaitForChild("CollectionsMenu3")
 local ProfileGrid = menuFrame:WaitForChild("ProfileMenu1")
+local ProfileMenu2 = menuFrame:WaitForChild("ProfileMenu2")
 
-applyGridLayout(NexusMenu, NEXUS_BLANK_GROUPS, NEXUS_ITEM_ORDERS)
 applyGridLayout(CollectionsGrid, COLLECTION_BLANK_GROUPS, {})
 applyGridLayout(SettingsGrid, SETTINGS_BLANK_GROUPS, {})
 applyGridLayout(SkillsGrid, SKILL_BLANK_GROUPS, {})
 applyGridLayout(StatisticsGrid, STATISTICS_BLANK_GROUPS, {})
 applyGridLayout(ProfileGrid, ProfileConfig.PROFILE_BLANK_GROUPS, ProfileConfig.PROFILE_ITEM_ORDERS)
+applyGridLayout(ProfileMenu2, ProfileConfig.PROFILE_MENU2_BLANK_GROUPS, ProfileConfig.PROFILE_MENU2_ITEM_ORDERS)
 
 GridMenuModule.registerGrid("CollectionsGrid", CollectionsGrid, COLLECTION_BUTTONS, { title = "Collections" })
 GridMenuModule.registerGrid("StatisticsGrid", StatisticsGrid, STATISTICS_BUTTONS, { title = "Statistics" })
@@ -1255,6 +1364,7 @@ GridMenuModule.registerGrid("StatisticsMenu2", StatisticsMenu2, STATS_MENU2_BUTT
 GridMenuModule.registerGrid("CollectionsMenu2", CollectionsMenu2, COLLECTION_MENU2_BUTTONS, { title = "Collections" })
 GridMenuModule.registerGrid("CollectionsMenu3", CollectionsMenu3, COLLECTION_MENU3_BUTTONS, { title = "Collection" })
 GridMenuModule.registerGrid("ProfileGrid", ProfileGrid, PROFILE_BUTTONS, { title = "Your Profile" })
+GridMenuModule.registerGrid("ProfileMenu2", ProfileMenu2, PROFILE_MENU2_BUTTONS, { title = "Attributes" })
 
 -- ===================== WIRE DYNAMIC SKILL GRID TOOLTIPS =====================
 local SKILLGRID_STAT_MAP = {
@@ -1296,22 +1406,6 @@ for skillName, buttonName in pairs(ProfileConfig.SKILL_BUTTON_MAP) do
 	end
 end
 
--- ===================== WIRE DYNAMIC PROFILE SUMMARY TOOLTIP (Nexus) =====================
-do
-	local profileBtn = NexusMenu:FindFirstChild("Profile")
-	if profileBtn then
-		profileBtn.MouseEnter:Connect(function()
-			UIClick3:Play()
-			ProfilePageModule.showProfileSummaryTooltip()
-		end)
-		profileBtn.MouseLeave:Connect(function()
-			ProfilePageModule.hideProfileSummaryTooltip()
-		end)
-	else
-		warn("[ProfileTooltips] Missing 'Profile' button in NexusMenu")
-	end
-end
-
 -- ===================== WIRE DYNAMIC FULL PROFILE TOOLTIP (MyProfile) =====================
 do
 	local myProfileBtn = ProfileGrid:FindFirstChild("MyProfile")
@@ -1336,6 +1430,7 @@ StatisticsPageModule.init(sharedRefs, StatisticsMenu2)
 CollectionsPageModule.init(sharedRefs, CollectionsMenu2, CollectionsMenu3)
 sharedRefs.SkillsPageModule = SkillsPageModule
 sharedRefs.ProfilePageModule = ProfilePageModule
+ProfilePageModule.init(sharedRefs, ProfileMenu2)
 
 -- ===================== INITIAL STATE =====================
 CentralizedMenu.Enabled = false
@@ -1435,14 +1530,6 @@ LiquidGlassHandler.apply(topBarFrame, {
 	},
 })
 LiquidGlassHandler.apply(inventoryPanel, {
-	SeparatedBorderOutline = {
-		enabled = true,
-		offset = 5,
-		thickness = 3,
-		color = Color3.fromRGB(255, 255, 255),
-	},
-})
-LiquidGlassHandler.apply(menuClip, {
 	SeparatedBorderOutline = {
 		enabled = true,
 		offset = 5,

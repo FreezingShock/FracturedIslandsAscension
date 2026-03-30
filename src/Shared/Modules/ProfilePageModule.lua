@@ -8,23 +8,29 @@
 --    • Armor slot tooltip builders (display-only for now)
 --    • Cached attribute data from StatUpdated RemoteEvent
 --    • Computed final attribute values (flat × multiplier)
+--    • ProfileMenu2 dynamic stat slot population + tooltips
 --
 --  The 6 skill attribute buttons on ProfileMenu1 use dynamic
 --  tooltips wired in CentralizedMenuController (not GridMenuModule
 --  tooltipData) because they require live stat values.
 --
 --  API:
---    init(sharedRefs)
+--    init(sharedRefs, profileMenu2Frame?)
 --    showSkillAttributeTooltip(skillName)
 --    hideSkillAttributeTooltip()
 --    getAttributeValue(attrKey)
 --    getAttributeData(attrKey)
+--    openAttributeGrid(skillName)
+--    closeAttributeGrid()
 -- ============================================================
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
 
 local player = Players.LocalPlayer
+
+-- ===================== AUDIO =====================
+local UIClick3 = workspace:WaitForChild("UISounds"):WaitForChild("Click3")
 
 -- ===================== MODULES =====================
 local Modules = ReplicatedStorage:WaitForChild("Modules")
@@ -38,32 +44,44 @@ local SKILL_DISPLAY_ORDER = ProfileConfig.SKILL_DISPLAY_ORDER
 local TOOLTIP_COLORS = ProfileConfig.TOOLTIP_COLORS
 local attrLookup = ProfileConfig.attrLookup
 
+-- Menu2 config — nil-safe: these may not exist yet if ProfileConfig
+-- additions weren't applied.  Guarded at usage site.
+local STAT_CAPS = ProfileConfig.STAT_CAPS or {}
+local BREAKDOWN_MAX_FLAT = ProfileConfig.BREAKDOWN_MAX_FLAT or 3
+local BREAKDOWN_MAX_MULT = ProfileConfig.BREAKDOWN_MAX_MULT or 3
+local CONTENT_SLOTS = ProfileConfig.PROFILE_MENU2_CONTENT_SLOTS or {}
+local MENU2_TITLES = ProfileConfig.PROFILE_MENU2_TITLES or {}
+
 -- ===================== STATE =====================
 local initialized = false
 local shared = nil
 local TooltipModule = nil
 
+-- ProfileMenu2 references (set during init)
+local profileMenu2Frame = nil
+local statSlotTemplate = nil
+local blankSlotTemplate = nil
+
 -- Cached attribute data from server.
 -- Format: { [attrKey] = { flatBoosts = { {label, value, color?} }, multipliers = { {label, value, color?} } } }
--- Keys match ProfileConfig attribute keys (e.g. "FarmingFortune", "Walkspeed").
 local cachedAttributeData = {}
 
--- ===================== TOOLTIP SOURCE =====================
--- Unique source identifier so profile tooltips don't clobber
--- other tooltip owners (skills, inventory, etc.)
+-- Dynamic slot tracking for ProfileMenu2 (prevents connection stacking — PITFALL 3)
+local dynamicSlots = {} -- array of cloned instances (StatSlots + fill blanks)
+local dynamicConnections = {} -- array of RBXScriptConnections
+local activeGridSkill = nil -- which skill is currently shown in ProfileMenu2
+
+-- ===================== TOOLTIP SOURCES =====================
 local TOOLTIP_SOURCE = "profile"
+local STAT_TOOLTIP_SOURCE = "profile_stat"
 
 -- ===================== REMOTES =====================
--- These are the same remotes the old ProfilePageModule used.
--- StatUpdated fires whenever the server recomputes player stats.
--- RequestStats asks the server to send the current snapshot.
 local StatUpdated = ReplicatedStorage:FindFirstChild("StatUpdated")
 local RequestStats = ReplicatedStorage:FindFirstChild("RequestStats")
 
 -- ===================== HELPERS =====================
 
---- Format a number for display.  Integers use MoneyLib shorthand;
---- small decimals keep 2dp; large decimals floor then shorthand.
+--- Format a number for display.
 local function formatNumber(n)
 	if n == nil then
 		return "0"
@@ -130,31 +148,21 @@ local function sanitizeStatData(data)
 end
 
 -- ===================== ATTRIBUTE KEY → DATA KEY MAP =====================
--- The server's StatUpdated payload may use different keys than
--- ProfileConfig attribute keys.  This map resolves mismatches.
--- If an attribute key is NOT in this map, the module tries using
--- the attribute key directly as the data key.
---
--- Add entries here when the server uses a different name than
--- the ProfileConfig key (e.g., server sends "Speed" but config
--- says "Walkspeed").
 local ATTR_TO_DATA_KEY = {
 	Walkspeed = "Speed",
-	-- FarmingFortune = "FarmingFortune",  -- same, no mapping needed
-	-- PressSpeed = "PressSpeed",          -- same
 }
 
---- Resolve an attribute key to the data key used in cachedAttributeData.
 local function resolveDataKey(attrKey)
 	return ATTR_TO_DATA_KEY[attrKey] or attrKey
 end
 
--- ===================== LEGACY TOOLTIP BUILDERS =====================
--- Kept for reference / non-icon tooltip contexts.  Profile skill
--- attribute tooltips now use icon stat lines via showSkillAttributeTooltip().
+-- ===================== PERCENT SUFFIX CHECK =====================
+local function needsPercentSuffix(key)
+	return string.find(key, "CritChance") ~= nil or string.find(key, "CritIncrease") ~= nil
+end
 
---- Build the compact rich-text attribute list for a skill category.
---- Returns a string suitable for TooltipModule's `stats` field.
+-- ===================== LEGACY TOOLTIP BUILDERS =====================
+
 local function buildAttributeListText(skillName)
 	local attrs = ATTRIBUTE_CATEGORIES[skillName]
 	if not attrs or #attrs == 0 then
@@ -188,8 +196,6 @@ local function buildAttributeListText(skillName)
 	return table.concat(lines, "\n")
 end
 
---- Build tooltip data table for a skill attribute category button.
---- Legacy path — used only if icon tooltips are not desired.
 local function buildSkillCategoryTooltipData(skillName)
 	local skillColor = SKILL_COLORS[skillName] or "#FFFFFF"
 
@@ -201,22 +207,17 @@ local function buildSkillCategoryTooltipData(skillName)
 	)
 
 	local desc = string.format('<font color="%s">Your %s attribute bonuses.</font>', TOOLTIP_COLORS.label, skillName)
-
 	local stats = buildAttributeListText(skillName)
-
-	local click = ""
 
 	return {
 		title = title,
 		desc = desc,
 		stats = stats,
-		click = click,
+		click = "",
 	}
 end
 
 -- ===================== SUMMARY TOOLTIP CONFIG =====================
--- Keys shown in the Nexus "Profile" button tooltip (top 5 overview).
--- Each entry references a skill + key from ATTRIBUTE_CATEGORIES.
 local SUMMARY_STAT_KEYS = {
 	{ skill = "General", key = "Health" },
 	{ skill = "General", key = "Defense" },
@@ -225,14 +226,7 @@ local SUMMARY_STAT_KEYS = {
 	{ skill = "General", key = "CritIncrease" },
 }
 
---- Check if a stat key should display a % suffix.
-local function needsPercentSuffix(key)
-	return string.find(key, "CritChance") ~= nil or string.find(key, "CritIncrease") ~= nil
-end
-
 --- Build icon stat lines from an array of attribute config entries.
---- Handles icon, color, name, value, suffix, and layout order.
---- Returns the number of lines created.
 local function buildIconLines(attrList, startLO)
 	local count = 0
 	for i, attr in ipairs(attrList) do
@@ -252,7 +246,7 @@ local function buildIconLines(attrList, startLO)
 			layoutOrder = startLO + (i - 1),
 		})
 
-		-- Caller-side belt-and-suspenders
+		-- Belt-and-suspenders
 		local statLabel = clone:FindFirstChild("StatLabel", true)
 		if statLabel then
 			statLabel.RichText = true
@@ -289,12 +283,226 @@ local function buildIconLines(attrList, startLO)
 	return count
 end
 
+-- ===================== STAT BREAKDOWN TOOLTIP BUILDER =====================
+
+local function buildStatBreakdownText(attrConfig)
+	local dataKey = resolveDataKey(attrConfig.key)
+	local entry = cachedAttributeData[dataKey]
+	local lines = {}
+
+	-- Formula placeholder
+	table.insert(
+		lines,
+		string.format(
+			'<font color="%s">Formula:</font> <font color="%s">Coming Soon</font>',
+			TOOLTIP_COLORS.label,
+			TOOLTIP_COLORS.comingSoon
+		)
+	)
+	table.insert(lines, "")
+
+	-- ── Flat Boosts ──
+	local flatTotal = 0
+	local flatBoosts = {}
+	if entry and type(entry.flatBoosts) == "table" then
+		for _, b in ipairs(entry.flatBoosts) do
+			local v = tonumber(b.value) or 0
+			flatTotal = flatTotal + v
+			table.insert(flatBoosts, b)
+		end
+	end
+
+	local flatStr = formatNumber(flatTotal)
+	if needsPercentSuffix(attrConfig.key) then
+		flatStr = flatStr .. "%"
+	end
+
+	table.insert(
+		lines,
+		string.format(
+			'<font color="%s">Flat Amount:</font> <font color="%s">%s</font>',
+			TOOLTIP_COLORS.accent,
+			TOOLTIP_COLORS.value,
+			flatStr
+		)
+	)
+
+	if #flatBoosts == 0 then
+		table.insert(lines, string.format('<font color="%s">‣ None</font>', TOOLTIP_COLORS.muted))
+	else
+		for i = 1, math.min(#flatBoosts, BREAKDOWN_MAX_FLAT) do
+			local b = flatBoosts[i]
+			local labelColor = b.color or "#FFFFFF"
+			local valDisplay = formatNumber(math.abs(tonumber(b.value) or 0))
+			local sign = (tonumber(b.value) or 0) >= 0 and "+" or "-"
+			local valColor = (tonumber(b.value) or 0) >= 0 and TOOLTIP_COLORS.positive or TOOLTIP_COLORS.negative
+			table.insert(
+				lines,
+				string.format(
+					'<font color="%s">‣</font> <font color="%s">%s</font> <font color="%s">%s%s</font>',
+					TOOLTIP_COLORS.muted,
+					labelColor,
+					b.label or "Unknown",
+					valColor,
+					sign,
+					valDisplay
+				)
+			)
+		end
+		if #flatBoosts > BREAKDOWN_MAX_FLAT then
+			local remaining = #flatBoosts - BREAKDOWN_MAX_FLAT
+			table.insert(
+				lines,
+				string.format(
+					'<font color="%s">(%d more flat boost%s...)</font>',
+					TOOLTIP_COLORS.muted,
+					remaining,
+					remaining == 1 and "" or "s"
+				)
+			)
+		end
+	end
+
+	table.insert(lines, "")
+
+	-- ── Multipliers ──
+	local multDisplay = 1
+	local multipliers = {}
+	if entry and type(entry.multipliers) == "table" then
+		for _, m in ipairs(entry.multipliers) do
+			local v = tonumber(m.value) or 1
+			multDisplay = multDisplay + (v - 1)
+			table.insert(multipliers, m)
+		end
+	end
+
+	table.insert(
+		lines,
+		string.format(
+			'<font color="#55FFFF">Multiplier Amount:</font> <font color="%s">%.2fx</font>',
+			TOOLTIP_COLORS.value,
+			multDisplay
+		)
+	)
+
+	if #multipliers == 0 then
+		table.insert(lines, string.format('<font color="%s">‣ None</font>', TOOLTIP_COLORS.muted))
+	else
+		for i = 1, math.min(#multipliers, BREAKDOWN_MAX_MULT) do
+			local m = multipliers[i]
+			local labelColor = m.color or "#FFFFFF"
+			local valStr = string.format("%.2f", tonumber(m.value) or 1)
+			table.insert(
+				lines,
+				string.format(
+					'<font color="%s">‣</font> <font color="%s">%s</font> <font color="%s">×%s</font>',
+					TOOLTIP_COLORS.muted,
+					labelColor,
+					m.label or "Unknown",
+					TOOLTIP_COLORS.positive,
+					valStr
+				)
+			)
+		end
+		if #multipliers > BREAKDOWN_MAX_MULT then
+			local remaining = #multipliers - BREAKDOWN_MAX_MULT
+			table.insert(
+				lines,
+				string.format(
+					'<font color="%s">(%d more multiplier boost%s...)</font>',
+					TOOLTIP_COLORS.muted,
+					remaining,
+					remaining == 1 and "" or "s"
+				)
+			)
+		end
+	end
+
+	return table.concat(lines, "\n")
+end
+
+-- ===================== DYNAMIC SLOT CLEANUP =====================
+
+local function cleanupDynamicSlots()
+	-- Disconnect hover connections first (PITFALL 3)
+	for _, conn in ipairs(dynamicConnections) do
+		conn:Disconnect()
+	end
+	table.clear(dynamicConnections)
+
+	-- Destroy cloned instances
+	for _, inst in ipairs(dynamicSlots) do
+		if inst and inst.Parent then
+			inst:Destroy()
+		end
+	end
+	table.clear(dynamicSlots)
+
+	activeGridSkill = nil
+end
+
+-- ===================== STAT SLOT ICON SETUP =====================
+
+-- Darken factor: 0 = black, 1 = original color. Adjust to taste.
+local SLOT_BG_DARKEN = 0.6
+local SLOT_STROKE_DARKEN = 0.6
+
+local function darkenColor(color3, factor)
+	return Color3.new(color3.R * factor, color3.G * factor, color3.B * factor)
+end
+
+local function setupStatSlotIcon(slot, attrConfig)
+	local hexColor = attrConfig.color or "#FFFFFF"
+	local color3 = Color3.fromHex(hexColor)
+
+	-- ── Tint the slot frame itself ──
+	slot.BackgroundColor3 = darkenColor(color3, SLOT_BG_DARKEN)
+
+	-- ── Tint BG ImageLabel + its UIStroke ──
+	local bg = slot:FindFirstChild("BG")
+	if bg then
+		bg.ImageColor3 = darkenColor(color3, SLOT_BG_DARKEN)
+		local bgStroke = bg:FindFirstChildOfClass("UIStroke")
+		if bgStroke then
+			bgStroke.Color = darkenColor(color3, SLOT_STROKE_DARKEN)
+		end
+	end
+
+	-- ── Configure icon ──
+	local icon = slot:FindFirstChild("Icon")
+	if not icon then
+		return
+	end
+
+	local iconData = attrConfig.icon
+	if type(iconData) == "table" then
+		local sheet = TooltipModule.STAT_SPRITESHEET
+		local col = iconData[1] or 0
+		local row = iconData[2] or 0
+		local cs = sheet.cellSize
+		icon.Image = sheet.assetId
+		icon.ImageRectSize = Vector2.new(cs, cs)
+		icon.ImageRectOffset = Vector2.new(col * cs, row * cs)
+		icon.ImageColor3 = Color3.fromHex(attrConfig.color or "#FFFFFF")
+		icon.ImageTransparency = 0
+	elseif type(iconData) == "string" and iconData ~= "" then
+		icon.Image = iconData
+		icon.ImageRectSize = Vector2.new(0, 0)
+		icon.ImageRectOffset = Vector2.new(0, 0)
+		icon.ImageColor3 = Color3.fromHex(attrConfig.color or "#FFFFFF")
+		icon.ImageTransparency = 0
+	else
+		icon.ImageTransparency = 1
+	end
+end
+
 -- ===================== MODULE API =====================
 local M = {}
 
 --- Initialize the module.  Call once from CentralizedMenuController.
---- sharedRefs = the same table passed to all page modules.
-function M.init(sharedRefs)
+--- sharedRefs   = the same table passed to all page modules.
+--- menu2Frame   = the ProfileMenu2 Frame instance (optional — resolves from menuFrame if nil).
+function M.init(sharedRefs, menu2Frame)
 	if initialized then
 		return
 	end
@@ -302,6 +510,45 @@ function M.init(sharedRefs)
 
 	shared = sharedRefs
 	TooltipModule = sharedRefs.TooltipModule
+
+	-- ── Resolve ProfileMenu2 frame ──
+	-- Accept explicit arg, or fall back to resolving from menuFrame (sharedRefs).
+	if menu2Frame then
+		profileMenu2Frame = menu2Frame
+	elseif sharedRefs.menuFrame then
+		profileMenu2Frame = sharedRefs.menuFrame:FindFirstChild("ProfileMenu2")
+	end
+
+	if profileMenu2Frame then
+		print("[ProfilePageModule] profileMenu2Frame: ✓ found (" .. profileMenu2Frame:GetFullName() .. ")")
+	else
+		warn("[ProfilePageModule] profileMenu2Frame: ✗ NOT FOUND — openAttributeGrid will not work")
+	end
+
+	-- ── Resolve templates from PlayerGui (same pattern as StatisticsPageModule) ──
+	local CentralizedMenu = player.PlayerGui:WaitForChild("CentralizedAscensionMenu")
+	local TemporaryMenus = CentralizedMenu:WaitForChild("TemporaryMenus")
+
+	statSlotTemplate = TemporaryMenus:FindFirstChild("StatSlot")
+	if not statSlotTemplate then
+		warn("[ProfilePageModule] StatSlot template NOT FOUND in TemporaryMenus")
+	else
+		print("[ProfilePageModule] StatSlot template: ✓")
+	end
+
+	blankSlotTemplate = TemporaryMenus:FindFirstChild("BlankSlot")
+	if not blankSlotTemplate then
+		warn("[ProfilePageModule] BlankSlot template NOT FOUND in TemporaryMenus")
+	else
+		print("[ProfilePageModule] BlankSlot template: ✓")
+	end
+
+	-- ── Validate config ──
+	if #CONTENT_SLOTS == 0 then
+		warn("[ProfilePageModule] CONTENT_SLOTS is empty — did you add PROFILE_MENU2_CONTENT_SLOTS to ProfileConfig?")
+	else
+		print("[ProfilePageModule] CONTENT_SLOTS: ✓ (" .. #CONTENT_SLOTS .. " positions)")
+	end
 
 	-- ── Listen for StatUpdated ──
 	if StatUpdated then
@@ -323,7 +570,8 @@ function M.init(sharedRefs)
 	print("ProfilePageModule: Initialized ✓")
 end
 
---- Show the dynamic icon tooltip for a skill attribute category button.
+-- ===================== PROFILE GRID (Menu1) TOOLTIPS =====================
+
 function M.showSkillAttributeTooltip(skillName)
 	TooltipModule.clearIconStats()
 	TooltipModule.resetTailOrders()
@@ -342,12 +590,13 @@ function M.showSkillAttributeTooltip(skillName)
 	refs.Desc.Visible = true
 	refs.Divider1.Visible = true
 	refs.Divider2.Visible = false
-	refs.Divider3.Visible = false
+	refs.Divider3.Visible = true
 	refs.Stats.Visible = false
 	refs.Rewards.Visible = false
 	refs.ProgressOuter.Visible = false
 	refs.ProgressLabel.Visible = false
-	refs.Click.Visible = false
+	refs.Click.Visible = true
+	refs.Click.Text = '<font color="#FFFF55">Click to view!</font>'
 
 	local attrs = ATTRIBUTE_CATEGORIES[skillName]
 	if attrs and #attrs > 0 then
@@ -358,12 +607,12 @@ function M.showSkillAttributeTooltip(skillName)
 	TooltipModule.showRaw(TOOLTIP_SOURCE)
 end
 
---- Hide the skill attribute tooltip (only if we own it).
 function M.hideSkillAttributeTooltip()
 	TooltipModule.hide(TOOLTIP_SOURCE)
 end
 
---- Show a summary profile tooltip (top 5 stats) on the Nexus "Profile" button.
+-- ===================== PROFILE SUMMARY TOOLTIP (Nexus) =====================
+
 function M.showProfileSummaryTooltip()
 	TooltipModule.clearIconStats()
 	TooltipModule.resetTailOrders()
@@ -384,7 +633,6 @@ function M.showProfileSummaryTooltip()
 	refs.Click.Text = '<font color="#FFFF55">Click to view!</font>'
 	refs.Click.Visible = true
 
-	-- Resolve config entries from SUMMARY_STAT_KEYS
 	local attrList = {}
 	for _, ref in ipairs(SUMMARY_STAT_KEYS) do
 		local skillAttrs = ATTRIBUTE_CATEGORIES[ref.skill]
@@ -406,13 +654,12 @@ function M.showProfileSummaryTooltip()
 	TooltipModule.showRaw(TOOLTIP_SOURCE)
 end
 
---- Hide the summary profile tooltip.
 function M.hideProfileSummaryTooltip()
 	TooltipModule.hide(TOOLTIP_SOURCE)
 end
 
---- Show the full profile tooltip (ALL stats from all skills) on the "MyProfile" button.
---- Stats are grouped by skill in SKILL_DISPLAY_ORDER but not visually separated.
+-- ===================== FULL PROFILE TOOLTIP (MyProfile) =====================
+
 function M.showFullProfileTooltip()
 	TooltipModule.clearIconStats()
 	TooltipModule.resetTailOrders()
@@ -432,7 +679,6 @@ function M.showFullProfileTooltip()
 	refs.ProgressLabel.Visible = false
 	refs.Click.Visible = false
 
-	-- General attributes only
 	local attrs = ATTRIBUTE_CATEGORIES["General"]
 	if attrs and #attrs > 0 then
 		local count = buildIconLines(attrs, TooltipModule.ICON_STATS_BASE_LO)
@@ -442,27 +688,195 @@ function M.showFullProfileTooltip()
 	TooltipModule.showRaw(TOOLTIP_SOURCE)
 end
 
---- Hide the full profile tooltip.
 function M.hideFullProfileTooltip()
 	TooltipModule.hide(TOOLTIP_SOURCE)
 end
 
---- Get the computed final value of an attribute by its config key.
---- Returns 0 if no data is cached yet.
+-- ===================== STAT BREAKDOWN TOOLTIP (ProfileMenu2 slots) =====================
+
+function M.showStatBreakdownTooltip(attrConfig)
+	TooltipModule.clearIconStats()
+	TooltipModule.resetTailOrders()
+
+	local refs = TooltipModule.refs
+	local attrColor = attrConfig.color or "#FFFFFF"
+
+	-- Compute value early (needed for both icon title and icon stat line)
+	local dataKey = resolveDataKey(attrConfig.key)
+	local finalVal = computeFinalValue(dataKey)
+	local valStr = formatNumber(finalVal)
+	if needsPercentSuffix(attrConfig.key) then
+		valStr = valStr .. "%"
+	end
+
+	-- Icon title (replaces native TitleLabel with icon + name + value)
+	TooltipModule.createIconTitle({
+		icon = attrConfig.icon,
+		color = attrColor,
+		name = attrConfig.name or "???",
+		value = valStr,
+	})
+
+	-- Description
+	refs.Desc.Text = string.format('<font color="%s">%s</font>', TOOLTIP_COLORS.label, attrConfig.description or "")
+	refs.Desc.Visible = true
+
+	-- Divider1
+	refs.Divider1.Visible = true
+
+	-- Stats: full breakdown
+	refs.Stats.Text = buildStatBreakdownText(attrConfig)
+	refs.Stats.Visible = true
+
+	-- Hidden elements
+	refs.Rewards.Visible = false
+	refs.ProgressOuter.Visible = false
+	refs.ProgressLabel.Visible = false
+
+	-- Divider3 + Cap (only if cap exists)
+	local cap = STAT_CAPS[attrConfig.key]
+	if cap then
+		refs.Divider3.Visible = true
+		refs.Click.Text = string.format(
+			'<font color="%s">Cap:</font> <font color="%s">%s</font>',
+			TOOLTIP_COLORS.label,
+			TOOLTIP_COLORS.accent,
+			formatNumber(cap)
+		)
+		refs.Click.Visible = true
+	else
+		refs.Divider3.Visible = false
+		refs.Click.Visible = false
+	end
+
+	TooltipModule.showRaw(STAT_TOOLTIP_SOURCE)
+end
+
+function M.hideStatBreakdownTooltip()
+	TooltipModule.hide(STAT_TOOLTIP_SOURCE)
+end
+
+-- ===================== PROFILE MENU 2 — DYNAMIC POPULATION =====================
+
+--- Populate ProfileMenu2 with stat slots for the given skill.
+--- Call BEFORE GridMenuModule.navigateToGrid("ProfileMenu2").
+function M.openAttributeGrid(skillName)
+	-- Clean up any previous population
+	cleanupDynamicSlots()
+
+	if not profileMenu2Frame then
+		warn("[ProfilePageModule] openAttributeGrid: profileMenu2Frame is nil — aborting")
+		return
+	end
+	if not statSlotTemplate then
+		warn("[ProfilePageModule] openAttributeGrid: statSlotTemplate is nil — aborting")
+		return
+	end
+	if #CONTENT_SLOTS == 0 then
+		warn("[ProfilePageModule] openAttributeGrid: CONTENT_SLOTS is empty — aborting")
+		return
+	end
+
+	activeGridSkill = skillName
+	local skillColor = SKILL_COLORS[skillName] or "#FFFFFF"
+	local attrs = ATTRIBUTE_CATEGORIES[skillName]
+	if not attrs then
+		warn("[ProfilePageModule] openAttributeGrid: no ATTRIBUTE_CATEGORIES for '" .. tostring(skillName) .. "'")
+		return
+	end
+
+	print("[ProfilePageModule] openAttributeGrid: " .. skillName .. " (" .. #attrs .. " attrs)")
+
+	-- ── Update Category button ──
+	local categoryBtn = profileMenu2Frame:FindFirstChild("Category")
+	if categoryBtn then
+		-- Try TextLabel child first, then button's own Text property
+		local textLabel = categoryBtn:FindFirstChild("TextLabel")
+			or categoryBtn:FindFirstChild("NameLabel")
+			or categoryBtn:FindFirstChild("Label")
+		if textLabel and textLabel:IsA("TextLabel") then
+			textLabel.RichText = true
+			textLabel.Text = string.format(
+				'<font color="%s"><b>%s</b></font> <font color="#AAAAAA">Attributes</font>',
+				skillColor,
+				skillName
+			)
+		elseif categoryBtn:IsA("TextButton") then
+			categoryBtn.RichText = true
+			categoryBtn.Text = string.format(
+				'<font color="%s"><b>%s</b></font> <font color="#AAAAAA">Attributes</font>',
+				skillColor,
+				skillName
+			)
+		end
+	end
+
+	-- ── Clone StatSlots for each attribute ──
+	local numAttrs = math.min(#attrs, #CONTENT_SLOTS)
+	for i = 1, numAttrs do
+		local attr = attrs[i]
+		local slot = statSlotTemplate:Clone()
+		slot.Name = "DynStatSlot"
+		slot.LayoutOrder = CONTENT_SLOTS[i]
+		slot.Visible = true
+
+		-- Configure icon from spritesheet
+		setupStatSlotIcon(slot, attr)
+
+		slot.Parent = profileMenu2Frame
+		table.insert(dynamicSlots, slot)
+
+		-- Wire hover tooltip (connections tracked for cleanup — PITFALL 3)
+		local capturedAttr = attr
+		local enterConn = slot.MouseEnter:Connect(function()
+			UIClick3:Play()
+			M.showStatBreakdownTooltip(capturedAttr)
+		end)
+		local leaveConn = slot.MouseLeave:Connect(function()
+			M.hideStatBreakdownTooltip()
+		end)
+		table.insert(dynamicConnections, enterConn)
+		table.insert(dynamicConnections, leaveConn)
+	end
+
+	print("[ProfilePageModule] Cloned " .. numAttrs .. " StatSlots")
+
+	-- ── Fill remaining content positions with BlankSlots ──
+	if blankSlotTemplate then
+		local blanksCloned = 0
+		for i = numAttrs + 1, #CONTENT_SLOTS do
+			local blank = blankSlotTemplate:Clone()
+			blank.Name = "DynBlank"
+			blank.LayoutOrder = CONTENT_SLOTS[i]
+			blank.Visible = true
+			blank.Parent = profileMenu2Frame
+			table.insert(dynamicSlots, blank)
+			blanksCloned = blanksCloned + 1
+		end
+		print("[ProfilePageModule] Cloned " .. blanksCloned .. " fill blanks")
+	end
+end
+
+--- Clean up ProfileMenu2 dynamic content.
+--- Call BEFORE GridMenuModule.navigateBack() from ProfileMenu2.
+function M.closeAttributeGrid()
+	TooltipModule.forceHide()
+	cleanupDynamicSlots()
+	print("[ProfilePageModule] closeAttributeGrid: cleaned up")
+end
+
+-- ===================== QUERY API =====================
+
 function M.getAttributeValue(attrKey)
 	local dataKey = resolveDataKey(attrKey)
 	return computeFinalValue(dataKey)
 end
 
---- Get the raw cached data entry for an attribute.
---- Returns { flatBoosts = {}, multipliers = {} } or nil.
 function M.getAttributeData(attrKey)
 	local dataKey = resolveDataKey(attrKey)
 	return cachedAttributeData[dataKey]
 end
 
---- Get all computed attribute values for a skill category.
---- Returns { { key, name, color, value } ... }
 function M.getSkillAttributeValues(skillName)
 	local attrs = ATTRIBUTE_CATEGORIES[skillName]
 	if not attrs then
@@ -482,9 +896,12 @@ function M.getSkillAttributeValues(skillName)
 	return results
 end
 
---- Check if attribute data has been received from the server.
 function M.hasData()
 	return next(cachedAttributeData) ~= nil
+end
+
+function M.getActiveGridSkill()
+	return activeGridSkill
 end
 
 return M

@@ -153,6 +153,13 @@ ProfileConfig.ATTRIBUTE_CATEGORIES = {
 			icon = { 3, 0 },
 			description = "Increases critical mining amount.",
 		},
+		{
+			key = "Pristine",
+			name = "Pristine",
+			color = "#AA00AA",
+			icon = { 1, 0 },
+			description = "Increases mining base amount.",
+		},
 	},
 
 	-- ═════════════════ FISHING ═════════════════
@@ -210,6 +217,27 @@ ProfileConfig.ATTRIBUTE_CATEGORIES = {
 			icon = { 2, 1 }, -- Swirl
 			description = "Boosts rare drop chance across all skills.",
 		},
+		{
+			key = "PetLuck",
+			name = "Pet Luck",
+			color = "#FF55FF",
+			icon = { 1, 2 }, -- Swirl
+			description = "Boosts rare drop chance for pet items.",
+		},
+		{
+			key = "Wisdom",
+			name = "Wisdom",
+			color = "#00AAAA",
+			icon = { 2, 2 }, -- Swirl
+			description = "Boosts rare drop chance for pet items.",
+		},
+		{
+			key = "BreakingPower",
+			name = "Breaking Power",
+			color = "#00AA00",
+			icon = { 3, 2 }, -- Diamond
+			description = "Increases the damage of breaking actions.",
+		},
 	},
 
 	-- ═════════════════ GENERAL ═════════════════
@@ -220,6 +248,13 @@ ProfileConfig.ATTRIBUTE_CATEGORIES = {
 			color = "#FF5555",
 			icon = { 0, 1 }, -- Heart
 			description = "Increases maximum health.",
+		},
+		{
+			key = "HealthRegen",
+			name = "Health Regen",
+			color = "#FF5555",
+			icon = { 4, 2 }, -- Heart
+			description = "Increases maximum health regen.",
 		},
 		{
 			key = "Defense",
@@ -243,6 +278,13 @@ ProfileConfig.ATTRIBUTE_CATEGORIES = {
 			description = "Increases maximum strength.",
 		},
 		{
+			key = "Intelligence",
+			name = "Intelligence",
+			color = "#55FFFF",
+			icon = { 5, 1 }, -- Starburst
+			description = "Increases maximum intelligence.",
+		},
+		{
 			key = "CritChance",
 			name = "Crit Chance",
 			color = "#5555FF",
@@ -262,6 +304,13 @@ ProfileConfig.ATTRIBUTE_CATEGORIES = {
 			color = "#FFFF55",
 			icon = { 3, 1 }, -- Cross
 			description = "Increases button presses per second.",
+		},
+		{
+			key = "Mending",
+			name = "Mending",
+			color = "#55FF55",
+			icon = { 5, 2 }, -- Cross
+			description = "Increases healing.",
 		},
 	},
 }
@@ -408,6 +457,118 @@ for _, skill in ipairs(ProfileConfig.SKILL_DISPLAY_ORDER) do
 		end
 	end
 end
+
+-- ===================== STAT CAPS =====================
+-- Only stats with a hard cap are listed.  If a key is absent,
+-- no cap line appears in the tooltip.  Add new entries as needed.
+ProfileConfig.STAT_CAPS = {
+	Speed = 500,
+	JumpHeight = 100,
+}
+
+-- ===================== TOOLTIP BREAKDOWN CONFIG =====================
+-- Max number of flat / multiplier sources shown before truncation.
+ProfileConfig.BREAKDOWN_MAX_FLAT = 3
+ProfileConfig.BREAKDOWN_MAX_MULT = 3
+
+-- ===================== PROFILE MENU 2 LAYOUT =====================
+-- 9 columns × 6 rows = 54 cells
+--
+-- Row 0: [B][B][B][B][Category][B][B][B][B]
+-- Row 1: [B][S1][S2][S3][S4][S5][S6][S7][B]
+-- Row 2: [B][S8][S9][S10][S11][S12][S13][S14][B]
+-- Row 3: [B][S15][S16][S17][S18][S19][S20][S21][B]
+-- Row 4: [B][S22][S23][S24][S25][S26][S27][S28][B]
+-- Row 5: [B][B][B][BackButton][CloseSlot][B][B][B][B]
+--
+-- Named static slots: 3 (Category, BackButton, CloseSlot)
+-- Dynamic stat slots:  up to 28 (7 per content row × 4 rows)
+-- Static border blanks: 20
+-- Dynamic fill blanks:  28 - #attrs (per skill)
+
+ProfileConfig.PROFILE_MENU2_COLUMNS = 9
+ProfileConfig.PROFILE_MENU2_ROWS = 6
+
+-- Static named slots — must match Studio instance names.
+ProfileConfig.PROFILE_MENU2_ITEM_ORDERS = {
+	Category = 4,
+	BackButton = 48,
+	CloseSlot = 49,
+}
+
+-- Ordered LayoutOrders for content positions (rows 1-4, columns 1-7).
+-- Stats fill these left-to-right, top-to-bottom.
+-- Remaining positions get dynamic BlankSlots.
+ProfileConfig.PROFILE_MENU2_CONTENT_SLOTS = {
+	-- Row 1
+	10,
+	11,
+	12,
+	13,
+	14,
+	15,
+	16,
+	-- Row 2
+	19,
+	20,
+	21,
+	22,
+	23,
+	24,
+	25,
+	-- Row 3
+	28,
+	29,
+	30,
+	31,
+	32,
+	33,
+	34,
+	-- Row 4
+	37,
+	38,
+	39,
+	40,
+	41,
+	42,
+	43,
+}
+
+-- Static border blanks only.
+-- Content-area blanks are spawned dynamically per skill in ProfilePageModule.
+ProfileConfig.PROFILE_MENU2_BLANK_GROUPS = {
+	-- Row 0: 4 before Category, 4 after
+	{ layoutOrder = 0, count = 4 },
+	{ layoutOrder = 5, count = 4 },
+	-- Row 1: left + right borders
+	{ layoutOrder = 9, count = 1 },
+	{ layoutOrder = 17, count = 1 },
+	-- Row 2: left + right borders
+	{ layoutOrder = 18, count = 1 },
+	{ layoutOrder = 26, count = 1 },
+	-- Row 3: left + right borders
+	{ layoutOrder = 27, count = 1 },
+	{ layoutOrder = 35, count = 1 },
+	-- Row 4: left + right borders
+	{ layoutOrder = 36, count = 1 },
+	{ layoutOrder = 44, count = 1 },
+	-- Row 5: 3 before BackButton, 4 after CloseSlot
+	{ layoutOrder = 45, count = 3 },
+	{ layoutOrder = 50, count = 4 },
+}
+
+-- Skill name → top bar title shown when ProfileMenu2 is active.
+ProfileConfig.PROFILE_MENU2_TITLES = {
+	General = "General Attributes",
+	Farming = "Farming Attributes",
+	Foraging = "Foraging Attributes",
+	Mining = "Mining Attributes",
+	Fishing = "Fishing Attributes",
+	Misc = "Misc Attributes",
+}
+
+-- Skill name → Category button label color (reuses SKILL_COLORS).
+-- Category button text is set dynamically in ProfilePageModule.
 
 print("ProfileConfig: Loaded ✓")
 return ProfileConfig

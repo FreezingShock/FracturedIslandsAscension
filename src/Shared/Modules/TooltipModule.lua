@@ -16,6 +16,10 @@
 --    All clones are auto-destroyed on hide/forceHide/show.
 --    Tail elements (StatsLabel, RewardsLabel, Divider3, ClickLabel)
 --    are bumped via API.adjustForIconCount(n) and reset on cleanup.
+--
+--  Icon title:
+--    API.createIconTitle() clones IconTitleLabelTemplate into LO 0,
+--    hides the native TitleLabel, and auto-cleans on hide/forceHide/show.
 -- ============================================================
 
 local RunService = game:GetService("RunService")
@@ -46,8 +50,9 @@ local TT_ProgressBL = TT_ProgressOuter:WaitForChild("ProgressBarLabel")
 local TT_ProgressLabel = TooltipFrame:WaitForChild("ProgressLabel")
 local TT_Rewards = TooltipFrame:WaitForChild("RewardsLabel")
 
--- ===================== ICON STAT TEMPLATE =====================
+-- ===================== ICON TEMPLATES =====================
 local IconStatsTemplate = ReplicatedStorage:WaitForChild("IconStatsLabelTemplate")
+local IconTitleTemplate = ReplicatedStorage:WaitForChild("IconTitleLabelTemplate")
 
 -- ===================== LIQUID GLASS =====================
 local Modules = ReplicatedStorage:WaitForChild("Modules")
@@ -92,13 +97,14 @@ local DEFAULT_TAIL_ORDERS = {
 -- Callers pass { col, row } coordinates to createIconStatLine().
 -- Upload the spritesheet PNG to Roblox and paste the asset ID here.
 local STAT_SPRITESHEET = {
-	assetId = "rbxassetid://85259289985835", -- TODO: replace with uploaded spritesheet asset ID
+	assetId = "rbxassetid://132086377310489", -- TODO: replace with uploaded spritesheet asset ID
 	cellSize = 170,
 }
 
 -- ===================== STATE =====================
 local following = false
 local activeSource = nil -- string key identifying who "owns" the tooltip right now
+local activeIconTitle = nil -- tracked clone of IconTitleLabelTemplate (nil when not active)
 
 -- ===================== INTERNAL CLEANUP =====================
 
@@ -111,6 +117,15 @@ local function clearIconStats()
 	end
 end
 
+--- Destroy the IconTitleLabel clone and restore native TitleLabel.
+local function clearIconTitle()
+	if activeIconTitle then
+		activeIconTitle:Destroy()
+		activeIconTitle = nil
+		TT_Title.Visible = true
+	end
+end
+
 --- Reset tail element LayoutOrders to their defaults (no icon offset).
 local function resetTailOrders()
 	TT_Stats.LayoutOrder = DEFAULT_TAIL_ORDERS.StatsLabel
@@ -119,9 +134,10 @@ local function resetTailOrders()
 	TT_Click.LayoutOrder = DEFAULT_TAIL_ORDERS.ClickLabel
 end
 
---- Full icon cleanup — called by hide / forceHide / show.
+--- Full cleanup — called by hide / forceHide / show.
 local function cleanupIcons()
 	clearIconStats()
+	clearIconTitle()
 	resetTailOrders()
 end
 
@@ -173,6 +189,73 @@ API.refs = {
 	ProgressLabel = TT_ProgressLabel,
 	Rewards = TT_Rewards,
 }
+
+-- ===================== ICON TITLE API =====================
+
+--- Clone IconTitleLabelTemplate, configure icon + text, hide the
+--- native TitleLabel, and parent the clone at LayoutOrder 0.
+--- Auto-cleaned by hide/forceHide/show via cleanupIcons().
+---
+--- config fields:
+---   icon  : table {col, row} for spritesheet OR string rbxassetid
+---   color : string  — hex color (e.g. "#FF5555")
+---   name  : string  — attribute display name
+---   value : string  — formatted attribute value (shown in white)
+function API.createIconTitle(config)
+	-- Tear down any previous icon title clone first
+	clearIconTitle()
+
+	local clone = IconTitleTemplate:Clone()
+	clone.Name = "IconTitleLabel"
+	clone.LayoutOrder = 0 -- same slot as TitleLabel
+
+	-- ── Icon (TitleIcon) ──
+	local img = clone:FindFirstChild("TitleIcon")
+	if img then
+		local iconData = config.icon
+		local hexColor = config.color or "#FFFFFF"
+
+		if type(iconData) == "table" then
+			local col = iconData[1] or 0
+			local row = iconData[2] or 0
+			local cs = STAT_SPRITESHEET.cellSize
+			img.Image = STAT_SPRITESHEET.assetId
+			img.ImageRectSize = Vector2.new(cs, cs)
+			img.ImageRectOffset = Vector2.new(col * cs, row * cs)
+			img.ImageColor3 = Color3.fromHex(hexColor)
+			img.ImageTransparency = 0
+		elseif type(iconData) == "string" and iconData ~= "" then
+			img.Image = iconData
+			img.ImageRectSize = Vector2.new(0, 0)
+			img.ImageRectOffset = Vector2.new(0, 0)
+			img.ImageColor3 = Color3.fromHex(hexColor)
+			img.ImageTransparency = 0
+		else
+			img.ImageTransparency = 1
+		end
+	end
+
+	-- ── Text (TitleLabel) ──
+	local titleLabel = clone:FindFirstChild("TitleLabel")
+	if titleLabel then
+		titleLabel.RichText = true
+		titleLabel.TextColor3 = Color3.fromHex(config.color or "#FFFFFF")
+		titleLabel.Text = string.format('%s <font color="#FFFFFF">%s</font>', config.name or "", config.value or "0")
+	end
+
+	-- Hide the native TitleLabel and parent the clone
+	TT_Title.Visible = false
+	clone.Parent = TooltipFrame
+	activeIconTitle = clone
+
+	return clone
+end
+
+--- Manually tear down the icon title clone (callers rarely need this
+--- directly — hide/forceHide/show handle it automatically).
+function API.clearIconTitle()
+	clearIconTitle()
+end
 
 -- ===================== ICON STAT LINE API =====================
 

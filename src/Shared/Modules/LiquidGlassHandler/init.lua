@@ -79,15 +79,23 @@ local function mergeSettings(overrides)
 		end
 	end
 
-	-- Layers
+	-- Layers (support overrides adding layers beyond the default count)
 	merged.Layers = {}
-	for i, layerDef in ipairs(DefaultSettings.Layers) do
+	local layerCount = #DefaultSettings.Layers
+	if overrides.Layers and #overrides.Layers > layerCount then
+		layerCount = #overrides.Layers
+	end
+	for i = 1, layerCount do
+		local base = DefaultSettings.Layers[i]
+		local over = overrides.Layers and overrides.Layers[i]
 		local ml = {}
-		for k, v in pairs(layerDef) do
-			ml[k] = v
+		if base then
+			for k, v in pairs(base) do
+				ml[k] = v
+			end
 		end
-		if overrides.Layers and overrides.Layers[i] then
-			for k, v in pairs(overrides.Layers[i]) do
+		if over then
+			for k, v in pairs(over) do
 				ml[k] = v
 			end
 		end
@@ -127,6 +135,17 @@ local function mergeSettings(overrides)
 		end
 	end
 
+	-- Distortion
+	merged.Distortion = {}
+	for k, v in pairs(DefaultSettings.Distortion) do
+		merged.Distortion[k] = v
+	end
+	if overrides.Distortion then
+		for k, v in pairs(overrides.Distortion) do
+			merged.Distortion[k] = v
+		end
+	end
+
 	return merged
 end
 
@@ -147,6 +166,9 @@ local function createGlassInstance(guiObject, overrides)
 
 	local instanceSettings = mergeSettings(overrides)
 	local forceFlat = instanceSettings.ForceFlat
+	local distortionCfg = instanceSettings.Distortion
+	local useDistortion = distortionCfg and distortionCfg.enabled
+	local distortionStrength = useDistortion and distortionCfg.strength or 0
 	local renderName = `LiquidGlass_{HttpService:GenerateGUID(false)}`
 
 	local masterFolder = Instance.new("Folder")
@@ -160,16 +182,23 @@ local function createGlassInstance(guiObject, overrides)
 		container.Name = renderName .. "_L" .. i
 		container.Parent = masterFolder
 
-		local hl = Instance.new("Highlight")
-		hl.FillColor = layerDef.fillColor
-		hl.FillTransparency = layerDef.fillTransparency
-		hl.OutlineColor = layerDef.outlineColor
-		hl.OutlineTransparency = layerDef.outlineTransparency
-		hl.Parent = container
+		local hl = nil
+		if not useDistortion then
+			-- Legacy mode: Model-level Highlight provides frosted tint.
+			hl = Instance.new("Highlight")
+			hl.FillColor = layerDef.fillColor
+			hl.OutlineColor = layerDef.outlineColor
+			hl.FillTransparency = layerDef.fillTransparency
+			hl.OutlineTransparency = layerDef.outlineTransparency
+			hl.Parent = container
+		end
+		-- Distortion mode: NO Model-level Highlight.
+		-- Per-Part Highlights (created in makePart) handle keep-alive.
+		-- Multiple competing Highlights kill the distortion effect.
 
 		layerContainers[i] = {
 			container = container,
-			highlight = hl,
+			highlight = hl, -- nil in distortion mode
 			pixels = {},
 			depthOffset = layerDef.depthOffset,
 			baseFillT = layerDef.fillTransparency,
@@ -206,9 +235,16 @@ local function createGlassInstance(guiObject, overrides)
 			return nil
 		end
 		local p = template:Clone()
-		p.Material = Enum.Material.Glass
-		p.Color = lc.meshColor
-		p.Transparency = lc.baseMeshT
+
+		if not useDistortion then
+			-- Legacy mode: override with config values
+			p.Material = Enum.Material.Glass
+			p.Color = lc.meshColor
+			p.Transparency = lc.baseMeshT
+		end
+		-- Distortion mode: template already has Glass material,
+		-- Transparency >5, and child Highlight. Don't touch them.
+
 		p.Anchored = true
 		p.CastShadow = false
 		p.CanCollide = false
@@ -241,6 +277,7 @@ local function createGlassInstance(guiObject, overrides)
 					RelSizeY = relSizeY,
 					LocalRot = localRot,
 					SwapAxes = swapAxes,
+					OriginalDepth = p.Size.X,
 				})
 			else
 				local data = pixels[partIndex]
@@ -259,7 +296,21 @@ local function createGlassInstance(guiObject, overrides)
 		-- ForceFlat path OR no UICorner: single Center part per layer.
 		-- This eliminates ALL internal seams.
 		if radius <= 0 then
-			addOrUpdate("Center", 0, 0, 1, 1)
+			if useDistortion then
+				local cols = distortionCfg.gridCols or 3
+				local rows = distortionCfg.gridRows or 2
+				local cellW = 1 / cols
+				local cellH = 1 / rows
+				for row = 0, rows - 1 do
+					for col = 0, cols - 1 do
+						local relX = (col + 0.5) * cellW - 0.5
+						local relY = (row + 0.5) * cellH - 0.5
+						addOrUpdate("Center", relX, relY, cellW, cellH)
+					end
+				end
+			else
+				addOrUpdate("Center", 0, 0, 1, 1)
+			end
 		else
 			-- 9-part rounded-corner grid (only used when ForceFlat = false
 			-- AND the GuiObject has a UICorner with radius > 0)
@@ -539,27 +590,44 @@ local function createGlassInstance(guiObject, overrides)
 			local worldW = (worldAtDepth(rRight, depth) - worldAtDepth(rLeft, depth)).Magnitude
 			local worldH = (worldAtDepth(rTop, depth) - worldAtDepth(rBottom, depth)).Magnitude
 
-			lc.highlight.FillTransparency = lc.baseFillT + (1 - lc.baseFillT) * absTransparency
-			lc.highlight.OutlineTransparency = lc.baseOutlineT + (1 - lc.baseOutlineT) * absTransparency
+			if lc.highlight then
+				lc.highlight.FillTransparency = lc.baseFillT + (1 - lc.baseFillT) * absTransparency
+				lc.highlight.OutlineTransparency = lc.baseOutlineT + (1 - lc.baseOutlineT) * absTransparency
+			end
 
 			for _, data in ipairs(lc.pixels) do
 				local pw = data.RelSizeX * worldW + localPadding
 				local ph = data.RelSizeY * worldH + localPadding
-				if data.SwapAxes then
-					data.Part.Size = Vector3.new(0.01, pw, ph)
-				else
-					data.Part.Size = Vector3.new(0.01, ph, pw)
-				end
-				data.Part.Transparency = lc.baseMeshT + (1 - lc.baseMeshT) * absTransparency
 
 				local localOffset = Vector3.new(data.RelX * worldW, -data.RelY * worldH, 0)
 				local rotatedOffset = guiRotCF * localOffset
 				local worldOffset = camCF.RightVector * rotatedOffset.X + camCF.UpVector * rotatedOffset.Y
-				data.Part.CFrame = CFrame.new(pCen + worldOffset)
-					* camCF.Rotation
-					* guiRotCF
-					* data.LocalRot
-					* rotationOffset
+
+				if useDistortion then
+					-- Clone's X depth is 0.025 (baked). rotationOffset aligns
+					-- thin X with camera look → camera sees through 0.025 studs.
+					-- Only scale Y (height) and Z (width) to match tile.
+					local tilePW = data.RelSizeX * worldW
+					local tilePH = data.RelSizeY * worldH
+					data.Part.Size = Vector3.new(data.OriginalDepth or 0.5, tilePH, tilePW)
+					data.Part.CFrame = CFrame.new(pCen + worldOffset)
+						* camCF.Rotation
+						* guiRotCF
+						* data.LocalRot
+						* rotationOffset
+				else
+					if data.SwapAxes then
+						data.Part.Size = Vector3.new(0.01, pw, ph)
+					else
+						data.Part.Size = Vector3.new(0.01, ph, pw)
+					end
+					data.Part.Transparency = lc.baseMeshT + (1 - lc.baseMeshT) * absTransparency
+					data.Part.CFrame = CFrame.new(pCen + worldOffset)
+						* camCF.Rotation
+						* guiRotCF
+						* data.LocalRot
+						* rotationOffset
+				end
 			end
 		end
 	end)
@@ -670,10 +738,12 @@ local function createGlassInstance(guiObject, overrides)
 			lc.baseOutlineT = layerDef.outlineTransparency
 			lc.baseMeshT = layerDef.meshTransparency
 			lc.meshColor = layerDef.meshColor
-			lc.highlight.FillColor = layerDef.fillColor
-			lc.highlight.FillTransparency = layerDef.fillTransparency
-			lc.highlight.OutlineColor = layerDef.outlineColor
-			lc.highlight.OutlineTransparency = layerDef.outlineTransparency
+			if lc.highlight then
+				lc.highlight.FillColor = layerDef.fillColor
+				lc.highlight.FillTransparency = layerDef.fillTransparency
+				lc.highlight.OutlineColor = layerDef.outlineColor
+				lc.highlight.OutlineTransparency = layerDef.outlineTransparency
+			end
 			for _, data in ipairs(lc.pixels) do
 				pcall(function()
 					data.Part.Color = layerDef.meshColor
@@ -710,6 +780,24 @@ local function createGlassInstance(guiObject, overrides)
 				cancelOutlineTweens()
 				outlineStroke.Transparency = 1
 				outlineStroke.BorderOffset = UDim.new(0, 0)
+			end
+		end
+
+		-- Update distortion
+		distortionCfg = instanceSettings.Distortion
+		useDistortion = distortionCfg and distortionCfg.enabled
+		distortionStrength = useDistortion and distortionCfg.strength or 0
+
+		for i, lc in ipairs(layerContainers) do
+			local layerDef = instanceSettings.Layers[i]
+			if layerDef and lc.highlight then
+				lc.highlight.FillTransparency = layerDef.fillTransparency
+				lc.highlight.OutlineTransparency = layerDef.outlineTransparency
+			end
+			for _, data in ipairs(lc.pixels) do
+				pcall(function()
+					data.Part.Transparency = if useDistortion then distortionStrength else lc.baseMeshT
+				end)
 			end
 		end
 

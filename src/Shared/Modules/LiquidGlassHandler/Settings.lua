@@ -48,15 +48,6 @@ return {
 
 	-- ── Two-layer glass stack ─────────────────────────────────────────────
 	Layers = {
-		{ -- Back: frosted body anchor
-			depthOffset = 0.22,
-			fillColor = Color3.fromRGB(190, 210, 235),
-			fillTransparency = 0.55,
-			outlineColor = Color3.fromRGB(255, 255, 255),
-			outlineTransparency = 1, -- DISABLED: was causing nested-rectangle artifacts
-			meshColor = Color3.fromRGB(175, 192, 215),
-			meshTransparency = 0.40,
-		},
 		{ -- Front: glass face (specular rim now via UIStroke, not Highlight)
 			depthOffset = -0.08,
 			fillColor = Color3.fromRGB(228, 236, 252),
@@ -111,5 +102,19 @@ return {
 		tweenOutTime = 0.2,
 		easingIn = Enum.EasingStyle.Quint,
 		easingOut = Enum.EasingStyle.Quint,
+	},
+
+	-- ── Distortion mode (transparency >1 trick) ──────────────────────────
+	-- When enabled, Part.Transparency is set to `strength` (>1) which
+	-- triggers Roblox's hidden glass distortion. The per-layer Highlight
+	-- becomes a keep-alive (both transparencies forced to 1). The higher
+	-- the strength, the heavier the frosted distortion.
+	-- NOTE: Requires Graphics Quality 8+ on the client. Lower settings
+	-- disable glass distortion entirely.
+	Distortion = {
+		enabled = true,
+		strength = 4,
+		gridCols = 3,
+		gridRows = 2,
 	},
 }
