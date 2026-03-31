@@ -1649,60 +1649,73 @@ LiquidGlassHandler.apply(inventoryPanel, {
 })
 
 -- ===================== BLANKSLOT GRADIENT ROTATION =====================
--- Rotates BG.UIGradient in every BlankSlot across both active grid buffers
--- so the transparent edge always faces the cursor. Throttled to 0.3s.
-
--- (UserInputService is already declared at the top of CMC — do NOT redeclare it)
+-- Lerps BG.UIGradient.Rotation toward the cursor-facing angle each Heartbeat.
+-- Takes the shortest arc across the 0/360 boundary (no long-way-around spins).
 
 local gridBufferA = menuFrame:WaitForChild("GridBufferA")
 local gridBufferB = menuFrame:WaitForChild("GridBufferB")
 
-local GRADIENT_THROTTLE = 0.03
-local lastGradientUpdate = 0
+local GRADIENT_LERP_SPEED = 12 -- higher = snappier; tune freely
 
-local function updateBlankSlotGradients(cursorPos)
-	-- Guard: skip if menu is closed
+-- Per-slot current angle state: [GuiObject] = currentAngleDegrees
+local slotCurrentAngles = {}
+
+-- Latest cursor position, updated on InputChanged
+local latestCursorPos = Vector2.new(0, 0)
+
+UserInputService.InputChanged:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseMovement then
+		latestCursorPos = Vector2.new(input.Position.X, input.Position.Y)
+	end
+end)
+
+local function shortestArcDelta(from, to)
+	-- Returns the signed delta in [-180, 180] to go from `from` to `to`
+	local delta = (to - from) % 360
+	if delta > 180 then
+		delta = delta - 360
+	end
+	return delta
+end
+
+RunService.Heartbeat:Connect(function(dt)
 	if not menuOpen then
 		return
 	end
 
-	local now = tick()
-	if (now - lastGradientUpdate) < GRADIENT_THROTTLE then
-		return
-	end
-	lastGradientUpdate = now
-
-	-- WITH this:
-
-	-- Apply per-slot gradient rotation based on each slot's own screen center
 	for _, buffer in ipairs({ gridBufferA, gridBufferB }) do
 		if not buffer.Visible then
 			continue
 		end
 		for _, child in ipairs(buffer:GetChildren()) do
-			if child.Name == "BlankSlot" then
-				local bg = child:FindFirstChild("BG")
-				if bg then
-					local gradient = bg:FindFirstChildOfClass("UIGradient")
-					if gradient then
-						local slotPos = bg.AbsolutePosition
-						local slotSize = bg.AbsoluteSize
-						local cx = slotPos.X + slotSize.X * 0.5
-						local cy = slotPos.Y + slotSize.Y * 0.5
-						-- WITH:
-						local angle = (math.deg(math.atan2(cx - cursorPos.X, cursorPos.Y - cy)) - 90) % 360
-						gradient.Rotation = angle
-					end
-				end
+			if child.Name ~= "BlankSlot" then
+				continue
 			end
-		end
-	end
-end
+			local bg = child:FindFirstChild("BG")
+			if not bg then
+				continue
+			end
+			local gradient = bg:FindFirstChildOfClass("UIGradient")
+			if not gradient then
+				continue
+			end
 
--- Wire once at startup
-UserInputService.InputChanged:Connect(function(input)
-	if input.UserInputType == Enum.UserInputType.MouseMovement then
-		updateBlankSlotGradients(input.Position)
+			-- Compute target angle from cursor to this slot's center
+			local slotPos = bg.AbsolutePosition
+			local slotSize = bg.AbsoluteSize
+			local cx = slotPos.X + slotSize.X * 0.5
+			local cy = slotPos.Y + slotSize.Y * 0.5
+			local target = (math.deg(math.atan2(cx - latestCursorPos.X, latestCursorPos.Y - cy)) - 90) % 360
+
+			-- Initialise current angle on first encounter
+			local current = slotCurrentAngles[bg] or target
+			local delta = shortestArcDelta(current, target)
+			local next = current + delta * math.min(dt * GRADIENT_LERP_SPEED, 1)
+			next = next % 360
+
+			slotCurrentAngles[bg] = next
+			gradient.Rotation = next
+		end
 	end
 end)
 
