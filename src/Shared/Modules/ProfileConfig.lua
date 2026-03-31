@@ -289,28 +289,42 @@ ProfileConfig.ATTRIBUTE_CATEGORIES = {
 			name = "Crit Chance",
 			color = "#5555FF",
 			icon = { 4, 1 }, -- Starburst
-			description = "Chance to land a critical hit.",
+			description = "Chance to land a critical hit.\n\n<font weight='900' color='#FFAA00'>Ability: Critical Hit</font>\nIncreases button press rewards by <font color='#5555FF'>Crit Increase %</font>.",
 		},
 		{
 			key = "CritIncrease",
 			name = "Crit Increase",
 			color = "#5555FF",
 			icon = { 3, 0 }, -- Starburst
-			description = "Increases critical hit damage.",
+			description = "Increases critical hit damage.\n\n<font weight='900' color='#FFAA00'>Ability: Critical Hit</font>\nIncreases button press rewards by <font color='#5555FF'>Crit Increase %</font>.",
 		},
 		{
 			key = "PressSpeed",
 			name = "Bonus Press Speed",
 			color = "#FFFF55",
 			icon = { 3, 1 }, -- Cross
-			description = "Increases button presses per second.",
+			description = "<font weight='900' color='#FFAA00'>Passive Ability: Fast Finger</font>\nIncreases button presses per second.",
 		},
 		{
-			key = "Mending",
-			name = "Mending",
+			key = "Luck",
+			name = "Luck",
 			color = "#55FF55",
-			icon = { 5, 2 }, -- Cross
-			description = "Increases healing.",
+			icon = { 0, 2 }, -- Cross
+			description = "<font weight='900' color='#FFAA00'>Passive Ability: Clover</font>\nIncreases base luck for all buttons.",
+		},
+		{
+			key = "Refine",
+			name = "Refine",
+			color = "#FF55FF",
+			icon = { 0, 3 }, -- Cross
+			description = "<font weight='900' color='#FFAA00'>Ability: Refinement</font>\nThe incoming stat's grade is increased by <font color='#55FF55'>+1</font>.",
+		},
+		{
+			key = "Pristine",
+			name = "Pristine",
+			color = "#AA00AA",
+			icon = { 1, 0 }, -- Cross
+			description = "<font weight='900' color='#FFAA00'>Ability: Mint</font>\n<font color='#55FF55'>2x</font> any incoming stat.",
 		},
 	},
 }

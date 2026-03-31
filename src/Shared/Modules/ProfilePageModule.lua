@@ -36,6 +36,7 @@ local UIClick3 = workspace:WaitForChild("UISounds"):WaitForChild("Click3")
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local ProfileConfig = require(Modules:WaitForChild("ProfileConfig")) :: any
 local MoneyLib = require(Modules:WaitForChild("MoneyLib")) :: any
+local TooltipModuleDirect = require(Modules:WaitForChild("TooltipModule")) :: any
 
 -- ===================== CONFIG REFERENCES =====================
 local ATTRIBUTE_CATEGORIES = ProfileConfig.ATTRIBUTE_CATEGORIES
@@ -70,6 +71,29 @@ local cachedAttributeData = {}
 local dynamicSlots = {} -- array of cloned instances (StatSlots + fill blanks)
 local dynamicConnections = {} -- array of RBXScriptConnections
 local activeGridSkill = nil -- which skill is currently shown in ProfileMenu2
+
+-- ===================== TOOLTIP LAZY-RESOLVE =====================
+-- TooltipModule is set via init(sharedRefs), but if init timing shifts
+-- (e.g. after pooled grid refactor), this self-heals from the direct require.
+local function resolveTooltip()
+	if TooltipModule then
+		return TooltipModule
+	end
+	if shared and shared.TooltipModule then
+		TooltipModule = shared.TooltipModule
+		return TooltipModule
+	end
+	-- Fallback: direct require (returns same cached instance)
+	if TooltipModuleDirect then
+		TooltipModule = TooltipModuleDirect
+		warn("[ProfilePageModule] TooltipModule resolved via direct require — sharedRefs was nil. Check init order.")
+		return TooltipModule
+	end
+	warn("[ProfilePageModule] TooltipModule is nil — cannot show tooltip")
+	return nil
+end
+
+-- ===================== TOOLTIP SOURCES =====================
 
 -- ===================== TOOLTIP SOURCES =====================
 local TOOLTIP_SOURCE = "profile"
@@ -511,32 +535,34 @@ function M.init(sharedRefs, menu2Frame)
 	shared = sharedRefs
 	TooltipModule = sharedRefs.TooltipModule
 
-	-- ── Resolve ProfileMenu2 frame ──
-	-- Accept explicit arg, or fall back to resolving from menuFrame (sharedRefs).
-	if menu2Frame then
-		profileMenu2Frame = menu2Frame
-	elseif sharedRefs.menuFrame then
-		profileMenu2Frame = sharedRefs.menuFrame:FindFirstChild("ProfileMenu2")
+	if TooltipModule then
+		print("[ProfilePageModule] TooltipModule from sharedRefs: ✓")
+	else
+		warn("[ProfilePageModule] sharedRefs.TooltipModule is NIL — will use direct require fallback")
+		TooltipModule = TooltipModuleDirect
 	end
 
-	if profileMenu2Frame then
-		print("[ProfilePageModule] profileMenu2Frame: ✓ found (" .. profileMenu2Frame:GetFullName() .. ")")
-	else
-		warn("[ProfilePageModule] profileMenu2Frame: ✗ NOT FOUND — openAttributeGrid will not work")
+	-- ── ProfileMenu2 frame ──
+	-- ProfileMenu2 is a pooled grid — no permanent frame in menuFrame.
+	-- The buffer frame is set dynamically via setMenu2Frame() from
+	-- the onPopulate hook each time the grid is populated.
+	if menu2Frame then
+		profileMenu2Frame = menu2Frame
 	end
+	print("[ProfilePageModule] profileMenu2Frame will be set via setMenu2Frame() on navigate")
 
 	-- ── Resolve templates from PlayerGui (same pattern as StatisticsPageModule) ──
 	local CentralizedMenu = player.PlayerGui:WaitForChild("CentralizedAscensionMenu")
 	local TemporaryMenus = CentralizedMenu:WaitForChild("TemporaryMenus")
 
-	statSlotTemplate = TemporaryMenus:FindFirstChild("StatSlot")
+	statSlotTemplate = TemporaryMenus:FindFirstChild("StatSlot") or TemporaryMenus:WaitForChild("StatSlot", 5)
 	if not statSlotTemplate then
 		warn("[ProfilePageModule] StatSlot template NOT FOUND in TemporaryMenus")
 	else
 		print("[ProfilePageModule] StatSlot template: ✓")
 	end
 
-	blankSlotTemplate = TemporaryMenus:FindFirstChild("BlankSlot")
+	blankSlotTemplate = TemporaryMenus:FindFirstChild("BlankSlot") or TemporaryMenus:WaitForChild("BlankSlot", 5)
 	if not blankSlotTemplate then
 		warn("[ProfilePageModule] BlankSlot template NOT FOUND in TemporaryMenus")
 	else
@@ -573,6 +599,9 @@ end
 -- ===================== PROFILE GRID (Menu1) TOOLTIPS =====================
 
 function M.showSkillAttributeTooltip(skillName)
+	if not resolveTooltip() then
+		return
+	end
 	TooltipModule.clearIconStats()
 	TooltipModule.resetTailOrders()
 
@@ -608,12 +637,18 @@ function M.showSkillAttributeTooltip(skillName)
 end
 
 function M.hideSkillAttributeTooltip()
+	if not resolveTooltip() then
+		return
+	end
 	TooltipModule.hide(TOOLTIP_SOURCE)
 end
 
 -- ===================== PROFILE SUMMARY TOOLTIP (Nexus) =====================
 
 function M.showProfileSummaryTooltip()
+	if not resolveTooltip() then
+		return
+	end
 	TooltipModule.clearIconStats()
 	TooltipModule.resetTailOrders()
 
@@ -655,12 +690,18 @@ function M.showProfileSummaryTooltip()
 end
 
 function M.hideProfileSummaryTooltip()
+	if not resolveTooltip() then
+		return
+	end
 	TooltipModule.hide(TOOLTIP_SOURCE)
 end
 
 -- ===================== FULL PROFILE TOOLTIP (MyProfile) =====================
 
 function M.showFullProfileTooltip()
+	if not resolveTooltip() then
+		return
+	end
 	TooltipModule.clearIconStats()
 	TooltipModule.resetTailOrders()
 
@@ -689,12 +730,18 @@ function M.showFullProfileTooltip()
 end
 
 function M.hideFullProfileTooltip()
+	if not resolveTooltip() then
+		return
+	end
 	TooltipModule.hide(TOOLTIP_SOURCE)
 end
 
 -- ===================== STAT BREAKDOWN TOOLTIP (ProfileMenu2 slots) =====================
 
 function M.showStatBreakdownTooltip(attrConfig)
+	if not resolveTooltip() then
+		return
+	end
 	TooltipModule.clearIconStats()
 	TooltipModule.resetTailOrders()
 
@@ -753,14 +800,28 @@ function M.showStatBreakdownTooltip(attrConfig)
 end
 
 function M.hideStatBreakdownTooltip()
+	if not resolveTooltip() then
+		return
+	end
 	TooltipModule.hide(STAT_TOOLTIP_SOURCE)
 end
 
 -- ===================== PROFILE MENU 2 — DYNAMIC POPULATION =====================
 
+--- Set the ProfileMenu2 parent frame dynamically.
+--- Called by the pooled grid's onPopulate hook with the active buffer.
+--- Must be called BEFORE openAttributeGrid().
+function M.setMenu2Frame(frame)
+	profileMenu2Frame = frame
+end
+
 --- Populate ProfileMenu2 with stat slots for the given skill.
 --- Call BEFORE GridMenuModule.navigateToGrid("ProfileMenu2").
-function M.openAttributeGrid(skillName)
+function M.openAttributeGrid(skillName, activeFrame)
+	-- Pooled grid: use the buffer frame as the parent for dynamic clones.
+	if activeFrame then
+		profileMenu2Frame = activeFrame
+	end
 	-- Clean up any previous population
 	cleanupDynamicSlots()
 
@@ -860,7 +921,9 @@ end
 --- Clean up ProfileMenu2 dynamic content.
 --- Call BEFORE GridMenuModule.navigateBack() from ProfileMenu2.
 function M.closeAttributeGrid()
-	TooltipModule.forceHide()
+	if resolveTooltip() then
+		TooltipModule.forceHide()
+	end
 	cleanupDynamicSlots()
 	print("[ProfilePageModule] closeAttributeGrid: cleaned up")
 end

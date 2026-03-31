@@ -97,7 +97,7 @@ local DEFAULT_TAIL_ORDERS = {
 -- Callers pass { col, row } coordinates to createIconStatLine().
 -- Upload the spritesheet PNG to Roblox and paste the asset ID here.
 local STAT_SPRITESHEET = {
-	assetId = "rbxassetid://132086377310489", -- TODO: replace with uploaded spritesheet asset ID
+	assetId = "rbxassetid://115852737004664", -- TODO: replace with uploaded spritesheet asset ID
 	cellSize = 170,
 }
 
@@ -373,10 +373,6 @@ function API.show(data, source)
 	TT_Rewards.Visible = false
 
 	TooltipFrame.Visible = true
-
-	if glassHandle then
-		glassHandle.setEnabled(true)
-	end
 	staticOutline.Transparency = 0.15
 end
 
@@ -389,10 +385,6 @@ function API.hide(source)
 	TooltipFrame.Visible = false
 	following = false
 	activeSource = nil
-
-	if glassHandle then
-		glassHandle.setEnabled(false)
-	end
 
 	-- Clean up icon clones and reset layout
 	cleanupIcons()
@@ -410,9 +402,6 @@ function API.forceHide()
 	following = false
 	activeSource = nil
 
-	if glassHandle then
-		glassHandle.setEnabled(false)
-	end
 	staticOutline.Transparency = 1
 
 	-- Clean up icon clones and reset layout
@@ -431,10 +420,6 @@ function API.showRaw(source)
 	activeSource = source
 	following = true
 	TooltipFrame.Visible = true
-
-	if glassHandle then
-		glassHandle.setEnabled(true)
-	end
 	staticOutline.Transparency = 0.15
 end
 

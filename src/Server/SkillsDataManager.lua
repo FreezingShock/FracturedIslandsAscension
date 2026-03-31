@@ -182,11 +182,12 @@ end
 -- nextOrderIndex: number — auto-increment for new item types
 -- maxCapacity   : number — total item cap across all stacks
 PROFILE_TEMPLATE._Inventory = {
-	items = {}, -- saved inventory (written on PlayerRemoving)
-	hotbarSlots = {}, -- { [slotNumber] = itemId }
-	toolOrder = {}, -- { [itemId] = orderNumber }
+	items = {},
+	hotbarSlots = {},
+	toolOrder = {},
 	nextOrderIndex = 1,
 	maxCapacity = 1000,
+	hotbarShowAll = false,
 }
 
 local SkillProfileStore = ProfileService.GetProfileStore(
@@ -195,6 +196,38 @@ local SkillProfileStore = ProfileService.GetProfileStore(
 )
 
 local skillProfiles = {} -- [player.UserId] = profile
+
+-- In your server DataManager (wherever ProfileService saves happen):
+
+local SetHotbarVisibilityFunc = Instance.new("RemoteFunction")
+SetHotbarVisibilityFunc.Name = "SetHotbarVisibility"
+SetHotbarVisibilityFunc.Parent = ReplicatedStorage
+
+local GetHotbarVisibilityFunc = Instance.new("RemoteFunction")
+GetHotbarVisibilityFunc.Name = "GetHotbarVisibility"
+GetHotbarVisibilityFunc.Parent = ReplicatedStorage
+
+SetHotbarVisibilityFunc.OnServerInvoke = function(player, showAll)
+	local profile = skillProfiles[player.UserId]
+	if profile then
+		profile.Data._Inventory.hotbarShowAll = (showAll == true)
+	end
+end
+
+GetHotbarVisibilityFunc.OnServerInvoke = function(player)
+	-- Profile may not be loaded yet if client fires before PlayerAdded completes.
+	-- Poll briefly rather than returning a stale false.
+	local attempts = 0
+	while not skillProfiles[player.UserId] and attempts < 20 do
+		task.wait(0.25)
+		attempts += 1
+	end
+	local profile = skillProfiles[player.UserId]
+	if profile then
+		return profile.Data._Inventory.hotbarShowAll or false
+	end
+	return false
+end
 
 -- ===================== REMOTE EVENT =====================
 local SkillUpdated = ReplicatedStorage:FindFirstChild("SkillUpdated")
@@ -237,6 +270,9 @@ local function sanitizeSkillData(data)
 	end
 	inv.nextOrderIndex = math.max(tonumber(inv.nextOrderIndex) or 1, 1)
 	inv.maxCapacity = math.max(tonumber(inv.maxCapacity) or 1000, 1)
+	if inv.hotbarShowAll == nil then
+		inv.hotbarShowAll = false
+	end
 end
 
 -- ===================== BUILD CLIENT PAYLOAD =====================

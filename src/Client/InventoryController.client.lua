@@ -644,11 +644,26 @@ local function refreshAll()
 	refreshInventory()
 end
 
+local hotbarShowAllPref = false -- mirrors server-saved preference
+
+-- Applies the current visibility preference (or drag override).
+-- dragOverride=true forces all slots visible (drag in progress).
+local function applyHotbarVisibility(dragOverride)
+	local showAll = dragOverride or hotbarShowAllPref
+	for i = 1, MAX_HOTBAR - 1 do
+		local slotData = hotbarSlots[i]
+		if showAll then
+			slotData.frame.Visible = true
+		else
+			-- Only show if filled
+			slotData.frame.Visible = (slotData.toolInfo ~= nil)
+		end
+	end
+end
+
 -- Show all 8 item hotbar slots (not slot 9) during drag
 local function _showAllHotbarSlots()
-	for i = 1, MAX_HOTBAR - 1 do -- slots 1-8 only
-		hotbarSlots[i].frame.Visible = true
-	end
+	applyHotbarVisibility(true) -- drag override = force all visible
 end
 
 -- ===================== EQUIP TRACKING =====================
@@ -1271,6 +1286,12 @@ MenuBridge._onStateChanged = function(mode)
 		clearMobileSelection()
 		TooltipModule.forceHide()
 	end
+end
+
+-- ── Hotbar visibility preference from CMC ──
+MenuBridge._onHotbarVisibilityChanged = function(showAll)
+	hotbarShowAllPref = showAll
+	applyHotbarVisibility(false)
 end
 
 -- Expose refresh for external callers

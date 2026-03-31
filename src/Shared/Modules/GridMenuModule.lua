@@ -820,5 +820,17 @@ function M.hasGrid(gridKey)
 	return grids[gridKey] ~= nil or pooledGrids[gridKey] ~= nil
 end
 
+--- Dynamically update a grid's title before navigating to it.
+--- Works for both legacy and pooled grids.
+--- Call this BEFORE navigateToGrid() when the title depends on
+--- context (e.g. which skill was clicked to open ProfileMenu2).
+function M.setGridTitle(gridKey, title)
+	if pooledGrids[gridKey] then
+		pooledGrids[gridKey].title = title
+	elseif grids[gridKey] then
+		grids[gridKey].title = title
+	end
+end
+
 print("GridMenuModule: Loaded ✓")
 return M

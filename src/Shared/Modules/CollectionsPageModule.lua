@@ -552,7 +552,25 @@ local function refreshMenu3Tiers()
 end
 
 -- ===================== OPEN SKILL (Menu2) =====================
-function M.openSkill(skillName)
+function M.openSkill(skillName, activeFrame)
+	-- Update frame reference if a new buffer was provided
+	if activeFrame then
+		menu2Frame = activeFrame
+		selectedSkillFrame = activeFrame:FindFirstChild("SelectedSkill")
+		-- Wire tooltip on freshly cloned SelectedSkill (GC'd with instance)
+		if selectedSkillFrame then
+			selectedSkillFrame.MouseEnter:Connect(function()
+				if currentSkill and shared.SkillsPageModule then
+					shared.SkillsPageModule.showGridSkillTooltip(currentSkill, false)
+				end
+			end)
+			selectedSkillFrame.MouseLeave:Connect(function()
+				if shared.SkillsPageModule then
+					shared.SkillsPageModule.hideGridSkillTooltip()
+				end
+			end)
+		end
+	end
 	clearMenu2Dynamic()
 	currentSkill = skillName
 	currentStatKey = nil
@@ -668,10 +686,11 @@ function M.openStat(skillName, statKey)
 		return
 	end
 
-	-- Navigate grid
+	-- Navigate grid and update frame reference
 	local GridMenuModule = shared.GridMenuModule
 	if GridMenuModule then
 		GridMenuModule.navigateToGrid("CollectionsMenu3")
+		menu3Frame = GridMenuModule.getActiveGridFrame()
 		shared.typewriteTitle(config.name .. " Collection")
 	end
 
@@ -883,8 +902,8 @@ end
 function M.init(sharedRefs, m2Frame, m3Frame)
 	shared = sharedRefs
 	TooltipModule = sharedRefs.TooltipModule
-	menu2Frame = m2Frame
-	menu3Frame = m3Frame
+	menu2Frame = m2Frame -- may be nil for pooled grids
+	menu3Frame = m3Frame -- may be nil for pooled grids
 
 	local CentralizedMenu = player.PlayerGui:WaitForChild("CentralizedAscensionMenu")
 	local TemporaryMenus = CentralizedMenu:WaitForChild("TemporaryMenus")
@@ -904,21 +923,10 @@ function M.init(sharedRefs, m2Frame, m3Frame)
 		warn("[CollectionsPageModule] BlankSlot template NOT FOUND in TemporaryMenus")
 	end
 
-	selectedSkillFrame = menu2Frame:FindFirstChild("SelectedSkill")
-	-- selectedStatFrame is cloned dynamically in openStat(), not pre-built
-
-	-- ── Tooltip on SelectedSkill (Menu2 header) ──
-	if selectedSkillFrame then
-		selectedSkillFrame.MouseEnter:Connect(function()
-			if currentSkill and shared.SkillsPageModule then
-				shared.SkillsPageModule.showGridSkillTooltip(currentSkill, false)
-			end
-		end)
-		selectedSkillFrame.MouseLeave:Connect(function()
-			if shared.SkillsPageModule then
-				shared.SkillsPageModule.hideGridSkillTooltip()
-			end
-		end)
+	-- Frame-dependent setup (selectedSkillFrame, tooltip wiring)
+	-- is now handled in openSkill() when the buffer frame is passed.
+	if menu2Frame then
+		selectedSkillFrame = menu2Frame:FindFirstChild("SelectedSkill")
 	end
 
 	-- ── Listen for StatisticsUpdated — refresh live data ──

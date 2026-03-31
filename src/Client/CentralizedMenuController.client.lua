@@ -36,14 +36,11 @@ local inventoryGridLayout = inventoryFrame:WaitForChild("UIGridLayout")
 
 local TemporaryMenus = CentralizedMenu:WaitForChild("TemporaryMenus")
 local GridTemplates = ReplicatedStorage:WaitForChild("GridTemplates")
-statSlotTemplate = TemporaryMenus:FindFirstChild("StatSlot")
 local Sidebar = playerGui:WaitForChild("Sidebar")
 local SidebarBB = Sidebar:WaitForChild("SidebarBB")
 local NexusBtn = SidebarBB:WaitForChild("Nexus")
 
 -- ===================== MODULES =====================
-local Modules = ReplicatedStorage:WaitForChild("Modules")
-
 local TooltipModule = require(Modules:WaitForChild("TooltipModule")) :: any
 local GridMenuModule = require(Modules:WaitForChild("GridMenuModule")) :: any
 local SkillsPageModule = require(Modules:WaitForChild("SkillsPageModule")) :: any
@@ -96,6 +93,33 @@ local sidebarActiveTween = nil
 
 -- ===================== ROOT GRID KEY =====================
 local ROOT_GRID = "NexusMenu"
+
+-- ===================== HOTBAR VISIBILITY STATE =====================
+-- true  = show all 8 slots always
+-- false = show only filled slots (default)
+local hotbarShowAll = false
+
+-- Persist across sessions via a simple IntValue in PlayerData (ProfileService).
+-- We read/write via a RemoteFunction so the server owns the value.
+local SetHotbarVisibilityFunc = ReplicatedStorage:WaitForChild("SetHotbarVisibility")
+local GetHotbarVisibilityFunc = ReplicatedStorage:WaitForChild("GetHotbarVisibility")
+
+-- Load saved preference on init (non-blocking)
+task.spawn(function()
+	local saved = GetHotbarVisibilityFunc:InvokeServer()
+	if saved ~= nil then
+		hotbarShowAll = saved
+	end
+	-- Apply immediately to hotbar
+	MenuBridge.setHotbarShowAll(hotbarShowAll)
+end)
+
+-- REPLACE WITH:
+local function toggleHotbarVisibility()
+	hotbarShowAll = not hotbarShowAll
+	SetHotbarVisibilityFunc:InvokeServer(hotbarShowAll)
+	MenuBridge.setHotbarShowAll(hotbarShowAll)
+end
 
 -- ===================== TWEEN HELPERS =====================
 local function tweenObject(object, targetProps, info)
@@ -242,6 +266,17 @@ local NEXUS_BUTTONS = {
 		},
 		action = nil,
 	},
+	HotbarVisibility = {
+		tooltipData = {
+			title = '<font color="#FFAA00"><b>Hotbar Visibility</b></font>',
+			desc = '<font color="#AAAAAA">Toggle between showing only filled hotbar slots or all 8 slots at all times.</font>',
+			click = '<font color="#FFFF55">Click to toggle!</font>',
+		},
+		action = "callback",
+		callback = function()
+			toggleHotbarVisibility()
+		end,
+	},
 	BoosterOil = {
 		tooltipData = {
 			title = '<font color="#FFAA00"><b>Booster Oil</b></font>',
@@ -338,8 +373,8 @@ local COLLECTION_BUTTONS = {
 		},
 		action = "callback",
 		callback = function()
-			CollectionsPageModule.openSkill("Farming")
 			GridMenuModule.navigateToGrid("CollectionsMenu2")
+			CollectionsPageModule.openSkill("Farming", GridMenuModule.getActiveGridFrame())
 			typewriteTitle("Farming Collections")
 		end,
 	},
@@ -351,8 +386,8 @@ local COLLECTION_BUTTONS = {
 		},
 		action = "callback",
 		callback = function()
-			CollectionsPageModule.openSkill("Foraging")
 			GridMenuModule.navigateToGrid("CollectionsMenu2")
+			CollectionsPageModule.openSkill("Foraging", GridMenuModule.getActiveGridFrame())
 			typewriteTitle("Foraging Collections")
 		end,
 	},
@@ -385,8 +420,8 @@ local COLLECTION_BUTTONS = {
 		},
 		action = "callback",
 		callback = function()
-			CollectionsPageModule.openSkill("General")
 			GridMenuModule.navigateToGrid("CollectionsMenu2")
+			CollectionsPageModule.openSkill("General", GridMenuModule.getActiveGridFrame())
 			typewriteTitle("General Collections")
 		end,
 	},
@@ -466,8 +501,8 @@ local STATISTICS_BUTTONS = {
 		},
 		action = "callback",
 		callback = function()
-			StatisticsPageModule.openSkill("Farming")
 			GridMenuModule.navigateToGrid("StatisticsMenu2")
+			StatisticsPageModule.openSkill("Farming", GridMenuModule.getActiveGridFrame())
 			typewriteTitle("Farming Statistics")
 		end,
 	},
@@ -479,8 +514,8 @@ local STATISTICS_BUTTONS = {
 		},
 		action = "callback",
 		callback = function()
-			StatisticsPageModule.openSkill("Foraging")
 			GridMenuModule.navigateToGrid("StatisticsMenu2")
+			StatisticsPageModule.openSkill("Foraging", GridMenuModule.getActiveGridFrame())
 			typewriteTitle("Foraging Statistics")
 		end,
 	},
@@ -506,8 +541,8 @@ local STATISTICS_BUTTONS = {
 		},
 		action = "callback",
 		callback = function()
-			StatisticsPageModule.openSkill("General")
 			GridMenuModule.navigateToGrid("StatisticsMenu2")
+			StatisticsPageModule.openSkill("General", GridMenuModule.getActiveGridFrame())
 			typewriteTitle("General Statistics")
 		end,
 	},
@@ -713,6 +748,18 @@ local SKILLS_BUTTONS = {
 	},
 }
 
+-- ===================== PROFILE MENU 2 — SKILL ROUTING =====================
+-- Tracks which skill the player clicked so onPopulate knows what to show.
+local pendingProfileSkill = nil
+
+local function openProfileMenu2(skillName)
+	pendingProfileSkill = skillName
+	local displayName = ProfileConfig.PROFILE_MENU2_TITLES and ProfileConfig.PROFILE_MENU2_TITLES[skillName]
+		or skillName
+	GridMenuModule.setGridTitle("ProfileMenu2", displayName .. " Attributes")
+	GridMenuModule.navigateToGrid("ProfileMenu2")
+end
+
 -- ===================== PROFILE GRID BUTTON CONFIGS =====================
 local PROFILE_BUTTONS = {
 	MyProfile = {
@@ -761,48 +808,48 @@ local PROFILE_BUTTONS = {
 	FarmingAttributes = {
 		action = "callback",
 		callback = function()
-			ProfilePageModule.openAttributeGrid("Farming")
 			GridMenuModule.navigateToGrid("ProfileMenu2")
+			ProfilePageModule.openAttributeGrid("Farming", GridMenuModule.getActiveGridFrame())
 			typewriteTitle('<font color="#FFAA00">Farming</font> Attributes')
 		end,
 	},
 	ForagingAttributes = {
 		action = "callback",
 		callback = function()
-			ProfilePageModule.openAttributeGrid("Foraging")
 			GridMenuModule.navigateToGrid("ProfileMenu2")
+			ProfilePageModule.openAttributeGrid("Foraging", GridMenuModule.getActiveGridFrame())
 			typewriteTitle('<font color="#00AA00">Foraging</font> Attributes')
 		end,
 	},
 	MiningAttributes = {
 		action = "callback",
 		callback = function()
-			ProfilePageModule.openAttributeGrid("Mining")
 			GridMenuModule.navigateToGrid("ProfileMenu2")
+			ProfilePageModule.openAttributeGrid("Mining", GridMenuModule.getActiveGridFrame())
 			typewriteTitle('<font color="#5555FF">Mining</font> Attributes')
 		end,
 	},
 	MiscAttributes = {
 		action = "callback",
 		callback = function()
-			ProfilePageModule.openAttributeGrid("Misc")
 			GridMenuModule.navigateToGrid("ProfileMenu2")
+			ProfilePageModule.openAttributeGrid("Misc", GridMenuModule.getActiveGridFrame())
 			typewriteTitle('<font color="#FFFF55">Misc</font> Attributes')
 		end,
 	},
 	FishingAttributes = {
 		action = "callback",
 		callback = function()
-			ProfilePageModule.openAttributeGrid("Fishing")
 			GridMenuModule.navigateToGrid("ProfileMenu2")
+			ProfilePageModule.openAttributeGrid("Fishing", GridMenuModule.getActiveGridFrame())
 			typewriteTitle('<font color="#00AAAA">Fishing</font> Attributes')
 		end,
 	},
 	GeneralAttributes = {
 		action = "callback",
 		callback = function()
-			ProfilePageModule.openAttributeGrid("General")
 			GridMenuModule.navigateToGrid("ProfileMenu2")
+			ProfilePageModule.openAttributeGrid("General", GridMenuModule.getActiveGridFrame())
 			typewriteTitle('<font color="#FFFFFF">General</font> Attributes')
 		end,
 	},
@@ -875,12 +922,14 @@ local PROFILE_MENU2_BUTTONS = {
 }
 
 -- ===================== NEXUS GRID LAYOUT CONFIG =====================
+-- REPLACE WITH:
 local NEXUS_BLANK_GROUPS = {
 	{ layoutOrder = 1, count = 13 },
 	{ layoutOrder = 3, count = 5 },
 	{ layoutOrder = 11, count = 4 },
-	{ layoutOrder = 15, count = 15 },
-	{ layoutOrder = 20, count = 2 },
+	{ layoutOrder = 15, count = 12 }, -- was 15; one cell taken by HotbarVisibility
+	{ layoutOrder = 17, count = 2 },
+	{ layoutOrder = 22, count = 2 },
 }
 
 local NEXUS_ITEM_ORDERS = {
@@ -895,10 +944,11 @@ local NEXUS_ITEM_ORDERS = {
 	RecipeBook = 12,
 	CraftingMenu = 13,
 	Bank = 14,
-	WarpMap = 16,
-	CloseSlot = 17,
-	Settings = 18,
-	BoosterOil = 19,
+	HotbarVisibility = 16, -- bottom-left area, between Bank and WarpMap
+	WarpMap = 18,
+	CloseSlot = 19,
+	Settings = 20,
+	BoosterOil = 21,
 }
 
 local COLLECTION_BLANK_GROUPS = {
@@ -1339,98 +1389,158 @@ GridMenuModule.registerPooledGrid(ROOT_GRID, GridTemplates:WaitForChild("NexusMe
 	end,
 })
 
-local CollectionsGrid = menuFrame:WaitForChild("CollectionsMenu1")
-local StatisticsGrid = menuFrame:WaitForChild("StatisticsMenu1")
-local SettingsGrid = menuFrame:WaitForChild("SettingsMenu1")
-local SkillsGrid = menuFrame:WaitForChild("SkillsMenu1")
-local StatisticsMenu2 = menuFrame:WaitForChild("StatisticsMenu2")
-local CollectionsMenu2 = menuFrame:WaitForChild("CollectionsMenu2")
-local CollectionsMenu3 = menuFrame:WaitForChild("CollectionsMenu3")
-local ProfileGrid = menuFrame:WaitForChild("ProfileMenu1")
-local ProfileMenu2 = menuFrame:WaitForChild("ProfileMenu2")
+-- ===================== REGISTER ALL POOLED GRIDS =====================
 
-applyGridLayout(CollectionsGrid, COLLECTION_BLANK_GROUPS, {})
-applyGridLayout(SettingsGrid, SETTINGS_BLANK_GROUPS, {})
-applyGridLayout(SkillsGrid, SKILL_BLANK_GROUPS, {})
-applyGridLayout(StatisticsGrid, STATISTICS_BLANK_GROUPS, {})
-applyGridLayout(ProfileGrid, ProfileConfig.PROFILE_BLANK_GROUPS, ProfileConfig.PROFILE_ITEM_ORDERS)
-applyGridLayout(ProfileMenu2, ProfileConfig.PROFILE_MENU2_BLANK_GROUPS, ProfileConfig.PROFILE_MENU2_ITEM_ORDERS)
+-- ── Level-1 static grids ──
+GridMenuModule.registerPooledGrid(
+	"CollectionsGrid",
+	GridTemplates:WaitForChild("CollectionsMenu1"),
+	COLLECTION_BUTTONS,
+	{
+		title = "Collections",
+		blankGroups = COLLECTION_BLANK_GROUPS,
+		itemOrders = {},
+	}
+)
 
-GridMenuModule.registerGrid("CollectionsGrid", CollectionsGrid, COLLECTION_BUTTONS, { title = "Collections" })
-GridMenuModule.registerGrid("StatisticsGrid", StatisticsGrid, STATISTICS_BUTTONS, { title = "Statistics" })
-GridMenuModule.registerGrid("SettingsGrid", SettingsGrid, SETTINGS_BUTTONS, { title = "Settings" })
-GridMenuModule.registerGrid("SkillsGrid", SkillsGrid, SKILLS_BUTTONS, { title = "Skills" })
-GridMenuModule.registerGrid("StatisticsMenu2", StatisticsMenu2, STATS_MENU2_BUTTONS, { title = "Statistics" })
-GridMenuModule.registerGrid("CollectionsMenu2", CollectionsMenu2, COLLECTION_MENU2_BUTTONS, { title = "Collections" })
-GridMenuModule.registerGrid("CollectionsMenu3", CollectionsMenu3, COLLECTION_MENU3_BUTTONS, { title = "Collection" })
-GridMenuModule.registerGrid("ProfileGrid", ProfileGrid, PROFILE_BUTTONS, { title = "Your Profile" })
-GridMenuModule.registerGrid("ProfileMenu2", ProfileMenu2, PROFILE_MENU2_BUTTONS, { title = "Attributes" })
+GridMenuModule.registerPooledGrid("StatisticsGrid", GridTemplates:WaitForChild("StatisticsMenu1"), STATISTICS_BUTTONS, {
+	title = "Statistics",
+	blankGroups = STATISTICS_BLANK_GROUPS,
+	itemOrders = {},
+})
 
--- ===================== WIRE DYNAMIC SKILL GRID TOOLTIPS =====================
-local SKILLGRID_STAT_MAP = {
-	FarmingSkills = "Farming",
-	ForagingSkills = "Foraging",
-	FishingSkills = "Fishing",
-	MiningSkills = "Mining",
-	CombatSkills = "Combat",
-}
+GridMenuModule.registerPooledGrid("SettingsGrid", GridTemplates:WaitForChild("SettingsMenu1"), SETTINGS_BUTTONS, {
+	title = "Settings",
+	blankGroups = SETTINGS_BLANK_GROUPS,
+	itemOrders = {},
+})
 
-for buttonName, statKey in pairs(SKILLGRID_STAT_MAP) do
-	local btn = SkillsGrid:FindFirstChild(buttonName)
-	if btn then
-		btn.MouseEnter:Connect(function()
-			SkillsPageModule.showGridSkillTooltip(statKey)
-		end)
-		btn.MouseLeave:Connect(function()
-			SkillsPageModule.hideGridSkillTooltip()
-		end)
-	else
-		warn("[SkillGridTooltips] Missing button: " .. buttonName)
-	end
+GridMenuModule.registerPooledGrid("SkillsGrid", GridTemplates:WaitForChild("SkillsMenu1"), SKILLS_BUTTONS, {
+	title = "Skills",
+	blankGroups = SKILL_BLANK_GROUPS,
+	itemOrders = {},
+	onWireTooltips = function(clonedButtons)
+		local conns = {}
+		local SKILLGRID_STAT_MAP = {
+			FarmingSkills = "Farming",
+			ForagingSkills = "Foraging",
+			FishingSkills = "Fishing",
+			MiningSkills = "Mining",
+			CombatSkills = "Combat",
+		}
+		for buttonName, statKey in pairs(SKILLGRID_STAT_MAP) do
+			local btn = clonedButtons[buttonName]
+			if btn then
+				table.insert(
+					conns,
+					btn.MouseEnter:Connect(function()
+						SkillsPageModule.showGridSkillTooltip(statKey)
+					end)
+				)
+				table.insert(
+					conns,
+					btn.MouseLeave:Connect(function()
+						SkillsPageModule.hideGridSkillTooltip()
+					end)
+				)
+			end
+		end
+		return conns
+	end,
+})
+
+GridMenuModule.registerPooledGrid("ProfileGrid", GridTemplates:WaitForChild("ProfileMenu1"), PROFILE_BUTTONS, {
+	title = "Your Profile",
+	blankGroups = ProfileConfig.PROFILE_BLANK_GROUPS,
+	itemOrders = ProfileConfig.PROFILE_ITEM_ORDERS,
+	onWireTooltips = function(clonedButtons)
+		local conns = {}
+		-- Skill attribute dynamic tooltips
+		for skillName, buttonName in pairs(ProfileConfig.SKILL_BUTTON_MAP) do
+			local btn = clonedButtons[buttonName]
+			if btn then
+				local capturedSkill = skillName
+				table.insert(
+					conns,
+					btn.MouseEnter:Connect(function()
+						UIClick3:Play()
+						ProfilePageModule.showSkillAttributeTooltip(capturedSkill)
+					end)
+				)
+				table.insert(
+					conns,
+					btn.MouseLeave:Connect(function()
+						ProfilePageModule.hideSkillAttributeTooltip()
+					end)
+				)
+			end
+		end
+		-- MyProfile full tooltip
+		local myProfileBtn = clonedButtons["MyProfile"]
+		if myProfileBtn then
+			table.insert(
+				conns,
+				myProfileBtn.MouseEnter:Connect(function()
+					UIClick3:Play()
+					ProfilePageModule.showFullProfileTooltip()
+				end)
+			)
+			table.insert(
+				conns,
+				myProfileBtn.MouseLeave:Connect(function()
+					ProfilePageModule.hideFullProfileTooltip()
+				end)
+			)
+		end
+		return conns
+	end,
+})
+
+-- ── Level-2/3 dynamic grids (page modules handle content cloning) ──
+-- Template folders contain only base icons (SelectedSkill, BackButton, CloseSlot).
+-- No blankGroups/itemOrders — page modules handle all dynamic layout.
+
+local StatisticsMenu2Template = GridTemplates:FindFirstChild("StatisticsMenu2")
+if StatisticsMenu2Template then
+	GridMenuModule.registerPooledGrid("StatisticsMenu2", StatisticsMenu2Template, STATS_MENU2_BUTTONS, {
+		title = "Statistics",
+	})
+else
+	warn("[CMC] GridTemplates/StatisticsMenu2 not found — skipping registration (still legacy?)")
 end
 
--- ===================== WIRE DYNAMIC PROFILE ATTRIBUTE TOOLTIPS =====================
-for skillName, buttonName in pairs(ProfileConfig.SKILL_BUTTON_MAP) do
-	local btn = ProfileGrid:FindFirstChild(buttonName)
-	if btn then
-		local capturedSkill = skillName
-		btn.MouseEnter:Connect(function()
-			UIClick3:Play()
-			ProfilePageModule.showSkillAttributeTooltip(capturedSkill)
-		end)
-		btn.MouseLeave:Connect(function()
-			ProfilePageModule.hideSkillAttributeTooltip()
-		end)
-	else
-		warn("[ProfileGridTooltips] Missing button: " .. buttonName)
-	end
+local CollectionsMenu2Template = GridTemplates:FindFirstChild("CollectionsMenu2")
+if CollectionsMenu2Template then
+	GridMenuModule.registerPooledGrid("CollectionsMenu2", CollectionsMenu2Template, COLLECTION_MENU2_BUTTONS, {
+		title = "Collections",
+	})
+else
+	warn("[CMC] GridTemplates/CollectionsMenu2 not found — skipping registration (still legacy?)")
 end
 
--- ===================== WIRE DYNAMIC FULL PROFILE TOOLTIP (MyProfile) =====================
-do
-	local myProfileBtn = ProfileGrid:FindFirstChild("MyProfile")
-	if myProfileBtn then
-		myProfileBtn.MouseEnter:Connect(function()
-			UIClick3:Play()
-			ProfilePageModule.showFullProfileTooltip()
-		end)
-		myProfileBtn.MouseLeave:Connect(function()
-			ProfilePageModule.hideFullProfileTooltip()
-		end)
-	else
-		warn("[ProfileTooltips] Missing 'MyProfile' button in ProfileGrid")
-	end
+local CollectionsMenu3Template = GridTemplates:FindFirstChild("CollectionsMenu3")
+if CollectionsMenu3Template then
+	GridMenuModule.registerPooledGrid("CollectionsMenu3", CollectionsMenu3Template, COLLECTION_MENU3_BUTTONS, {
+		title = "Collection",
+	})
+else
+	warn("[CMC] GridTemplates/CollectionsMenu3 not found — skipping registration (still legacy?)")
 end
+
+GridMenuModule.registerPooledGrid("ProfileMenu2", GridTemplates:WaitForChild("ProfileMenu2"), PROFILE_MENU2_BUTTONS, {
+	title = "Attributes",
+	blankGroups = ProfileConfig.PROFILE_MENU2_BLANK_GROUPS,
+	itemOrders = ProfileConfig.PROFILE_MENU2_ITEM_ORDERS,
+})
 
 -- ===================== INITIALIZE PAGE MODULES =====================
 SkillsPageModule.init(sharedRefs, menuChildFrames["SkillsMenu"])
 ProfilePageModule.init(sharedRefs)
 SettingsPageModule.init(sharedRefs, menuChildFrames["SettingsMenu"])
-StatisticsPageModule.init(sharedRefs, StatisticsMenu2)
-CollectionsPageModule.init(sharedRefs, CollectionsMenu2, CollectionsMenu3)
+StatisticsPageModule.init(sharedRefs)
+CollectionsPageModule.init(sharedRefs)
 sharedRefs.SkillsPageModule = SkillsPageModule
 sharedRefs.ProfilePageModule = ProfilePageModule
-ProfilePageModule.init(sharedRefs, ProfileMenu2)
 
 -- ===================== INITIAL STATE =====================
 CentralizedMenu.Enabled = false
@@ -1537,5 +1647,63 @@ LiquidGlassHandler.apply(inventoryPanel, {
 		color = Color3.fromRGB(255, 255, 255),
 	},
 })
+
+-- ===================== BLANKSLOT GRADIENT ROTATION =====================
+-- Rotates BG.UIGradient in every BlankSlot across both active grid buffers
+-- so the transparent edge always faces the cursor. Throttled to 0.3s.
+
+-- (UserInputService is already declared at the top of CMC — do NOT redeclare it)
+
+local gridBufferA = menuFrame:WaitForChild("GridBufferA")
+local gridBufferB = menuFrame:WaitForChild("GridBufferB")
+
+local GRADIENT_THROTTLE = 0.03
+local lastGradientUpdate = 0
+
+local function updateBlankSlotGradients(cursorPos)
+	-- Guard: skip if menu is closed
+	if not menuOpen then
+		return
+	end
+
+	local now = tick()
+	if (now - lastGradientUpdate) < GRADIENT_THROTTLE then
+		return
+	end
+	lastGradientUpdate = now
+
+	-- WITH this:
+
+	-- Apply per-slot gradient rotation based on each slot's own screen center
+	for _, buffer in ipairs({ gridBufferA, gridBufferB }) do
+		if not buffer.Visible then
+			continue
+		end
+		for _, child in ipairs(buffer:GetChildren()) do
+			if child.Name == "BlankSlot" then
+				local bg = child:FindFirstChild("BG")
+				if bg then
+					local gradient = bg:FindFirstChildOfClass("UIGradient")
+					if gradient then
+						local slotPos = bg.AbsolutePosition
+						local slotSize = bg.AbsoluteSize
+						local cx = slotPos.X + slotSize.X * 0.5
+						local cy = slotPos.Y + slotSize.Y * 0.5
+						-- WITH:
+						local angle = (math.deg(math.atan2(cx - cursorPos.X, cursorPos.Y - cy)) - 90) % 360
+						gradient.Rotation = angle
+					end
+				end
+			end
+		end
+	end
+end
+
+-- Wire once at startup
+UserInputService.InputChanged:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseMovement then
+		updateBlankSlotGradients(input.Position)
+	end
+end)
 
 print("CentralizedMenuController: Ready ✓")

@@ -297,7 +297,25 @@ local function refreshSlotCounts()
 end
 
 -- ===================== OPEN SKILL =====================
-function M.openSkill(skillName)
+function M.openSkill(skillName, activeFrame)
+	-- Update frame reference if a new buffer was provided
+	if activeFrame then
+		statsFrame = activeFrame
+		selectedSkillFrame = activeFrame:FindFirstChild("SelectedSkill")
+		-- Wire tooltip on freshly cloned SelectedSkill (GC'd with instance)
+		if selectedSkillFrame then
+			selectedSkillFrame.MouseEnter:Connect(function()
+				if currentSkill and shared.SkillsPageModule then
+					shared.SkillsPageModule.showGridSkillTooltip(currentSkill, false)
+				end
+			end)
+			selectedSkillFrame.MouseLeave:Connect(function()
+				if shared.SkillsPageModule then
+					shared.SkillsPageModule.hideGridSkillTooltip()
+				end
+			end)
+		end
+	end
 	clearDynamicChildren()
 	currentSkill = skillName
 
@@ -311,7 +329,8 @@ function M.openSkill(skillName)
 	if selectedSkillFrame then
 		selectedSkillFrame.LayoutOrder = LAYOUT.selectedSkillOrder
 
-		local statisticsMenu1 = statsFrame.Parent:FindFirstChild("StatisticsMenu1")
+		local GridTemplates = ReplicatedStorage:FindFirstChild("GridTemplates")
+		local statisticsMenu1 = GridTemplates and GridTemplates:FindFirstChild("StatisticsMenu1")
 		if statisticsMenu1 then
 			local skillButton = statisticsMenu1:FindFirstChild(skillName .. "Statistics")
 			if skillButton then
@@ -528,7 +547,7 @@ end
 function M.init(sharedRefs, menu2Frame)
 	shared = sharedRefs
 	TooltipModule = sharedRefs.TooltipModule
-	statsFrame = menu2Frame
+	statsFrame = menu2Frame -- may be nil for pooled grids
 
 	local CentralizedMenu = player.PlayerGui:WaitForChild("CentralizedAscensionMenu")
 	local TemporaryMenus = CentralizedMenu:WaitForChild("TemporaryMenus")
@@ -543,36 +562,13 @@ function M.init(sharedRefs, menu2Frame)
 		warn("[StatisticsPageModule] BlankSlot template NOT FOUND in TemporaryMenus")
 	end
 
-	selectedSkillFrame = statsFrame:FindFirstChild("SelectedSkill")
+	-- Frame-dependent setup (selectedSkillFrame, tooltip wiring)
+	-- is now handled in openSkill() when the buffer frame is passed.
+	-- StatisticsMenu1 button click wiring is handled by CMC callbacks
+	-- via GridMenuModule — no longer needed here.
 
-	-- Wire skill button clicks in StatisticsMenu1
-	local statisticsMenu1 = statsFrame.Parent:FindFirstChild("StatisticsMenu1")
-	if statisticsMenu1 then
-		local SKILL_NAMES = { "Farming", "Foraging", "Fishing", "Mining", "Combat" }
-		for _, skillName in ipairs(SKILL_NAMES) do
-			local skillButton = statisticsMenu1:FindFirstChild(skillName .. "Statistics")
-			if skillButton then
-				skillButton.MouseButton1Click:Connect(function()
-					UIClick:Play()
-					M.openSkill(skillName)
-				end)
-			end
-		end
-	end
-
-	-- Tooltip on SelectedSkill slot
-	if selectedSkillFrame then
-		selectedSkillFrame.MouseEnter:Connect(function()
-			if currentSkill and shared.SkillsPageModule then
-				shared.SkillsPageModule.showGridSkillTooltip(currentSkill, false)
-			end
-		end)
-
-		selectedSkillFrame.MouseLeave:Connect(function()
-			if shared.SkillsPageModule then
-				shared.SkillsPageModule.hideGridSkillTooltip()
-			end
-		end)
+	if statsFrame then
+		selectedSkillFrame = statsFrame:FindFirstChild("SelectedSkill")
 	end
 
 	-- Listen for StatisticsUpdated — process confirmed purchases, then refresh
