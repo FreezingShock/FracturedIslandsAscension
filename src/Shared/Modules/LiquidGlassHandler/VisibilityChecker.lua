@@ -1,20 +1,26 @@
 --[[
-	VisibilityChecker.lua — LiquidGlassHandler 2.1
+	VisibilityChecker.lua — GlassHandler (Merged)
 
-	Improvements over 1.0:
-	  • check() performs a single ancestor walk returning both visibility state
-	    and accumulated GroupTransparency simultaneously. Eliminates the double
-	    traversal (isPotentiallyVisible + getAbsoluteTransparency) that ran every
-	    RenderStepped frame per instance.
-	  • GroupTransparency early-exit: if a CanvasGroup has faded the element to
-	    effectively zero opacity, we bail before any world-space math runs.
-	  • Legacy public functions preserved for backward compatibility.
+	Single-pass ancestor walk returning visibility + accumulated GroupTransparency.
+	CaptureService suppression: when suppressOnCapture is true and a screenshot
+	is in progress, check() returns false — used by liquid glass mode only.
 ]]
 
 local VisibilityChecker = {}
 local GuiService = game:GetService("GuiService")
+local CaptureService = game:GetService("CaptureService")
 
--- ── Internal: Visible / Enabled flag walk ────────────────────────────────────
+-- ── CaptureService state ──────────────────────────────────────────────────────
+local capturing = false
+CaptureService.CaptureBegan:Connect(function()
+	capturing = true
+end)
+CaptureService.CaptureEnded:Connect(function()
+	capturing = false
+end)
+
+-- ── Internal helpers ──────────────────────────────────────────────────────────
+
 local function areAncestorsVisible(guiObject): boolean
 	local current = guiObject
 	while current do
@@ -28,8 +34,6 @@ local function areAncestorsVisible(guiObject): boolean
 	return true
 end
 
--- ── Internal: GroupTransparency accumulation ──────────────────────────────────
--- Returns absTransparency in [0,1] where 1 = fully invisible.
 local function computeAbsoluteTransparency(guiObject): number
 	local current = guiObject
 	local combinedOpacity = 1
@@ -42,16 +46,16 @@ local function computeAbsoluteTransparency(guiObject): number
 	return math.round((1 - combinedOpacity) * 1000) / 1000
 end
 
--- ── PUBLIC: single-pass combined check ───────────────────────────────────────
--- Use this in RenderStepped.  Returns (isVisible: boolean, absTransparency: number).
+-- ── PUBLIC: combined check ────────────────────────────────────────────────────
+-- suppressOnCapture: when true, returns false during active screenshot capture.
+-- Liquid glass passes true; mosaic glass passes false (or nil).
 --
--- Exit order:
---   1. nil / unparented → false, 1
---   2. Any ancestor Visible=false or ScreenGui Enabled=false → false, 1
---   3. Accumulated GroupTransparency ≥ 0.999 → false, 1  (skips all render work)
---   4. Otherwise → true, absTransparency
-function VisibilityChecker.check(guiObject: GuiObject): (boolean, number)
+-- Returns (isVisible: boolean, absTransparency: number).
+function VisibilityChecker.check(guiObject: GuiObject, suppressOnCapture: boolean?): (boolean, number)
 	if not guiObject or not guiObject.Parent then
+		return false, 1
+	end
+	if suppressOnCapture and capturing then
 		return false, 1
 	end
 	if not areAncestorsVisible(guiObject) then
@@ -64,9 +68,10 @@ function VisibilityChecker.check(guiObject: GuiObject): (boolean, number)
 	return true, absT
 end
 
--- ── PUBLIC: legacy wrappers (backward compat) ─────────────────────────────────
+-- ── PUBLIC: legacy wrappers ───────────────────────────────────────────────────
+
 function VisibilityChecker.isPotentiallyVisible(guiObject: GuiObject): boolean
-	local visible, _ = VisibilityChecker.check(guiObject)
+	local visible, _ = VisibilityChecker.check(guiObject, false)
 	return visible
 end
 
@@ -76,8 +81,6 @@ end
 
 -- ── PUBLIC: clipped render bounds ─────────────────────────────────────────────
 -- Returns the actually-visible screen rect after walking ClipsDescendants ancestors.
--- Skips clip walk when the element has non-zero AbsoluteRotation (clip math is
--- non-trivial for rotated elements).
 -- Returns: { Min, Max, Width, Height, IsFullyClipped }
 function VisibilityChecker.getTrueRenderBounds(guiObject: GuiObject)
 	local absPos = guiObject.AbsolutePosition

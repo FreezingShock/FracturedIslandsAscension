@@ -1,6 +1,13 @@
 -- ============================================================
---  ChatController (LocalScript)
+--  ChatController (LocalScript) — INTEGRATED TOPBARPLUS
 --  Place inside: StarterPlayerScripts
+--
+--  WHAT CHANGED:
+--    - TopbarPlus button creation moved into this file
+--    - Single chatVisible state variable tracks panel visibility
+--    - Button.selected:Connect wires directly to ChatGui.Enabled
+--    - No separate ChatToggleButton.lua script needed
+--    - Tab system REMOVED — unified message stream
 --
 --  ARCHITECTURE (2025/2026 compliant):
 --    SENDING:   InputBox Enter/Send → TextChannel:SendAsync()
@@ -15,16 +22,12 @@
 --    SYSTEM:    SystemMessage RemoteEvent from ChatService (server)
 --               for level-up, day change, etc. Rendered the same way.
 --
---    WHY NOT TextService:FilterStringAsync / GetChatForUserAsync:
---               GetChatForUserAsync was deprecated in May 2025 and
---               now returns empty strings. Do not use it for chat.
---
 --  Panel behaviour:
 --    - High transparency when idle (unfocused, cursor not inside panel)
 --    - Low transparency (opaque) when InputBox focused or cursor inside
 --    - Messages fade when panel is idle
 --    - / key focuses the input bar
---    - Hides the default Roblox CoreGui chat window
+--    - TopbarPlus button toggles chat panel visibility
 -- ============================================================
 
 local Players = game:GetService("Players")
@@ -40,8 +43,12 @@ local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
 local Modules = ReplicatedStorage:WaitForChild("Modules")
-local ChatConfig = require(Modules:WaitForChild("ChatConfig"))
+local Config = ReplicatedStorage:WaitForChild("Config")
+local ChatConfig = require(Config:WaitForChild("ChatConfig"))
 local ChatBridge = require(Modules:WaitForChild("ChatBridge"))
+
+-- Load TopbarPlus for chat toggle button
+local Topbar = require(ReplicatedStorage:WaitForChild("TopbarPlus"))
 
 -- SystemMessage remote (server → client, system blocks only)
 local SystemMsg = ReplicatedStorage:WaitForChild("SystemMessage")
@@ -121,9 +128,6 @@ end
 --  Expected hierarchy in ReplicatedStorage > GUI > FIAChatGui  (ScreenGui):
 --    FIAChatGui  (ScreenGui — blank, no children needed in template)
 --      Panel       (Frame)
---        TabBar    (Frame)
---          UIListLayout
---          UIPadding
 --        LogFrame  (ScrollingFrame)
 --          UIListLayout
 --          UIPadding
@@ -193,14 +197,13 @@ local function cloneChatGui()
 	end
 
 	local Panel = need(gui, "Panel", "Frame")
-	local TabBar = need(Panel, "TabBar", "Frame")
 	local LogFrame = need(Panel, "LogFrame", "ScrollingFrame")
 	local InputBar = need(Panel, "InputBar", "Frame")
 	local InputBox = need(InputBar, "InputBox", "TextBox")
 	local SendBtn = need(InputBar, "SendBtn", "TextButton")
 	local NewMsgBtn = need(Panel, "NewMsgBtn", "TextButton")
 
-	-- ── Ensure layout instances exist inside TabBar / LogFrame ─
+	-- ── Ensure layout instances exist inside LogFrame ─
 	local function ensureLayout(parent, class, props)
 		local existing = parent:FindFirstChildOfClass(class)
 		if existing then
@@ -213,18 +216,6 @@ local function cloneChatGui()
 		inst.Parent = parent
 		return inst
 	end
-
-	ensureLayout(TabBar, "UIListLayout", {
-		FillDirection = Enum.FillDirection.Horizontal,
-		SortOrder = Enum.SortOrder.LayoutOrder,
-		Padding = UDim.new(0, 4),
-	})
-	local tabPadding = TabBar:FindFirstChildOfClass("UIPadding")
-	if not tabPadding then
-		tabPadding = Instance.new("UIPadding")
-		tabPadding.Parent = TabBar
-	end
-	tabPadding.PaddingLeft = UDim.new(0, 6)
 
 	ensureLayout(LogFrame, "UIListLayout", {
 		FillDirection = Enum.FillDirection.Vertical,
@@ -253,20 +244,13 @@ local function cloneChatGui()
 	-- Sizes, positions, colours come from config — not baked into template.
 	-- This keeps the Studio template as a pure structural scaffold.
 
-	Panel.AnchorPoint = Vector2.new(0, 1)
-	Panel.Position = UDim2.new(0, V.PanelOffsetX, 1, -V.PanelOffsetY)
-	Panel.Size = UDim2.new(0, V.PanelWidth, 0, V.LogHeight + V.InputBarHeight + V.TabBarHeight)
 	Panel.BackgroundColor3 = V.PanelBackground
 	Panel.BackgroundTransparency = V.PanelBackgroundAlpha
 	Panel.BorderSizePixel = 0
 	Panel.ClipsDescendants = false
 
-	TabBar.Size = UDim2.new(1, 0, 0, V.TabBarHeight)
-	TabBar.Position = UDim2.new(0, 0, 0, 0)
-	TabBar.BackgroundTransparency = 1
-
-	LogFrame.Size = UDim2.new(1, 0, 0, V.LogHeight)
-	LogFrame.Position = UDim2.new(0, 0, 0, V.TabBarHeight)
+	LogFrame.Size = UDim2.new(1, 0, 1, -43)
+	LogFrame.Position = UDim2.new(0, 0, 0, 0)
 	LogFrame.BackgroundTransparency = 1
 	LogFrame.BorderSizePixel = 0
 	LogFrame.ScrollBarThickness = 4
@@ -277,13 +261,25 @@ local function cloneChatGui()
 	LogFrame.VerticalScrollBarPosition = Enum.VerticalScrollBarPosition.Right
 
 	InputBar.Size = UDim2.new(1, 0, 0, V.InputBarHeight)
-	InputBar.Position = UDim2.new(0, 0, 0, V.TabBarHeight + V.LogHeight)
+	InputBar.Position = UDim2.new(0, 0, 1, -38)
 	InputBar.BackgroundColor3 = V.InputBackground
 	InputBar.BackgroundTransparency = V.InputBackgroundAlpha
 	InputBar.BorderSizePixel = 0
 
+	InputBox.Size = UDim2.new(1, -50, 1, 0)
+	InputBox.Position = UDim2.new(0, 0, 0, 0)
+	InputBox.BackgroundTransparency = 1
+	InputBox.BorderSizePixel = 0
+	InputBox.TextStrokeTransparency = 0
+	InputBox.FontFace = V.ChatFont
+	InputBox.TextSize = V.FontSize
+	InputBox.TextColor3 = V.PlayerTextColor
+	InputBox.TextXAlignment = Enum.TextXAlignment.Left
+	InputBox.ClearTextOnFocus = false
+	InputBox.MultiLine = false
+
 	NewMsgBtn.Size = UDim2.new(1, 0, 0, 22)
-	NewMsgBtn.Position = UDim2.new(0, 0, 0, V.TabBarHeight + V.LogHeight - 22)
+	NewMsgBtn.Position = UDim2.new(0, 0, 0, V.LogHeight - 22)
 	NewMsgBtn.BackgroundTransparency = 0.2
 	NewMsgBtn.BorderSizePixel = 0
 	NewMsgBtn.TextSize = 13
@@ -295,15 +291,64 @@ local function cloneChatGui()
 	-- Parent last — one reparent, no intermediate layout thrash
 	gui.Parent = playerGui
 
-	return gui, Panel, TabBar, LogFrame, InputBar, InputBox, SendBtn, NewMsgBtn
+	return gui, Panel, LogFrame, InputBar, InputBox, SendBtn, NewMsgBtn
 end
 
-local ChatGui, Panel, TabBar, LogFrame, InputBar, InputBox, SendBtn, NewMsgBtn = cloneChatGui()
+local ChatGui, Panel, LogFrame, InputBar, InputBox, SendBtn, NewMsgBtn = cloneChatGui()
+
+-- ===================== TOPBARPLUS CHAT TOGGLE =====================
+local chatVisible = true -- Chat starts visible
+
+local chatIcon = Topbar.new()
+chatIcon:setName("ChatToggle")
+chatIcon:setLabel("Chat")
+chatIcon:setOrder(1)
+
+-- Apply initial state: solid icon (open)
+chatIcon:setImage("rbxassetid://72986449768058")
+
+-- Modify theme for hover effect (brighten on hover)
+-- White background, white stroke, white text with black stroke
+-- White background, white stroke, white text with black stroke
+-- White background, black stroke, white text with black stroke
+chatIcon:modifyTheme({
+	{ "IconButton", "BackgroundColor3", Color3.fromRGB(255, 255, 255) }, -- White bg
+	{ "IconButton", "BackgroundTransparency", 0.8 }, -- Opaque
+	{ "IconButton", "BorderSizePixel", 2 }, -- Add black border
+	{ "IconButton", "BorderColor3", Color3.fromRGB(0, 0, 0) }, -- Black border
+	{ "IconLabel", "TextColor3", Color3.fromRGB(255, 255, 255) }, -- White text
+	{ "IconLabel", "TextStrokeColor3", Color3.fromRGB(0, 0, 0) }, -- Black stroke on text
+	{ "IconLabel", "TextStrokeTransparency", 0 }, -- Visible stroke
+	{ "UICorner", "CornerRadius", UDim.new(0, 8) }, -- Rounded corners (adjust if needed)
+})
+
+chatIcon:bindToggleKey(Enum.KeyCode.V)
+chatIcon:setCaption("Toggle Chat")
+-- Track visibility state and sync icon + panel
+local function updateChatState(isOpen)
+	chatVisible = isOpen
+	ChatGui.Enabled = chatVisible
+
+	-- Update icon based on state
+	if chatVisible then
+		chatIcon:setImage("rbxassetid://72986449768058") -- Solid (open)
+	else
+		chatIcon:setImage("rbxassetid://122351441139765") -- Dashed (closed)
+	end
+end
+
+-- When button is selected (clicked while deselected)
+chatIcon.selected:Connect(function()
+	updateChatState(true)
+end)
+
+-- When button is deselected (clicked while selected)
+chatIcon.deselected:Connect(function()
+	updateChatState(false)
+end)
 
 -- ===================== STATE =====================
 local messages = {}
-local activeChannel = ChatConfig.DefaultChannel
-local tabButtons = {}
 local isFocused = false
 local isHovered = false
 local lastSendTime = 0
@@ -364,50 +409,6 @@ Panel.MouseLeave:Connect(function()
 	updateFocusState()
 end)
 
--- ===================== CHANNEL TABS =====================
-for _, channelId in ipairs(ChatConfig.ChannelOrder) do
-	local channelDef = ChatConfig.Channels[channelId]
-	if channelDef then
-		local tab = Instance.new("TextButton")
-		tab.Name = channelId
-		tab.AutomaticSize = Enum.AutomaticSize.X
-		tab.Size = UDim2.new(0, 0, 1, -4)
-		tab.BackgroundTransparency = 1
-		tab.BorderSizePixel = 0
-		tab.FontFace = V.ChatFont
-		tab.TextSize = 13
-		tab.AutoButtonColor = false
-		tab.Text = channelDef.displayName
-		tab.LayoutOrder = _
-
-		local p = Instance.new("UIPadding")
-		p.PaddingLeft = UDim.new(0, 6)
-		p.PaddingRight = UDim.new(0, 6)
-		p.Parent = tab
-
-		tab.Parent = TabBar
-		tabButtons[channelId] = tab
-	end
-end
-
-local function refreshTabColors()
-	for channelId, tab in pairs(tabButtons) do
-		tab.TextColor3 = (channelId == activeChannel) and V.TabActiveColor or V.TabInactiveColor
-	end
-end
-refreshTabColors()
-
-for channelId, tab in pairs(tabButtons) do
-	tab.MouseButton1Click:Connect(function()
-		activeChannel = channelId
-		refreshTabColors()
-		for _, record in ipairs(messages) do
-			local p = record.payload
-			record.frame.Visible = (activeChannel == "all" and not p.hideFromAll) or (p.channel == activeChannel)
-		end
-	end)
-end
-
 -- ===================== SCROLL HELPERS =====================
 local function scrollToBottom()
 	RunService.Heartbeat:Wait()
@@ -456,8 +457,6 @@ local function renderPayload(payload)
 	layoutOrder = layoutOrder + 1
 	local order = layoutOrder
 
-	local visible = (activeChannel == "all" and not payload.hideFromAll) or (payload.channel == activeChannel)
-
 	local entry = Instance.new("Frame")
 	entry.Name = "Msg_" .. order
 	entry.AutomaticSize = Enum.AutomaticSize.Y
@@ -465,7 +464,6 @@ local function renderPayload(payload)
 	entry.BackgroundTransparency = 1
 	entry.BorderSizePixel = 0
 	entry.LayoutOrder = order
-	entry.Visible = visible
 	entry.Parent = LogFrame
 
 	local entryLayout = Instance.new("UIListLayout")
@@ -516,8 +514,7 @@ local function renderPayload(payload)
 		table.insert(lineLabels, lbl)
 	else
 		-- Multi-line system block
-		local channelDef = ChatConfig.Channels[payload.channel or "all"]
-		local defaultHex = channelDef and toHex(channelDef.headerColor) or "DCDCDC"
+		local defaultHex = "DCDCDC"
 
 		for i, lineText in ipairs(payload.lines) do
 			if lineText == "" then
@@ -726,7 +723,7 @@ task.defer(function()
 	ChatBridge.postRaw({
 		"",
 		"  Welcome to Fractured Islands: Ascension",
-		"  Press / to chat.",
+		"  Press / to chat. Click chat icon to toggle.",
 		"  Custom chat is in early beta — expect bugs and missing features!",
 		"",
 	}, {

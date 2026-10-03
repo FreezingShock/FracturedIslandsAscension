@@ -1,27 +1,43 @@
 --[[
-	LiquidGlassHandler 3.2
-	Copyright (c) 2026 @7eoeb, @UNIVERSECORNUCOPIA
+	GlassHandler (Merged)
+	Liquid Glass + Mosaic Glass in a single module.
 
-	CHANGES FROM 3.1:
+	MODES:
+	  "liquid"  — v1 approach: model-level Highlight (black fill, 0.9 FillT)
+	              + Glass parts at Transparency 3. Adaptive 9-part grid
+	              (Center/Edge/Corner) when UICorner present, single Center
+	              when not. CaptureService suppression active.
 
-	① SEPARATED BORDER OUTLINE
-	  New per-instance toggle: SeparatedBorderOutline.enabled
-	  Creates a third UIStroke on the GuiObject using the new BorderOffset
-	  property. On hover, BorderOffset tweens outward from (0,0) to the
-	  configured offset while Transparency tweens from invisible to the
-	  target. On leave, both reverse (shrink + fade). Cancel-safe tweens.
+	  "mosaic"  — distortion-only approach: NO model Highlight. CenterMosaic
+	              template parts left untouched (Glass, 0.8 transparency,
+	              Reflectance 1 baked in .rbxm). Always flat tiled grid with
+	              configurable cols/rows. No CaptureService suppression.
 
-	② SPECULAR STROKE TOGGLE
-	  Stroke.enabled is now respected per-instance — if false, no specular
-	  UIStroke or Heartbeat connection is created. (Was already partially
-	  implemented; now fully gated.)
+	TAGS:
+	  "LiquidGlass" → auto-creates liquid instance.
+	  "MosaicGlass" → auto-creates mosaic instance.
+	  Both tags on the same GuiObject → SKIPPED (mutual exclusion).
 
-	PRIOR CHANGES (3.1):
-	  • ForceFlat mode — single Center part per layer, zero internal seams
-	  • All Highlight outlines disabled — UIStroke provides specular rim
+	SHARED OVERLAY FEATURES (independently toggleable per instance):
+	  • Stroke                  — cursor-tracking specular UIStroke + UIGradient
+	  • SeparatedBorderOutline  — hover-activated offset outline via BorderOffset
+
+	API:
+	  GlassHandler.apply(guiObject, { mode = "liquid", Stroke = {...}, ... })
+	  GlassHandler.apply(guiObject, { mode = "mosaic", Mosaic = { Distortion = {...} } })
+	  GlassHandler.new(guiObject)          — liquid (default), used by tag system
+	  GlassHandler.newMosaic(guiObject)    — mosaic, used by tag system
+	  GlassHandler.remove(guiObject)
+	  GlassHandler.has(guiObject)
+	  GlassHandler.get(guiObject)
+	  GlassHandler.setEnabled(guiObject, state)
+	  GlassHandler.removeAll()
+	  GlassHandler.getActiveCount()
 ]]
 
-local LiquidGlassHandler = {}
+local GlassHandler = {}
+
+-- ── Services ──────────────────────────────────────────────────────────────────
 local RunService = game:GetService("RunService")
 local CollectionService = game:GetService("CollectionService")
 local Players = game:GetService("Players")
@@ -30,123 +46,84 @@ local UserInputService = game:GetService("UserInputService")
 local HttpService = game:GetService("HttpService")
 local TweenService = game:GetService("TweenService")
 
+-- ── Imports ───────────────────────────────────────────────────────────────────
 local VisibilityChecker = require(script.VisibilityChecker)
 local DefaultSettings = require(script.Settings)
 
-local tag = DefaultSettings.Tag
+-- ── Constants ─────────────────────────────────────────────────────────────────
+local LIQUID_TAG = DefaultSettings.LiquidTag
+local MOSAIC_TAG = DefaultSettings.MosaicTag
 local templateContainer = script.Overlay
-
-local parentFolder = Instance.new("Folder")
-parentFolder.Name = "LiquidGlassObjects"
-parentFolder.Parent = workspace
-
 local rotationOffset = CFrame.Angles(0, math.rad(-90), 0)
 
-local activeInstances = {}
+-- ── World container ───────────────────────────────────────────────────────────
+local parentFolder = Instance.new("Folder")
+parentFolder.Name = "GlassObjects"
+parentFolder.Parent = workspace
+
+-- ── Active instance tracking ──────────────────────────────────────────────────
+local activeInstances = {} -- [GuiObject] → { handle, mode, renderName }
+
+-- ── Shallow merge helper ──────────────────────────────────────────────────────
+local function shallowMerge(base, over)
+	if not over then
+		return base
+	end
+	local result = {}
+	if base then
+		for k, v in pairs(base) do
+			result[k] = v
+		end
+	end
+	for k, v in pairs(over) do
+		result[k] = v
+	end
+	return result
+end
 
 -- ── Settings merge ────────────────────────────────────────────────────────────
 local function mergeSettings(overrides)
 	if not overrides then
-		return DefaultSettings
+		return {
+			Padding = DefaultSettings.Padding,
+			Depth = DefaultSettings.Depth,
+			mode = "liquid",
+			Liquid = {
+				Highlight = shallowMerge(DefaultSettings.Liquid.Highlight, nil),
+				Mesh = shallowMerge(DefaultSettings.Liquid.Mesh, nil),
+				PartDepth = DefaultSettings.Liquid.PartDepth,
+			},
+			Mosaic = {
+				Distortion = shallowMerge(DefaultSettings.Mosaic.Distortion, nil),
+			},
+			Stroke = shallowMerge(DefaultSettings.Stroke, nil),
+			SeparatedBorderOutline = shallowMerge(DefaultSettings.SeparatedBorderOutline, nil),
+		}
 	end
 
-	local merged = {
-		Tag = DefaultSettings.Tag,
+	return {
 		Padding = if overrides.Padding ~= nil then overrides.Padding else DefaultSettings.Padding,
-		Depth = if overrides.Depth ~= nil then overrides.Depth else (DefaultSettings.Depth or 2),
-		ForceFlat = if overrides.ForceFlat ~= nil then overrides.ForceFlat else DefaultSettings.ForceFlat,
+		Depth = if overrides.Depth ~= nil then overrides.Depth else DefaultSettings.Depth,
+		mode = overrides.mode or "liquid",
+
+		Liquid = {
+			Highlight = shallowMerge(DefaultSettings.Liquid.Highlight, overrides.Liquid and overrides.Liquid.Highlight),
+			Mesh = shallowMerge(DefaultSettings.Liquid.Mesh, overrides.Liquid and overrides.Liquid.Mesh),
+			PartDepth = if overrides.Liquid and overrides.Liquid.PartDepth ~= nil
+				then overrides.Liquid.PartDepth
+				else DefaultSettings.Liquid.PartDepth,
+		},
+
+		Mosaic = {
+			Distortion = shallowMerge(
+				DefaultSettings.Mosaic.Distortion,
+				overrides.Mosaic and overrides.Mosaic.Distortion
+			),
+		},
+
+		Stroke = shallowMerge(DefaultSettings.Stroke, overrides.Stroke),
+		SeparatedBorderOutline = shallowMerge(DefaultSettings.SeparatedBorderOutline, overrides.SeparatedBorderOutline),
 	}
-
-	-- Highlight
-	merged.Highlight = {}
-	for k, v in pairs(DefaultSettings.Highlight) do
-		merged.Highlight[k] = v
-	end
-	if overrides.Highlight then
-		for k, v in pairs(overrides.Highlight) do
-			merged.Highlight[k] = v
-		end
-	end
-
-	-- Mesh
-	merged.Mesh = {}
-	for k, v in pairs(DefaultSettings.Mesh) do
-		merged.Mesh[k] = v
-	end
-	if overrides.Mesh then
-		for k, v in pairs(overrides.Mesh) do
-			merged.Mesh[k] = v
-		end
-	end
-
-	-- Layers (support overrides adding layers beyond the default count)
-	merged.Layers = {}
-	local layerCount = #DefaultSettings.Layers
-	if overrides.Layers and #overrides.Layers > layerCount then
-		layerCount = #overrides.Layers
-	end
-	for i = 1, layerCount do
-		local base = DefaultSettings.Layers[i]
-		local over = overrides.Layers and overrides.Layers[i]
-		local ml = {}
-		if base then
-			for k, v in pairs(base) do
-				ml[k] = v
-			end
-		end
-		if over then
-			for k, v in pairs(over) do
-				ml[k] = v
-			end
-		end
-		merged.Layers[i] = ml
-	end
-
-	-- Rim
-	merged.Rim = {}
-	for k, v in pairs(DefaultSettings.Rim) do
-		merged.Rim[k] = v
-	end
-	if overrides.Rim then
-		for k, v in pairs(overrides.Rim) do
-			merged.Rim[k] = v
-		end
-	end
-
-	-- Stroke
-	merged.Stroke = {}
-	for k, v in pairs(DefaultSettings.Stroke) do
-		merged.Stroke[k] = v
-	end
-	if overrides.Stroke then
-		for k, v in pairs(overrides.Stroke) do
-			merged.Stroke[k] = v
-		end
-	end
-
-	-- SeparatedBorderOutline
-	merged.SeparatedBorderOutline = {}
-	for k, v in pairs(DefaultSettings.SeparatedBorderOutline) do
-		merged.SeparatedBorderOutline[k] = v
-	end
-	if overrides.SeparatedBorderOutline then
-		for k, v in pairs(overrides.SeparatedBorderOutline) do
-			merged.SeparatedBorderOutline[k] = v
-		end
-	end
-
-	-- Distortion
-	merged.Distortion = {}
-	for k, v in pairs(DefaultSettings.Distortion) do
-		merged.Distortion[k] = v
-	end
-	if overrides.Distortion then
-		for k, v in pairs(overrides.Distortion) do
-			merged.Distortion[k] = v
-		end
-	end
-
-	return merged
 end
 
 -- ── Shortest-path angle lerp ──────────────────────────────────────────────────
@@ -155,8 +132,11 @@ local function lerpAngle(current: number, target: number, alpha: number): number
 	return current + diff * alpha
 end
 
--- ── Core instance factory ─────────────────────────────────────────────────────
-local function createGlassInstance(guiObject, overrides)
+-- ══════════════════════════════════════════════════════════════════════════════
+-- ██ CORE INSTANCE FACTORY
+-- ══════════════════════════════════════════════════════════════════════════════
+
+local function createGlassInstance(guiObject: GuiObject, overrides: { [string]: any }?)
 	if not guiObject:IsDescendantOf(Players.LocalPlayer) then
 		return nil
 	end
@@ -164,86 +144,84 @@ local function createGlassInstance(guiObject, overrides)
 		return activeInstances[guiObject].handle
 	end
 
-	local instanceSettings = mergeSettings(overrides)
-	local forceFlat = instanceSettings.ForceFlat
-	local distortionCfg = instanceSettings.Distortion
-	local useDistortion = distortionCfg and distortionCfg.enabled
-	local distortionStrength = useDistortion and distortionCfg.strength or 0
-	local renderName = `LiquidGlass_{HttpService:GenerateGUID(false)}`
-
-	local masterFolder = Instance.new("Folder")
-	masterFolder.Name = renderName
-	masterFolder.Parent = parentFolder
-
-	-- ── Layer containers ──────────────────────────────────────────────────
-	local layerContainers = {}
-	for i, layerDef in ipairs(instanceSettings.Layers) do
-		local container = Instance.new("Model")
-		container.Name = renderName .. "_L" .. i
-		container.Parent = masterFolder
-
-		local hl = nil
-		if not useDistortion then
-			-- Legacy mode: Model-level Highlight provides frosted tint.
-			hl = Instance.new("Highlight")
-			hl.FillColor = layerDef.fillColor
-			hl.OutlineColor = layerDef.outlineColor
-			hl.FillTransparency = layerDef.fillTransparency
-			hl.OutlineTransparency = layerDef.outlineTransparency
-			hl.Parent = container
-		end
-		-- Distortion mode: NO Model-level Highlight.
-		-- Per-Part Highlights (created in makePart) handle keep-alive.
-		-- Multiple competing Highlights kill the distortion effect.
-
-		layerContainers[i] = {
-			container = container,
-			highlight = hl, -- nil in distortion mode
-			pixels = {},
-			depthOffset = layerDef.depthOffset,
-			baseFillT = layerDef.fillTransparency,
-			baseOutlineT = layerDef.outlineTransparency,
-			baseMeshT = layerDef.meshTransparency,
-			meshColor = layerDef.meshColor,
-		}
+	-- ── Mutual exclusion ──────────────────────────────────────────────────
+	local hasLiquidTag = CollectionService:HasTag(guiObject, LIQUID_TAG)
+	local hasMosaicTag = CollectionService:HasTag(guiObject, MOSAIC_TAG)
+	if hasLiquidTag and hasMosaicTag then
+		warn(
+			"[GlassHandler] GuiObject has both LiquidGlass and MosaicGlass tags — skipping:",
+			guiObject:GetFullName()
+		)
+		return nil
 	end
 
+	-- ── Resolve settings ──────────────────────────────────────────────────
+	local settings = mergeSettings(overrides)
+	local mode = settings.mode
+	local isLiquid = (mode == "liquid")
+	local isMosaic = (mode == "mosaic")
+	local depth = settings.Depth
+	local localPadding = settings.Padding
+
+	local renderName = `Glass_{HttpService:GenerateGUID(false)}`
+
+	-- ── 3D container ──────────────────────────────────────────────────────
+	local container = Instance.new("Model")
+	container.Name = renderName
+	container.Parent = parentFolder
+
+	-- ── Model-level Highlight (liquid only) ───────────────────────────────
+	local highlight = nil
+	if isLiquid then
+		local hlCfg = settings.Liquid.Highlight
+		highlight = Instance.new("Highlight")
+		highlight.FillColor = hlCfg.FillColor
+		highlight.OutlineTransparency = hlCfg.OutlineTransparency
+		highlight.FillTransparency = hlCfg.FillTransparency
+		highlight.Parent = container
+	end
+	-- Mosaic: NO model Highlight. Template parts handle their own appearance.
+
 	-- ── Geometry state ────────────────────────────────────────────────────
+	local pixels = {}
 	local lastSize = Vector2.zero
-	local lastRadius = -1
+	local lastRadius: number = -1
 	local currentLayoutMode = "None"
 	local enabled = true
 	local destroyed = false
+	local glassVisible = true -- false = 3D glass hidden, stroke/outline still active
 
+	-- ── Corner radius (liquid only — mosaic always returns 0) ─────────────
 	local function getCornerRadius(): number
-		if forceFlat then
-			return 0 -- skip UICorner detection entirely
+		if isMosaic then
+			return 0
 		end
 		local sz = guiObject.AbsoluteSize
 		local uiCorner = guiObject:FindFirstChildWhichIsA("UICorner")
-		if not uiCorner then
-			return 0
-		end
-		local r = uiCorner.CornerRadius.Offset + uiCorner.CornerRadius.Scale * math.min(sz.X, sz.Y)
-		return math.clamp(r, 0, math.min(sz.X, sz.Y) / 2)
+		local radius = uiCorner and (uiCorner.CornerRadius.Offset + uiCorner.CornerRadius.Scale * math.min(sz.X, sz.Y))
+			or 0
+		local maxR = math.min(sz.X, sz.Y) / 2
+		return math.clamp(radius, 0, maxR)
 	end
 
-	local function makePart(lc, templateName: string)
+	-- ── Part creation ─────────────────────────────────────────────────────
+	local function makePart(templateName: string)
 		local template = templateContainer:FindFirstChild(templateName)
 		if not template then
-			warn("[LiquidGlass] Missing overlay template: " .. templateName)
+			warn("[GlassHandler] Missing overlay template:", templateName)
 			return nil
 		end
 		local p = template:Clone()
 
-		if not useDistortion then
-			-- Legacy mode: override with config values
-			p.Material = Enum.Material.Glass
-			p.Color = lc.meshColor
-			p.Transparency = lc.baseMeshT
+		if isLiquid then
+			-- Apply liquid mesh config over the cloned template
+			local meshCfg = settings.Liquid.Mesh
+			p.Material = meshCfg.Material
+			p.Color = meshCfg.Color
+			p.Transparency = meshCfg.Transparency
 		end
-		-- Distortion mode: template already has Glass material,
-		-- Transparency >5, and child Highlight. Don't touch them.
+		-- Mosaic: leave template properties untouched
+		-- (Glass material, 0.8 transparency, Reflectance 1 — baked in .rbxm)
 
 		p.Anchored = true
 		p.CastShadow = false
@@ -253,19 +231,41 @@ local function createGlassInstance(guiObject, overrides)
 		pcall(function()
 			p.AudioCanCollide = false
 		end)
-		p.Parent = lc.container
+		p.Parent = container
 		return p
 	end
 
-	local function buildLayerGrid(lc, currentSize, needsRebuild, radius)
-		local pixels = lc.pixels
-		local partIndex = 1
+	-- ── Grid building ─────────────────────────────────────────────────────
+	local function rebuildGrid()
+		local currentSize = guiObject.AbsoluteSize
+		if currentSize.X < 1 or currentSize.Y < 1 then
+			return
+		end
 
-		local function addOrUpdate(name, relX, relY, relSizeX, relSizeY, localRot, swapAxes)
+		local radius = getCornerRadius()
+		if currentSize == lastSize and radius == lastRadius then
+			return
+		end
+		lastSize = currentSize
+		lastRadius = radius
+
+		local targetMode = if radius <= 0 then "Flat" else "Rounded"
+		local needsRebuild = (targetMode ~= currentLayoutMode)
+
+		if needsRebuild then
+			for _, data in ipairs(pixels) do
+				data.Part:Destroy()
+			end
+			table.clear(pixels)
+			currentLayoutMode = targetMode
+		end
+
+		local partIndex = 1
+		local function addOrUpdate(templateName, relX, relY, relSizeX, relSizeY, localRot, swapAxes)
 			localRot = localRot or CFrame.new()
 			swapAxes = swapAxes or false
 			if needsRebuild then
-				local p = makePart(lc, name)
+				local p = makePart(templateName)
 				if not p then
 					return
 				end
@@ -293,52 +293,65 @@ local function createGlassInstance(guiObject, overrides)
 			partIndex += 1
 		end
 
-		-- ForceFlat path OR no UICorner: single Center part per layer.
-		-- This eliminates ALL internal seams.
-		if radius <= 0 then
-			if useDistortion then
-				local cols = distortionCfg.gridCols or 3
-				local rows = distortionCfg.gridRows or 2
-				local cellW = 1 / cols
-				local cellH = 1 / rows
-				for row = 0, rows - 1 do
-					for col = 0, cols - 1 do
-						local relX = (col + 0.5) * cellW - 0.5
-						local relY = (row + 0.5) * cellH - 0.5
-						addOrUpdate("Center", relX, relY, cellW, cellH)
-					end
+		if isMosaic then
+			-- ── Mosaic: always flat, tiled CenterMosaic grid ──────────
+			local distCfg = settings.Mosaic.Distortion
+			local cols = distCfg.gridCols
+			local rows = distCfg.gridRows
+			local cellW = 1 / cols
+			local cellH = 1 / rows
+			for row = 0, rows - 1 do
+				for col = 0, cols - 1 do
+					local relX = (col + 0.5) * cellW - 0.5
+					local relY = (row + 0.5) * cellH - 0.5
+					addOrUpdate("CenterMosaic", relX, relY, cellW, cellH)
 				end
-			else
-				addOrUpdate("Center", 0, 0, 1, 1)
 			end
+		elseif radius <= 0 then
+			-- ── Liquid flat (no UICorner) ─────────────────────────────
+			addOrUpdate("Center", 0, 0, 1, 1)
 		else
-			-- 9-part rounded-corner grid (only used when ForceFlat = false
-			-- AND the GuiObject has a UICorner with radius > 0)
+			-- ── Liquid 9-part rounded ─────────────────────────────────
 			local relRadX = radius / currentSize.X
 			local relRadY = radius / currentSize.Y
 			local innerW = (currentSize.X - 2 * radius) / currentSize.X
 			local innerH = (currentSize.Y - 2 * radius) / currentSize.Y
-			local diamX, diamY = relRadX, relRadY
-			addOrUpdate("Center", 0, 0, innerW, innerH, CFrame.new())
-			addOrUpdate("Edge", 0, -(0.5 - relRadY / 2), innerW, relRadY, CFrame.Angles(0, 0, 0))
-			addOrUpdate("Edge", 0, 0.5 - relRadY / 2, innerW, relRadY, CFrame.Angles(0, 0, math.rad(180)))
-			addOrUpdate("Edge", -(0.5 - relRadX / 2), 0, relRadX, innerH, CFrame.Angles(0, 0, math.rad(90)), true)
-			addOrUpdate("Edge", 0.5 - relRadX / 2, 0, relRadX, innerH, CFrame.Angles(0, 0, math.rad(-90)), true)
+			local diamX = relRadX
+			local diamY = relRadY
+
+			addOrUpdate("Center", 0, 0, innerW, innerH)
+
+			-- Top edge
+			addOrUpdate("Edge", 0, -0.5 + (relRadY / 2), innerW, relRadY, CFrame.Angles(0, 0, 0))
+			-- Bottom edge
+			addOrUpdate("Edge", 0, 0.5 - (relRadY / 2), innerW, relRadY, CFrame.Angles(0, 0, math.rad(180)))
+			-- Left edge
+			addOrUpdate("Edge", -0.5 + (relRadX / 2), 0, relRadX, innerH, CFrame.Angles(0, 0, math.rad(90)), true)
+			-- Right edge
+			addOrUpdate("Edge", 0.5 - (relRadX / 2), 0, relRadX, innerH, CFrame.Angles(0, 0, math.rad(-90)), true)
+
+			local halfDiamX = diamX / 2
+			local halfDiamY = diamY / 2
+
+			-- Top-left corner
 			addOrUpdate(
 				"Corner",
-				-(0.5 - diamX / 2),
-				-(0.5 - diamY / 2),
+				-0.5 + halfDiamX,
+				-0.5 + halfDiamY,
 				diamX,
 				diamY,
 				CFrame.Angles(0, 0, math.rad(90)),
 				true
 			)
-			addOrUpdate("Corner", 0.5 - diamX / 2, -(0.5 - diamY / 2), diamX, diamY, CFrame.Angles(0, 0, 0))
-			addOrUpdate("Corner", -(0.5 - diamX / 2), 0.5 - diamY / 2, diamX, diamY, CFrame.Angles(0, 0, math.rad(180)))
+			-- Top-right corner
+			addOrUpdate("Corner", 0.5 - halfDiamX, -0.5 + halfDiamY, diamX, diamY, CFrame.Angles(0, 0, 0))
+			-- Bottom-left corner
+			addOrUpdate("Corner", -0.5 + halfDiamX, 0.5 - halfDiamY, diamX, diamY, CFrame.Angles(0, 0, math.rad(180)))
+			-- Bottom-right corner
 			addOrUpdate(
 				"Corner",
-				0.5 - diamX / 2,
-				0.5 - diamY / 2,
+				0.5 - halfDiamX,
+				0.5 - halfDiamY,
 				diamX,
 				diamY,
 				CFrame.Angles(0, 0, math.rad(-90)),
@@ -347,49 +360,23 @@ local function createGlassInstance(guiObject, overrides)
 		end
 	end
 
-	local function rebuildAllLayers()
-		local currentSize = guiObject.AbsoluteSize
-		if currentSize.X < 1 or currentSize.Y < 1 then
-			return
-		end
-		local radius = getCornerRadius()
-		if currentSize == lastSize and radius == lastRadius then
-			return
-		end
-		local targetMode = if radius <= 0 then "Flat" else "Rounded"
-		local needsRebuild = targetMode ~= currentLayoutMode
-		if needsRebuild then
-			for _, lc in ipairs(layerContainers) do
-				for _, data in ipairs(lc.pixels) do
-					data.Part:Destroy()
-				end
-				table.clear(lc.pixels)
-			end
-			currentLayoutMode = targetMode
-		end
-		lastSize = currentSize
-		lastRadius = radius
-		for _, lc in ipairs(layerContainers) do
-			buildLayerGrid(lc, currentSize, needsRebuild, radius)
-		end
-	end
+	rebuildGrid()
 
-	rebuildAllLayers()
+	-- ══════════════════════════════════════════════════════════════════════
+	-- ██ SPECULAR STROKE (shared — independently toggleable)
+	-- ══════════════════════════════════════════════════════════════════════
 
-	-- ── Dynamic specular stroke ───────────────────────────────────────────
-
-	local ss = instanceSettings.Stroke
+	local ss = settings.Stroke
 	local stroke = nil
 	local strokeGradient = nil
 	local strokeHovering = false
-	local strokeCurrentRot = ss and ss.restingAngle or 135
+	local strokeCurrentRot = ss.restingAngle
 	local strokeHeartbeatConn = nil
-
 	local cachedInset = GuiService:GetGuiInset()
 
-	if ss and ss.enabled then
+	if ss.enabled then
 		stroke = Instance.new("UIStroke")
-		stroke.Name = "LiquidGlassStroke"
+		stroke.Name = "GlassStroke"
 		stroke.Color = ss.color
 		stroke.Thickness = ss.thickness
 		stroke.Transparency = 0
@@ -418,8 +405,8 @@ local function createGlassInstance(guiObject, overrides)
 				return
 			end
 
-			local isVisible, _ = VisibilityChecker.check(guiObject)
-			if not isVisible then
+			local isVis, _ = VisibilityChecker.check(guiObject, false)
+			if not isVis then
 				return
 			end
 
@@ -445,14 +432,14 @@ local function createGlassInstance(guiObject, overrides)
 		end)
 	end
 
-	-- ── Separated border outline ──────────────────────────────────────────
-	-- A third UIStroke using BorderOffset to create a hover-activated
-	-- separated outline effect (Fortnite item shop style).
+	-- ══════════════════════════════════════════════════════════════════════
+	-- ██ SEPARATED BORDER OUTLINE (shared — independently toggleable)
+	-- ══════════════════════════════════════════════════════════════════════
 
-	local sbo = instanceSettings.SeparatedBorderOutline
+	local sbo = settings.SeparatedBorderOutline
 	local outlineStroke = nil
-	local outlineTweenIn1 = nil -- BorderOffset tween
-	local outlineTweenIn2 = nil -- Transparency tween
+	local outlineTweenIn1 = nil
+	local outlineTweenIn2 = nil
 	local outlineTweenOut1 = nil
 	local outlineTweenOut2 = nil
 	local outlineHoverEnterConn = nil
@@ -515,9 +502,9 @@ local function createGlassInstance(guiObject, overrides)
 		outlineTweenOut2:Play()
 	end
 
-	if sbo and sbo.enabled then
+	if sbo.enabled then
 		outlineStroke = Instance.new("UIStroke")
-		outlineStroke.Name = "LiquidGlassOutline"
+		outlineStroke.Name = "GlassOutline"
 		outlineStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Contextual
 		outlineStroke.LineJoinMode = Enum.LineJoinMode.Round
 		outlineStroke.Thickness = sbo.thickness
@@ -535,9 +522,17 @@ local function createGlassInstance(guiObject, overrides)
 		end)
 	end
 
-	-- ── RenderStepped — 3D glass geometry ────────────────────────────────
+	-- ══════════════════════════════════════════════════════════════════════
+	-- ██ RENDERSTEP — 3D glass geometry
+	-- ══════════════════════════════════════════════════════════════════════
+
 	RunService:BindToRenderStep(renderName, Enum.RenderPriority.Camera.Value + 1, function()
 		if not enabled then
+			return
+		end
+		-- Glass-only toggle: hides 3D parts while stroke/outline remain active
+		if not glassVisible then
+			container.Parent = nil
 			return
 		end
 		local camera = workspace.CurrentCamera
@@ -545,94 +540,114 @@ local function createGlassInstance(guiObject, overrides)
 			return
 		end
 
+		-- Rebuild grid on size / corner-radius change
 		if guiObject.AbsoluteSize ~= lastSize or getCornerRadius() ~= lastRadius then
-			rebuildAllLayers()
+			rebuildGrid()
 		end
 
-		local isVisible, absTransparency = VisibilityChecker.check(guiObject)
-		masterFolder.Parent = if isVisible then parentFolder else nil
+		-- Visibility (liquid suppresses during screenshot capture)
+		local isVisible, absTransparency = VisibilityChecker.check(guiObject, isLiquid)
+		container.Parent = if isVisible then parentFolder else nil
 		if not isVisible then
 			return
 		end
 
+		-- Clipped render bounds
 		local visibleRect = VisibilityChecker.getTrueRenderBounds(guiObject)
-		if visibleRect.IsFullyClipped then
-			masterFolder.Parent = nil
+		local visibleSize = Vector2.new(visibleRect.Width, visibleRect.Height)
+
+		if visibleSize.X <= 0 or visibleSize.Y <= 0 then
+			container.Parent = nil
 			return
+		else
+			container.Parent = parentFolder
 		end
 
-		local visibleSize = Vector2.new(visibleRect.Width, visibleRect.Height)
+		-- Screen → world projection
 		local inset, _ = GuiService:GetGuiInset()
-		local cx = visibleRect.Min.X + visibleSize.X * 0.5 + inset.X
-		local cy = visibleRect.Min.Y + visibleSize.Y * 0.5 + inset.Y
-		local hw = visibleSize.X * 0.5
-		local hh = visibleSize.Y * 0.5
+		local centerScreenPos = visibleRect.Min + (visibleSize / 2) + inset
 
 		local camCF = camera:GetRenderCFrame()
 		local camLookVec = camCF.LookVector
 		local guiRotCF = CFrame.Angles(0, 0, math.rad(-guiObject.AbsoluteRotation))
-		local baseDepth = instanceSettings.Depth
-		local localPadding = instanceSettings.Padding
 
-		local rCenter = camera:ViewportPointToRay(cx, cy)
-		local rRight = camera:ViewportPointToRay(cx + hw, cy)
-		local rLeft = camera:ViewportPointToRay(cx - hw, cy)
-		local rTop = camera:ViewportPointToRay(cx, cy - hh)
-		local rBottom = camera:ViewportPointToRay(cx, cy + hh)
-
-		local function worldAtDepth(ray, depth)
-			return ray.Origin + ray.Direction * (depth / ray.Direction:Dot(camLookVec))
+		local function getPlanePos(pixelX, pixelY)
+			local ray = camera:ViewportPointToRay(pixelX, pixelY)
+			local dist = depth / ray.Direction:Dot(camLookVec)
+			return ray.Origin + ray.Direction * dist
 		end
 
-		for _, lc in ipairs(layerContainers) do
-			local depth = baseDepth + lc.depthOffset
-			local pCen = worldAtDepth(rCenter, depth)
-			local worldW = (worldAtDepth(rRight, depth) - worldAtDepth(rLeft, depth)).Magnitude
-			local worldH = (worldAtDepth(rTop, depth) - worldAtDepth(rBottom, depth)).Magnitude
+		local centerWorldPos = getPlanePos(centerScreenPos.X, centerScreenPos.Y)
+		local rightEdge = getPlanePos(centerScreenPos.X + (visibleSize.X / 2), centerScreenPos.Y)
+		local leftEdge = getPlanePos(centerScreenPos.X - (visibleSize.X / 2), centerScreenPos.Y)
+		local topEdge = getPlanePos(centerScreenPos.X, centerScreenPos.Y - (visibleSize.Y / 2))
+		local bottomEdge = getPlanePos(centerScreenPos.X, centerScreenPos.Y + (visibleSize.Y / 2))
 
-			if lc.highlight then
-				lc.highlight.FillTransparency = lc.baseFillT + (1 - lc.baseFillT) * absTransparency
-				lc.highlight.OutlineTransparency = lc.baseOutlineT + (1 - lc.baseOutlineT) * absTransparency
-			end
+		local worldW = (rightEdge - leftEdge).Magnitude
+		local worldH = (topEdge - bottomEdge).Magnitude
 
-			for _, data in ipairs(lc.pixels) do
-				local pw = data.RelSizeX * worldW + localPadding
-				local ph = data.RelSizeY * worldH + localPadding
+		-- ── Branch: liquid vs mosaic render ────────────────────────────
 
+		if isLiquid then
+			-- ▸ V1 EXACT RENDER LOGIC ◂
+			-- Model Highlight transparency responds to CanvasGroup fade
+			local hlCfg = settings.Liquid.Highlight
+			local meshCfg = settings.Liquid.Mesh
+			local partDepth = settings.Liquid.PartDepth
+
+			highlight.FillTransparency = hlCfg.FillTransparency + (1 - hlCfg.FillTransparency) * absTransparency
+
+			for _, data in ipairs(pixels) do
 				local localOffset = Vector3.new(data.RelX * worldW, -data.RelY * worldH, 0)
 				local rotatedOffset = guiRotCF * localOffset
-				local worldOffset = camCF.RightVector * rotatedOffset.X + camCF.UpVector * rotatedOffset.Y
+				local worldOffset = (camCF.RightVector * rotatedOffset.X) + (camCF.UpVector * rotatedOffset.Y)
 
-				if useDistortion then
-					-- Clone's X depth is 0.025 (baked). rotationOffset aligns
-					-- thin X with camera look → camera sees through 0.025 studs.
-					-- Only scale Y (height) and Z (width) to match tile.
-					local tilePW = data.RelSizeX * worldW
-					local tilePH = data.RelSizeY * worldH
-					data.Part.Size = Vector3.new(data.OriginalDepth or 0.5, tilePH, tilePW)
-					data.Part.CFrame = CFrame.new(pCen + worldOffset)
-						* camCF.Rotation
-						* guiRotCF
-						* data.LocalRot
-						* rotationOffset
+				if data.SwapAxes then
+					data.Part.Size = Vector3.new(
+						partDepth,
+						data.RelSizeX * worldW + localPadding,
+						data.RelSizeY * worldH + localPadding
+					)
 				else
-					if data.SwapAxes then
-						data.Part.Size = Vector3.new(0.01, pw, ph)
-					else
-						data.Part.Size = Vector3.new(0.01, ph, pw)
-					end
-					data.Part.Transparency = lc.baseMeshT + (1 - lc.baseMeshT) * absTransparency
-					data.Part.CFrame = CFrame.new(pCen + worldOffset)
-						* camCF.Rotation
-						* guiRotCF
-						* data.LocalRot
-						* rotationOffset
+					data.Part.Size = Vector3.new(
+						partDepth,
+						data.RelSizeY * worldH + localPadding,
+						data.RelSizeX * worldW + localPadding
+					)
 				end
+
+				data.Part.Transparency = meshCfg.Transparency + (1 - meshCfg.Transparency) * absTransparency
+				data.Part.CFrame = CFrame.new(centerWorldPos + worldOffset)
+					* camCF.Rotation
+					* guiRotCF
+					* data.LocalRot
+					* rotationOffset
+			end
+		else
+			-- ▸ MOSAIC RENDER LOGIC (distortion-only) ◂
+			-- No Highlight. Parts keep template transparency/reflectance.
+			-- Size preserves OriginalDepth (template mesh depth).
+			for _, data in ipairs(pixels) do
+				local localOffset = Vector3.new(data.RelX * worldW, -data.RelY * worldH, 0)
+				local rotatedOffset = guiRotCF * localOffset
+				local worldOffset = (camCF.RightVector * rotatedOffset.X) + (camCF.UpVector * rotatedOffset.Y)
+
+				local tilePW = data.RelSizeX * worldW
+				local tilePH = data.RelSizeY * worldH
+				data.Part.Size = Vector3.new(data.OriginalDepth or 0.5, tilePH, tilePW)
+				data.Part.CFrame = CFrame.new(centerWorldPos + worldOffset)
+					* camCF.Rotation
+					* guiRotCF
+					* data.LocalRot
+					* rotationOffset
 			end
 		end
 	end)
 
-	-- ── Cleanup ───────────────────────────────────────────────────────────
+	-- ══════════════════════════════════════════════════════════════════════
+	-- ██ CLEANUP
+	-- ══════════════════════════════════════════════════════════════════════
+
 	local function cleanup(): number
 		if destroyed then
 			return 0
@@ -640,9 +655,9 @@ local function createGlassInstance(guiObject, overrides)
 		destroyed = true
 		activeInstances[guiObject] = nil
 		RunService:UnbindFromRenderStep(renderName)
-		masterFolder:Destroy()
+		container:Destroy()
 
-		-- Specular stroke cleanup
+		-- Specular stroke
 		if strokeHeartbeatConn then
 			strokeHeartbeatConn:Disconnect()
 			strokeHeartbeatConn = nil
@@ -653,7 +668,7 @@ local function createGlassInstance(guiObject, overrides)
 		stroke = nil
 		strokeGradient = nil
 
-		-- Separated outline cleanup
+		-- Separated outline
 		cancelOutlineTweens()
 		if outlineHoverEnterConn then
 			outlineHoverEnterConn:Disconnect()
@@ -671,6 +686,7 @@ local function createGlassInstance(guiObject, overrides)
 		return 1
 	end
 
+	-- Auto-cleanup on ancestry removal
 	guiObject.AncestryChanged:Connect(function(_, newParent)
 		if newParent then
 			return
@@ -678,14 +694,20 @@ local function createGlassInstance(guiObject, overrides)
 		cleanup()
 	end)
 
-	CollectionService:GetInstanceRemovedSignal(tag):Connect(function(v)
+	-- Auto-cleanup on tag removal (for either tag)
+	local function onTagRemoved(v)
 		if v ~= guiObject then
 			return
 		end
 		cleanup()
-	end)
+	end
+	CollectionService:GetInstanceRemovedSignal(LIQUID_TAG):Connect(onTagRemoved)
+	CollectionService:GetInstanceRemovedSignal(MOSAIC_TAG):Connect(onTagRemoved)
 
-	-- ── Handle ────────────────────────────────────────────────────────────
+	-- ══════════════════════════════════════════════════════════════════════
+	-- ██ INSTANCE HANDLE
+	-- ══════════════════════════════════════════════════════════════════════
+
 	local handle = {}
 
 	function handle.destroy(): number
@@ -695,7 +717,7 @@ local function createGlassInstance(guiObject, overrides)
 	function handle.setEnabled(state: boolean)
 		enabled = state
 		if not state then
-			masterFolder.Parent = nil
+			container.Parent = nil
 
 			-- Specular stroke
 			if stroke then
@@ -703,7 +725,7 @@ local function createGlassInstance(guiObject, overrides)
 			end
 			strokeHovering = false
 
-			-- Separated outline — snap to rest state
+			-- Separated outline — snap to rest
 			if outlineStroke then
 				cancelOutlineTweens()
 				outlineStroke.Transparency = sbo.restTransparency
@@ -714,8 +736,7 @@ local function createGlassInstance(guiObject, overrides)
 			if stroke then
 				stroke.Transparency = 0
 			end
-
-			-- Outline stays at rest until next hover — no action needed
+			-- Outline stays at rest until next hover
 		end
 	end
 
@@ -723,110 +744,54 @@ local function createGlassInstance(guiObject, overrides)
 		return enabled
 	end
 
-	function handle.updateSettings(newOverrides)
-		instanceSettings = mergeSettings(newOverrides)
-		forceFlat = instanceSettings.ForceFlat
-
-		-- Update glass layers
-		for i, lc in ipairs(layerContainers) do
-			local layerDef = instanceSettings.Layers[i]
-			if not layerDef then
-				continue
-			end
-			lc.depthOffset = layerDef.depthOffset
-			lc.baseFillT = layerDef.fillTransparency
-			lc.baseOutlineT = layerDef.outlineTransparency
-			lc.baseMeshT = layerDef.meshTransparency
-			lc.meshColor = layerDef.meshColor
-			if lc.highlight then
-				lc.highlight.FillColor = layerDef.fillColor
-				lc.highlight.FillTransparency = layerDef.fillTransparency
-				lc.highlight.OutlineColor = layerDef.outlineColor
-				lc.highlight.OutlineTransparency = layerDef.outlineTransparency
-			end
-			for _, data in ipairs(lc.pixels) do
-				pcall(function()
-					data.Part.Color = layerDef.meshColor
-					data.Part.Transparency = layerDef.meshTransparency
-				end)
-			end
-		end
-
-		-- Update specular stroke
-		local nss = instanceSettings.Stroke
-		if nss and stroke and strokeGradient then
-			stroke.Color = nss.color
-			stroke.Thickness = nss.thickness
-			strokeGradient.Transparency = nss.transparency
-			strokeGradient.Color = nss.colorSequence
-			ss = nss
-			strokeCurrentRot = nss.restingAngle
-			if not nss.enabled then
-				stroke.Transparency = 1
-				strokeHovering = false
-			else
-				stroke.Transparency = 0
-			end
-		end
-
-		-- Update separated outline
-		local nsbo = instanceSettings.SeparatedBorderOutline
-		if nsbo and outlineStroke then
-			outlineStroke.Color = nsbo.color
-			outlineStroke.Thickness = nsbo.thickness
-			sbo = nsbo
-
-			if not nsbo.enabled then
-				cancelOutlineTweens()
-				outlineStroke.Transparency = 1
-				outlineStroke.BorderOffset = UDim.new(0, 0)
-			end
-		end
-
-		-- Update distortion
-		distortionCfg = instanceSettings.Distortion
-		useDistortion = distortionCfg and distortionCfg.enabled
-		distortionStrength = useDistortion and distortionCfg.strength or 0
-
-		for i, lc in ipairs(layerContainers) do
-			local layerDef = instanceSettings.Layers[i]
-			if layerDef and lc.highlight then
-				lc.highlight.FillTransparency = layerDef.fillTransparency
-				lc.highlight.OutlineTransparency = layerDef.outlineTransparency
-			end
-			for _, data in ipairs(lc.pixels) do
-				pcall(function()
-					data.Part.Transparency = if useDistortion then distortionStrength else lc.baseMeshT
-				end)
-			end
-		end
-
-		currentLayoutMode = "None"
-		lastSize = Vector2.zero
-		lastRadius = -1
+	function handle.getMode(): string
+		return mode
 	end
 
+	--- Toggle only the 3D glass parts. Stroke and outline remain functional.
+	function handle.setGlassVisible(state: boolean)
+		glassVisible = state
+		if not state then
+			container.Parent = nil
+		end
+	end
+
+	function handle.isGlassVisible(): boolean
+		return glassVisible
+	end
+
+	-- ── Register ──────────────────────────────────────────────────────────
 	activeInstances[guiObject] = {
 		handle = handle,
-		masterFolder = masterFolder,
+		mode = mode,
 		renderName = renderName,
-		settings = instanceSettings,
 	}
 
 	return handle
 end
 
--- ── Public API ────────────────────────────────────────────────────────────────
+-- ══════════════════════════════════════════════════════════════════════════════
+-- ██ PUBLIC API
+-- ══════════════════════════════════════════════════════════════════════════════
 
-function LiquidGlassHandler.new(guiObject: GuiObject)
-	return createGlassInstance(guiObject, nil)
+--- Create a liquid glass instance (default). Used by tag auto-application.
+function GlassHandler.new(guiObject: GuiObject)
+	return createGlassInstance(guiObject, { mode = "liquid" })
 end
 
-function LiquidGlassHandler.apply(guiObject: GuiObject, overrides: { [string]: any }?)
+--- Create a mosaic glass instance. Used by tag auto-application.
+function GlassHandler.newMosaic(guiObject: GuiObject)
+	return createGlassInstance(guiObject, { mode = "mosaic" })
+end
+
+--- Create a glass instance with full config control.
+--- overrides.mode = "liquid" (default) | "mosaic"
+function GlassHandler.apply(guiObject: GuiObject, overrides: { [string]: any }?)
 	return createGlassInstance(guiObject, overrides)
 end
 
-function LiquidGlassHandler.remove(guiObject: GuiObject): boolean
+--- Remove the glass effect from a GuiObject.
+function GlassHandler.remove(guiObject: GuiObject): boolean
 	local instance = activeInstances[guiObject]
 	if not instance then
 		return false
@@ -835,7 +800,19 @@ function LiquidGlassHandler.remove(guiObject: GuiObject): boolean
 	return true
 end
 
-function LiquidGlassHandler.setEnabled(guiObject: GuiObject, state: boolean)
+--- Check whether a GuiObject has an active glass instance.
+function GlassHandler.has(guiObject: GuiObject): boolean
+	return activeInstances[guiObject] ~= nil
+end
+
+--- Get the handle for an active glass instance (or nil).
+function GlassHandler.get(guiObject: GuiObject)
+	local instance = activeInstances[guiObject]
+	return instance and instance.handle or nil
+end
+
+--- Toggle enabled state for an existing glass instance.
+function GlassHandler.setEnabled(guiObject: GuiObject, state: boolean)
 	local instance = activeInstances[guiObject]
 	if not instance then
 		return
@@ -843,16 +820,17 @@ function LiquidGlassHandler.setEnabled(guiObject: GuiObject, state: boolean)
 	instance.handle.setEnabled(state)
 end
 
-function LiquidGlassHandler.has(guiObject: GuiObject): boolean
-	return activeInstances[guiObject] ~= nil
-end
-
-function LiquidGlassHandler.get(guiObject: GuiObject)
+--- Toggle only the 3D glass rendering. Stroke and outline remain active.
+function GlassHandler.setGlassVisible(guiObject: GuiObject, state: boolean)
 	local instance = activeInstances[guiObject]
-	return instance and instance.handle or nil
+	if not instance then
+		return
+	end
+	instance.handle.setGlassVisible(state)
 end
 
-function LiquidGlassHandler.applyBatch(guiObjects: { GuiObject }, overrides: { [string]: any }?)
+--- Batch apply to multiple GuiObjects.
+function GlassHandler.applyBatch(guiObjects: { GuiObject }, overrides: { [string]: any }?)
 	local handles = {}
 	for _, obj in ipairs(guiObjects) do
 		local h = createGlassInstance(obj, overrides)
@@ -863,17 +841,19 @@ function LiquidGlassHandler.applyBatch(guiObjects: { GuiObject }, overrides: { [
 	return handles
 end
 
-function LiquidGlassHandler.removeAll()
+--- Remove all active glass instances.
+function GlassHandler.removeAll()
 	local objects = {}
 	for guiObject in pairs(activeInstances) do
 		table.insert(objects, guiObject)
 	end
 	for _, guiObject in ipairs(objects) do
-		LiquidGlassHandler.remove(guiObject)
+		GlassHandler.remove(guiObject)
 	end
 end
 
-function LiquidGlassHandler.getActiveCount(): number
+--- Count of active glass instances.
+function GlassHandler.getActiveCount(): number
 	local count = 0
 	for _ in pairs(activeInstances) do
 		count += 1
@@ -881,9 +861,40 @@ function LiquidGlassHandler.getActiveCount(): number
 	return count
 end
 
-CollectionService:GetInstanceAddedSignal(tag):Connect(LiquidGlassHandler.new)
-for _, v in ipairs(CollectionService:GetTagged(tag)) do
-	LiquidGlassHandler.new(v)
+-- ══════════════════════════════════════════════════════════════════════════════
+-- ██ TAG AUTO-APPLICATION
+-- ══════════════════════════════════════════════════════════════════════════════
+
+-- LiquidGlass tag → liquid mode
+CollectionService:GetInstanceAddedSignal(LIQUID_TAG):Connect(function(v)
+	-- Guard: if it also has the mosaic tag, skip (mutual exclusion)
+	if CollectionService:HasTag(v, MOSAIC_TAG) then
+		warn("[GlassHandler] GuiObject has both LiquidGlass and MosaicGlass tags — skipping:", v:GetFullName())
+		return
+	end
+	GlassHandler.new(v)
+end)
+
+-- MosaicGlass tag → mosaic mode
+CollectionService:GetInstanceAddedSignal(MOSAIC_TAG):Connect(function(v)
+	-- Guard: if it also has the liquid tag, skip (mutual exclusion)
+	if CollectionService:HasTag(v, LIQUID_TAG) then
+		warn("[GlassHandler] GuiObject has both LiquidGlass and MosaicGlass tags — skipping:", v:GetFullName())
+		return
+	end
+	GlassHandler.newMosaic(v)
+end)
+
+-- Process already-tagged instances at startup
+for _, v in ipairs(CollectionService:GetTagged(LIQUID_TAG)) do
+	if not CollectionService:HasTag(v, MOSAIC_TAG) then
+		GlassHandler.new(v)
+	end
+end
+for _, v in ipairs(CollectionService:GetTagged(MOSAIC_TAG)) do
+	if not CollectionService:HasTag(v, LIQUID_TAG) then
+		GlassHandler.newMosaic(v)
+	end
 end
 
-return LiquidGlassHandler
+return GlassHandler

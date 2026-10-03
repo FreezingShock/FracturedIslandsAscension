@@ -15,42 +15,39 @@
 
 local ChatConfig = {}
 
--- ===================== CHANNELS =====================
+-- ===================== CHANNELS (minimal, for routing only) =====================
+-- Channels are kept purely for template organization.
+-- UI no longer shows tabs — all messages in one stream.
 ChatConfig.Channels = {
 	["all"] = {
 		displayName = "All",
-		tabColor = Color3.fromRGB(220, 220, 220),
 		headerColor = Color3.fromRGB(255, 255, 255),
 	},
 	["game"] = {
 		displayName = "Game",
-		tabColor = Color3.fromRGB(100, 210, 255),
 		headerColor = Color3.fromRGB(100, 210, 255),
 	},
 	["combat"] = {
 		displayName = "Combat",
-		tabColor = Color3.fromRGB(255, 100, 100),
 		headerColor = Color3.fromRGB(255, 100, 100),
 	},
 	["events"] = {
 		displayName = "Events",
-		tabColor = Color3.fromRGB(255, 210, 50),
 		headerColor = Color3.fromRGB(255, 210, 50),
 	},
 }
 
-ChatConfig.ChannelOrder = { "all", "game", "combat", "events" }
 ChatConfig.DefaultChannel = "all"
 
 -- ===================== TEMPLATES =====================
 -- FIELDS:
---   channel     (string)  — which channel tab this appears in
+--   channel     (string)  — which channel tab this appears in (no longer visible in UI)
 --   lines       (array)   — message lines; "" = blank spacer
 --   colors      (table)   — [lineIndex] = Color3
 --   bold        (table)   — [lineIndex] = true
 --   tokens      (table)   — documented token names for reference
 --   sound       (string)  — optional SoundId played on client receipt
---   hideFromAll (bool)    — only show in own channel, not "All" tab
+--   hideFromAll (bool)    — only show in own channel, not "All" tab (kept for logic)
 
 ChatConfig.Templates = {
 
@@ -71,7 +68,6 @@ ChatConfig.Templates = {
 	-- ── Skill Events ──────────────────────────────────────────
 	SKILL_XP = {
 		channel = "game",
-		hideFromAll = true,
 		lines = { "  +{xp} {skill} XP" },
 		colors = { [1] = Color3.fromRGB(170, 255, 170) },
 		tokens = { "xp", "skill" },
@@ -110,7 +106,6 @@ ChatConfig.Templates = {
 	-- ── Button / Clicking Events ──────────────────────────────
 	BUTTON_PRESS = {
 		channel = "game",
-		hideFromAll = true,
 		lines = { "  +{amount} {skill} XP" },
 		colors = { [1] = Color3.fromRGB(180, 255, 180) },
 		tokens = { "amount", "skill" },
@@ -137,7 +132,6 @@ ChatConfig.Templates = {
 	},
 	ITEM_EQUIP = {
 		channel = "game",
-		hideFromAll = true,
 		lines = { "  Equipped: {item}" },
 		colors = { [1] = Color3.fromRGB(180, 180, 255) },
 		tokens = { "item" },
@@ -146,14 +140,12 @@ ChatConfig.Templates = {
 	-- ── Combat Events ─────────────────────────────────────────
 	HIT_DEALT = {
 		channel = "combat",
-		hideFromAll = true,
 		lines = { "  Hit {enemy} for {damage}" },
 		colors = { [1] = Color3.fromRGB(255, 160, 160) },
 		tokens = { "enemy", "damage" },
 	},
 	CRIT_HIT = {
 		channel = "combat",
-		hideFromAll = true,
 		lines = { "  ⚔ CRIT  {enemy}  {damage}!" },
 		colors = { [1] = Color3.fromRGB(255, 80, 80) },
 		bold = { [1] = true },
@@ -230,23 +222,21 @@ ChatConfig.Visual = {
 	PanelWidth = 480,
 	LogHeight = 200,
 	InputBarHeight = 38,
-	TabBarHeight = 26,
 	PanelOffsetX = 8,
 	PanelOffsetY = 8,
 
 	-- Fonts
-	ChatFont = Font.new("rbxassetid://11598121416"),
-	FontSize = 16,
+	ChatFont = Font.new("rbxassetid://12187370747"),
+	FontSize = 20,
 	LineSpacing = 2,
 
 	-- Colors
-	PanelBackground = Color3.fromRGB(0, 0, 0),
+	PanelBackground = Color3.fromRGB(150, 150, 150),
 	PanelBackgroundAlpha = 0.85, -- unfocused (more transparent)
 	PanelFocusedAlpha = 0.40, -- focused / hovered (more opaque)
-	InputBackground = Color3.fromRGB(0, 0, 0),
-	InputBackgroundAlpha = 0.55,
-	TabActiveColor = Color3.fromRGB(255, 255, 255),
-	TabInactiveColor = Color3.fromRGB(120, 120, 120),
+	InputBackground = Color3.fromRGB(255, 255, 255),
+	InputBackgroundAlpha = 1,
+	SendButtonColor = Color3.fromRGB(100, 150, 255),
 	PlayerNameColor = Color3.fromRGB(255, 255, 255),
 	PlayerTextColor = Color3.fromRGB(220, 220, 220),
 	TimestampColor = Color3.fromRGB(100, 100, 100),

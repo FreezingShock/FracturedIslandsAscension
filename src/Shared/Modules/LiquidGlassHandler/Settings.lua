@@ -1,67 +1,59 @@
 --[[
-	Settings.lua — LiquidGlassHandler 3.2
+	Settings.lua — GlassHandler (Merged)
 
-	Two Glass layers (Back + Front) — frosted body.
-	Dynamic UIStroke + UIGradient — cursor-tracking specular highlight.
-	SeparatedBorderOutline — hover-activated offset outline via UIStroke.BorderOffset.
+	Two glass modes:
+	  • Liquid  — model-level Highlight + Glass parts at Transparency 3.
+	             Adaptive 9-part grid (Center/Edge/Corner) when UICorner present.
+	  • Mosaic  — no Highlight; CenterMosaic template parts left untouched
+	             (Glass, 0.8 transparency, Reflectance 1 baked in template).
+	             Always flat tiled grid.
 
-	CHANGES FROM 3.1:
-	  ① SeparatedBorderOutline section added. Creates a third UIStroke on
-	    the GuiObject that tweens its BorderOffset outward on hover, producing
-	    a Fortnite-style separated outline effect. Toggled per-instance via
-	    LiquidGlassHandler.apply() overrides.
-
-	meshTransparency must stay 0.30–0.65 for Glass refraction to be active.
+	Shared overlay features (independently toggleable per instance):
+	  • Stroke                  — cursor-tracking specular UIStroke + UIGradient.
+	  • SeparatedBorderOutline  — hover-activated offset outline via UIStroke.BorderOffset.
 ]]
 
 return {
 
-	-- ── Legacy keys (mirror Layer 1) ─────────────────────────────────────
-	Highlight = {
-		FillColor = Color3.fromRGB(190, 210, 235),
-		OutlineColor = Color3.fromRGB(255, 255, 255),
-		OutlineTransparency = 1, -- DISABLED: UIStroke handles rim
-		FillTransparency = 0.55,
-	},
-	Mesh = {
-		Material = Enum.Material.Glass,
-		Color = Color3.fromRGB(175, 192, 215),
-		Transparency = 0.40,
-		Anchored = true,
-		CastShadow = false,
-		CanCollide = false,
-		CanTouch = false,
-		CanQuery = false,
-		AudioCanCollide = false,
-	},
+	-- ── Tags ──────────────────────────────────────────────────────────────
+	LiquidTag = "LiquidGlass",
+	MosaicTag = "MosaicGlass",
 
-	Tag = "LiquidGlass",
+	-- ── Shared geometry ───────────────────────────────────────────────────
 	Padding = 0.001,
 	Depth = 2,
 
-	-- When true, always use a single Center part per layer regardless of
-	-- whether the GuiObject has a UICorner. Eliminates ALL internal seams
-	-- from the 9-part rounded-corner grid. The frosted glass effect is
-	-- subtle enough that the glass not following rounded corners exactly
-	-- is unnoticeable in practice.
-	ForceFlat = true,
-
-	-- ── Two-layer glass stack ─────────────────────────────────────────────
-	Layers = {
-		{ -- Front: glass face (specular rim now via UIStroke, not Highlight)
-			depthOffset = -0.08,
-			fillColor = Color3.fromRGB(228, 236, 252),
-			fillTransparency = 0.72,
-			outlineColor = Color3.fromRGB(255, 255, 255),
-			outlineTransparency = 1, -- DISABLED: was 0.18, primary cause of line artifacts
-			meshColor = Color3.fromRGB(192, 206, 228),
-			meshTransparency = 0.54,
+	-- ── Liquid glass mode ─────────────────────────────────────────────────
+	-- Exact v1 approach: model-level Highlight (black fill) + Glass parts
+	-- at Transparency 3 for the >1 distortion trick.
+	Liquid = {
+		Highlight = {
+			FillColor = Color3.fromRGB(0, 0, 0),
+			OutlineTransparency = 1,
+			FillTransparency = 0.9,
+		},
+		Mesh = {
+			Material = Enum.Material.Glass,
+			Color = Color3.fromRGB(0, 0, 0),
+			Transparency = 3,
 		},
 	},
 
-	Rim = { enabled = true },
+	-- ── Mosaic glass mode ─────────────────────────────────────────────────
+	-- Distortion-only approach: no model Highlight. CenterMosaic template
+	-- properties (Glass, Transparency 0.8, Reflectance 1) are baked in the
+	-- .rbxm and left untouched after cloning.
+	-- `strength` is the Part.Transparency override — set to 0.8 to match
+	-- the template default. Increase for heavier distortion if desired.
+	Mosaic = {
+		Distortion = {
+			strength = 0.8,
+			gridCols = 3,
+			gridRows = 2,
+		},
+	},
 
-	-- ── Dynamic specular stroke ───────────────────────────────────────────
+	-- ── Dynamic specular stroke (shared, same defaults for both modes) ────
 	Stroke = {
 		enabled = true,
 		thickness = 4,
@@ -87,34 +79,18 @@ return {
 		}),
 	},
 
-	-- ── Separated border outline (hover-activated offset stroke) ──────────
-	-- Creates a UIStroke that sits flush at rest (invisible) and tweens its
-	-- BorderOffset outward on hover to produce a separated outline effect.
-	-- Toggled per-instance via .apply() overrides.
+	-- ── Separated border outline (shared, same defaults for both modes) ───
+	-- Off by default; enable per-instance via .apply() overrides.
 	SeparatedBorderOutline = {
-		enabled = false, -- off by default; enable per-instance
-		offset = 7, -- px gap at full hover (BorderOffset.X and .Y)
-		thickness = 3, -- stroke weight
-		color = Color3.fromRGB(213, 229, 255), -- pastel liquid-glass blue
-		restTransparency = 1, -- invisible at rest
-		hoverTransparency = 0.15, -- slight translucency for glassy feel
+		enabled = false,
+		offset = 7,
+		thickness = 3,
+		color = Color3.fromRGB(213, 229, 255),
+		restTransparency = 1,
+		hoverTransparency = 0.15,
 		tweenInTime = 0.25,
 		tweenOutTime = 0.2,
 		easingIn = Enum.EasingStyle.Quint,
 		easingOut = Enum.EasingStyle.Quint,
-	},
-
-	-- ── Distortion mode (transparency >1 trick) ──────────────────────────
-	-- When enabled, Part.Transparency is set to `strength` (>1) which
-	-- triggers Roblox's hidden glass distortion. The per-layer Highlight
-	-- becomes a keep-alive (both transparencies forced to 1). The higher
-	-- the strength, the heavier the frosted distortion.
-	-- NOTE: Requires Graphics Quality 8+ on the client. Lower settings
-	-- disable glass distortion entirely.
-	Distortion = {
-		enabled = true,
-		strength = 4,
-		gridCols = 3,
-		gridRows = 2,
 	},
 }
