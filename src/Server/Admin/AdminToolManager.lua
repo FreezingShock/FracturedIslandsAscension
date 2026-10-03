@@ -18,10 +18,8 @@ local ItemRegistry = require(ReplicatedStorage:WaitForChild("Modules"):WaitForCh
 local AdminToolManager = {}
 
 -- ===================== ADMIN USER IDS =====================
--- Hardcode your admin user IDs here. In production, use a proper admin system.
-local ADMIN_IDS = {
-	288851273, -- Nate
-}
+-- Admin ids live in Modules/AdminConfig.
+local AdminConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("AdminConfig"))
 
 -- ===================== RUNTIME ITEM STORAGE =====================
 -- Items created during this session (not persisted between server restarts)
@@ -30,14 +28,7 @@ local runtimeItemCounter = 0
 
 -- ===================== VALIDATION =====================
 
-local function isAdmin(player)
-	for _, adminId in ipairs(ADMIN_IDS) do
-		if player.UserId == adminId then
-			return true
-		end
-	end
-	return false
-end
+local isAdmin = AdminConfig.isAdmin
 
 local function validateItemData(itemData)
 	-- Required fields

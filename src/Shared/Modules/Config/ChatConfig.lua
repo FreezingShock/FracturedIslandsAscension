@@ -261,8 +261,7 @@ ChatConfig.Behaviour = {
 	ShowJoinLeave = true,
 }
 
--- ===================== ADMIN CONFIG =====================
-ChatConfig.AdminIds = { 288851273 }
+-- Admin ids live in Modules/AdminConfig.
 
 -- ===================== RARITY COLORS =====================
 ChatConfig.RarityColors = {

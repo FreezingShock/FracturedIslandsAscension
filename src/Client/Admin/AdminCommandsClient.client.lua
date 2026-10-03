@@ -25,16 +25,8 @@ local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
 -- ===================== ADMIN GATE =====================
-local ADMIN_IDS = { 288851273 }
-local function isAdmin()
-	for _, id in ipairs(ADMIN_IDS) do
-		if player.UserId == id then
-			return true
-		end
-	end
-	return false
-end
-if not isAdmin() then
+local AdminConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("AdminConfig"))
+if not AdminConfig.isAdmin(player) then
 	return
 end
 

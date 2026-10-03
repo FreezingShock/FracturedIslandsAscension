@@ -480,15 +480,8 @@ ChangeSkill.Parent = ReplicatedStorage
 
 ChangeSkill.OnServerEvent:Connect(function(player, targetName, skillName, level)
 	-- Only allow admins
-	local ADMIN_IDS = { 288851273 } -- replace with your Roblox user ID
-	local isAdmin = false
-	for _, id in ipairs(ADMIN_IDS) do
-		if player.UserId == id then
-			isAdmin = true
-			break
-		end
-	end
-	if not isAdmin then
+	local AdminConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("AdminConfig"))
+	if not AdminConfig.isAdmin(player) then
 		return
 	end
 
