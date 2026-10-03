@@ -8,7 +8,7 @@ description: Playtest-verify a change in Roblox Studio with minimal tokens. Sync
 Goal: prove the change works and return **a short pass/fail report with evidence**. Never call
 `get_console_output` (it dumps the whole log). Read errors with `LogService:GetLogHistory()` instead.
 
-If a `studio-tester` subagent is available, delegate this whole skill to it and relay only its report.
+Run this **inline** in the main conversation: the error filter already keeps results tiny, so a subagent would cost more than it saves.
 
 ## Steps
 1. **Studio id:** `list_roblox_studios` once, reuse the id.

@@ -7,7 +7,12 @@ argument-hint: <feature idea>
 
 # /fia-feature $ARGUMENTS
 
-Run these phases in order. Keep each phase's output short. If scope is a one-sentence diff, skip phases 1-2.
+## 0. Size check (decides how much process to use)
+- **Small** (fits in one sentence, 1-3 files, no saved-data or Remote changes): skip the spec, skip review. Branch -> implement -> `/fia-verify` -> `/fia-ship`.
+- **Large** (new system, 4+ files, touches saved data, RemoteEvents/Functions, or the menu/grid engine): run every phase below.
+- If `$ARGUMENTS` already contains a spec (e.g. pasted from `/fia-ideate`), skip phase 1 and start at phase 2.
+
+Run the phases in order. Keep each phase's output short.
 
 ## 1. Spec (skip if /fia-ideate already produced one)
 - Read only what is needed: the registry rows for the touched systems (`Grep` the vault note
@@ -31,9 +36,9 @@ Run these phases in order. Keep each phase's output short. If scope is a one-sen
 ## 4. Verify
 Run `/fia-verify`. Fix until PASS (two-attempt rule applies).
 
-## 5. Review
-Run the `fia-reviewer` subagent on the diff against the spec. Apply only findings that affect correctness
-or the stated requirements; ignore style.
+## 5. Review (large features only)
+Run `/code-review` on the diff and check it against the spec and the review checklist in CLAUDE.md. Apply only findings that affect
+correctness or the stated requirements; ignore style.
 
 ## 6. Commit
 Run `/fia-ship` (commit, vault log, push). Finish by telling the user: what changed, what was verified (with

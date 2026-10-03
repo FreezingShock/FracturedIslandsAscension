@@ -18,5 +18,10 @@ Purpose: expand a rough idea into something `/fia-feature` can execute, without 
 4. **Ask only what is the user's call** with `AskUserQuestion` (max 4, recommended option first).
 5. **Output a spec** (<=12 lines): Goal - Player-facing behavior - Data/config shape - Files likely touched -
    Out of scope - Verification (what `/fia-verify` observes) - Open questions.
-6. Offer to save it (`/obsidian-decide` for decisions, `/obsidian-graduate` for a project-sized idea) and to
-   run `/fia-feature` on it. Do not create new vault files unless the user asks.
+6. **End with a ready-to-run prompt** in a code block the user can copy, so the spec is not re-derived:
+   ````
+   /fia-feature <one-line title>
+   SPEC: <the spec above, condensed, including the verification step>
+   ````
+   Then offer to save the idea (`/obsidian-decide` for decisions, `/obsidian-graduate` for a project-sized idea).
+   Do not create new vault files unless the user asks. Do not start building.

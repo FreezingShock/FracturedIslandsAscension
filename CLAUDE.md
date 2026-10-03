@@ -26,7 +26,8 @@ Naming: `*.client.lua` = LocalScript, `*.server.lua` = Script, plain `.lua` = Mo
 
 ## Workflow automation (committed in `.claude/`, works on any machine after `git clone`)
 - **Skills:** `/fia-ideate <idea>` (idea -> spec) -> `/fia-feature <idea>` (branch, build, verify, review) -> `/fia-verify` (token-lean playtest) -> `/fia-ship` (commit, vault log, push). `/fia-skill <idea or restriction>` creates or changes skills, hooks, subagents, permissions and rules.
-- **Subagents:** `studio-tester` (verify without console noise), `fia-reviewer` (fresh-context diff review), `lua-explorer` (read-only code search).
+- **Subagent:** `lua-explorer` (read-only code search). Verification runs inline via `/fia-verify`; reviews use `/code-review` for large features.
+- **Review checklist:** async callbacks that mutate reused state check `PlaybackState`/generation (tween `Completed` fires on Cancel); saved-data changes backfill via `Reconcile`; server never trusts client values; new RemoteEvents type-check inputs; GUI is looked up by name, so renames break scripts; script names are unique per realm.
 - **Hooks:** blocks hand edits to generated files; regenerates `default.project.json` when a script is added; Stop is blocked while the project file is stale; a small context pack loads at session start.
 - **Token rules:** never call `get_console_output` (use `/fia-verify`); `Grep`/partial reads instead of whole files; text assertions over screenshots; `/clear` between features.
 - Install the skills user-wide with `python tools/install_skills.py`; validate with `python tools/check_skills.py`.

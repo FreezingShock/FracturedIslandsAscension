@@ -63,7 +63,11 @@
     "SessionStart": [
       {
         "hooks": [
-          { "type": "command", "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/session_start.py\"", "timeout": 10 }
+          {
+            "type": "command",
+            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/session_start.py\"",
+            "timeout": 10
+          }
         ]
       }
     ],
@@ -71,7 +75,11 @@
       {
         "matcher": "Edit|Write|MultiEdit",
         "hooks": [
-          { "type": "command", "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/guard_generated.py\"", "timeout": 5 }
+          {
+            "type": "command",
+            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/guard_generated.py\"",
+            "timeout": 5
+          }
         ]
       }
     ],
@@ -79,16 +87,47 @@
       {
         "matcher": "Edit|Write|MultiEdit",
         "hooks": [
-          { "type": "command", "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/post_edit.py\"", "timeout": 20 }
+          {
+            "type": "command",
+            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/post_edit.py\"",
+            "timeout": 20
+          }
         ]
       }
     ],
     "Stop": [
       {
         "hooks": [
-          { "type": "command", "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/stop_gate.py\"", "timeout": 20 }
+          {
+            "type": "command",
+            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/stop_gate.py\"",
+            "timeout": 20
+          }
         ]
       }
     ]
+  },
+  "skillOverrides": {
+    "claude-api": "off",
+    "keybindings-help": "off",
+    "plugin-authoring": "off",
+    "init": "off",
+    "artifact-styling": "off",
+    "consolidate-memory": "off",
+    "docx": "off",
+    "xlsx": "off",
+    "pptx": "off",
+    "pdf": "off",
+    "google-workspace": "off",
+    "import-memory": "off",
+    "morning": "off",
+    "learn": "off",
+    "skill-creator": "off",
+    "dataviz": "off",
+    "artifact-design": "off",
+    "artifact-diagramming": "off",
+    "artifact-capabilities": "off",
+    "explain-usage": "off",
+    "setup-claude": "off"
   }
 }
