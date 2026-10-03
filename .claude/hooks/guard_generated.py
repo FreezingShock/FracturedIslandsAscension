@@ -12,6 +12,7 @@ import sys
 GENERATED = {
     "default.project.json": "python tools/gen_project.py",
     "sourcemap.json": "rojo sourcemap default.project.json -o sourcemap.json",
+    "ItemIconData.lua": "python tools/gen_icon_data.py (edit assets/icons/ids.json)",
 }
 
 try:
