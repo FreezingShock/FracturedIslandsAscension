@@ -8,3 +8,7 @@
 .DS_Store
 Thumbs.db
 *.log
+
+# Packaged skills / local Claude settings
+dist/
+.claude/settings.local.json

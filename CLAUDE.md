@@ -24,6 +24,13 @@ Roblox incremental/progression game (Hypixel SkyBlock-style skills + stats). Sol
 
 Naming: `*.client.lua` = LocalScript, `*.server.lua` = Script, plain `.lua` = ModuleScript.
 
+## Workflow automation (committed in `.claude/`, works on any machine after `git clone`)
+- **Skills:** `/fia-ideate <idea>` (idea -> spec) -> `/fia-feature <idea>` (branch, build, verify, review) -> `/fia-verify` (token-lean playtest) -> `/fia-ship` (commit, vault log, push). `/fia-skill <idea or restriction>` creates or changes skills, hooks, subagents, permissions and rules.
+- **Subagents:** `studio-tester` (verify without console noise), `fia-reviewer` (fresh-context diff review), `lua-explorer` (read-only code search).
+- **Hooks:** blocks hand edits to generated files; regenerates `default.project.json` when a script is added; Stop is blocked while the project file is stale; a small context pack loads at session start.
+- **Token rules:** never call `get_console_output` (use `/fia-verify`); `Grep`/partial reads instead of whole files; text assertions over screenshots; `/clear` between features.
+- Install the skills user-wide with `python tools/install_skills.py`; validate with `python tools/check_skills.py`.
+
 ## Architecture
 - **Server-authoritative.** Clients never compute final stats. Server modules own data; clients get state via RemoteEvents (e.g. `SkillUpdated`) and only render.
 - **Persistence:** `ProfileService` (`src/Server/Data/ProfileService.luau`). One profile per player in `SkillsDataManager` (`PlayerSkills_v1`): skills at top level, inventory under `_Inventory`. `InventoryDataManager` reaches the profile through `SkillsDataManager.GetProfile` / `GetInventoryData`. New fields go in `PROFILE_TEMPLATE`; `Reconcile()` backfills existing players, so don't bump the store name.

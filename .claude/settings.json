@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "allow": [
+      "Bash(git status *)",
+      "Bash(git diff *)",
+      "Bash(git log *)",
+      "Bash(git show *)",
+      "Bash(git branch *)",
+      "Bash(git checkout -b *)",
+      "Bash(git switch *)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git mv *)",
+      "Bash(git push)",
+      "Bash(git push -u origin *)",
+      "Bash(git push origin feature/*)",
+      "Bash(git fetch *)",
+      "Bash(git pull --ff-only*)",
+      "Bash(python tools/*)",
+      "Bash(python .claude/*)",
+      "Bash(rojo build *)",
+      "Bash(rojo sourcemap *)",
+      "Bash(rojo --version)",
+      "Bash(rojo serve *)",
+      "mcp__Roblox_Studio__list_roblox_studios",
+      "mcp__Roblox_Studio__get_studio_state",
+      "mcp__Roblox_Studio__execute_luau",
+      "mcp__Roblox_Studio__start_stop_play",
+      "mcp__Roblox_Studio__get_console_output",
+      "mcp__Roblox_Studio__screen_capture",
+      "mcp__Roblox_Studio__user_keyboard_input",
+      "mcp__Roblox_Studio__user_mouse_input",
+      "mcp__Roblox_Studio__script_read",
+      "mcp__Roblox_Studio__script_grep",
+      "mcp__Roblox_Studio__script_search",
+      "mcp__Roblox_Studio__search_game_tree",
+      "mcp__Roblox_Studio__inspect_instance",
+      "mcp__Roblox_Studio__multi_edit",
+      "mcp__Roblox_Studio__skill",
+      "mcp__plugin_obsidian-second-brain_vault__obsidian_search",
+      "mcp__plugin_obsidian-second-brain_vault__obsidian_read_note",
+      "mcp__plugin_obsidian-second-brain_vault__obsidian_backlinks",
+      "mcp__plugin_obsidian-second-brain_vault__obsidian_update_note",
+      "mcp__plugin_obsidian-second-brain_vault__obsidian_replace_text",
+      "mcp__plugin_obsidian-second-brain_vault__obsidian_capture",
+      "mcp__plugin_obsidian-second-brain_vault__obsidian_validate_note",
+      "mcp__plugin_obsidian-second-brain_vault__obsidian_vault_health",
+      "mcp__plugin_obsidian-second-brain_vault__obsidian_list_skills",
+      "mcp__plugin_obsidian-second-brain_vault__obsidian_get_skill"
+    ],
+    "deny": [
+      "Bash(git push --force*)",
+      "Bash(git push -f *)",
+      "Bash(git push origin main*)",
+      "Bash(git push origin HEAD:main*)",
+      "Bash(git reset --hard*)",
+      "Bash(git clean *)",
+      "Bash(rm -rf *)"
+    ]
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          { "type": "command", "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/session_start.py\"", "timeout": 10 }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          { "type": "command", "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/guard_generated.py\"", "timeout": 5 }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          { "type": "command", "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/post_edit.py\"", "timeout": 20 }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          { "type": "command", "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/stop_gate.py\"", "timeout": 20 }
+        ]
+      }
+    ]
+  }
+}

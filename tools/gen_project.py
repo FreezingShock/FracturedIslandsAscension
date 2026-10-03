@@ -18,6 +18,7 @@ Rules (per realm: src/Server, src/Shared/Modules, src/Client):
 
 Usage:  python tools/gen_project.py          (rewrite default.project.json)
         python tools/gen_project.py --check  (exit 1 if the file is out of date)
+        python tools/gen_project.py --counts (script counts Studio should show, per container)
 """
 import json
 import os
@@ -89,7 +90,19 @@ def build():
     }
 
 
+def count_scripts(realm_dir):
+    """Every Lua(u) file under the realm = every script Studio should contain there."""
+    total = 0
+    for _, _, files in os.walk(os.path.join(SRC, realm_dir)):
+        total += sum(1 for f in files if f.endswith((".lua", ".luau")))
+    return total
+
+
 def main():
+    if "--counts" in sys.argv:
+        print(f"Modules={count_scripts('Shared/Modules')} ServerScriptService={count_scripts('Server')} "
+              f"StarterPlayerScripts={count_scripts('Client')}")
+        return
     text = json.dumps(build(), indent=2, ensure_ascii=False) + "\n"
     if "--check" in sys.argv:
         current = open(PROJECT, encoding="utf-8").read() if os.path.exists(PROJECT) else ""
