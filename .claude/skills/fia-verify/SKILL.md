@@ -12,7 +12,7 @@ Run this **inline** in the main conversation: the error filter already keeps res
 
 ## Steps
 1. **Studio id:** `list_roblox_studios` once, reuse the id.
-2. **Static checks (no Studio):** `python tools/gen_project.py --check` and `rojo build default.project.json -o NUL`
+2. **Static checks (no Studio):** `python tools/gen_project.py --check` and `rojo build default.project.json -o <temp>.rbxlx`
    (use a temp path on Linux/macOS). Stop and fix if either fails.
 3. **Sync check (Edit datamodel, `execute_luau`):** script counts must equal
    `python tools/gen_project.py --counts`. If Modules is 0 or a count is doubled, the Rojo plugin is
