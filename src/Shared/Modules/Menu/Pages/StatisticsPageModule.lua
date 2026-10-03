@@ -612,6 +612,11 @@ function M.getActiveSkill()
 	return currentSkill
 end
 
+--- Owned count of one statistic (0 until the first server snapshot arrives).
+function M.getCount(skill, statKey)
+	return getStatData(skill, statKey).count
+end
+
 -- ===================== INIT =====================
 function M.init(sharedRefs)
 	shared = sharedRefs

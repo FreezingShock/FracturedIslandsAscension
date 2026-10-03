@@ -90,6 +90,7 @@ local ProfileConfig = safeRequire("ProfileConfig", true)
 local SettingsPageModule = safeRequire("SettingsPageModule", true)
 local StatisticsPageModule = safeRequire("StatisticsPageModule", true)
 local CollectionsPageModule = safeRequire("CollectionsPageModule", true)
+local AdminPageModule = safeRequire("AdminPageModule", false)
 local MenuBridge = safeRequire("MenuBridge", true)
 
 -- Register MenuBridge callbacks IMMEDIATELY (before InventoryController tries to use them)
@@ -503,10 +504,13 @@ local NEXUS_BUTTONS = {
 	AdminPanel = {
 		tooltipData = {
 			title = '<font color="#FF55FF"><b>Admin Panel</b></font>',
-			desc = '<font color="#AAAAAA">Create and spawn test items for development.</font>',
-			click = '<font color="#555555">Coming Soon</font>',
+			desc = '<font color="#AAAAAA">See every item, give yourself items and statistics, and add temporary attribute bonuses.</font>',
+			click = '<font color="#FFFF55">Click to open!</font>',
 		},
-		action = nil,
+		-- Not a template button: AdminPageModule.addNexusButton builds it for admins only.
+		callback = function()
+			GridMenuModule.navigateToGrid("AdminGrid")
+		end,
 	},
 }
 
@@ -700,6 +704,11 @@ local STATS_MENU2_BUTTONS = {
 		},
 		action = "close",
 	},
+}
+
+local ADMIN_BUTTONS = {
+	BackButton = STATS_MENU2_BUTTONS.BackButton,
+	CloseSlot = STATS_MENU2_BUTTONS.CloseSlot,
 }
 
 local SETTINGS_BUTTONS = {
@@ -1017,7 +1026,9 @@ local PROFILE_MENU3_BUTTONS = {
 -- ===================== NEXUS GRID LAYOUT CONFIG =====================
 -- REPLACE WITH:
 local NEXUS_BLANK_GROUPS = {
-	{ layoutOrder = 1, count = 13 },
+	{ layoutOrder = -2, count = 8 },
+	{ layoutOrder = -1, count = 1 }, -- top-right: the admin button replaces this for admins
+	{ layoutOrder = 1, count = 4 },
 	{ layoutOrder = 3, count = 5 },
 	{ layoutOrder = 11, count = 4 },
 	{ layoutOrder = 15, count = 12 }, -- was 15; one cell taken by HotbarVisibility
@@ -1486,6 +1497,13 @@ GridMenuModule.registerPooledGrid(ROOT_GRID, GridTemplates:WaitForChild("NexusMe
 				end)
 			)
 		end
+		-- Admin button (top-right). Non-admins keep the blank slot.
+		if AdminPageModule then
+			local settingsBtn = clonedButtons["Settings"]
+			for _, conn in ipairs(AdminPageModule.addNexusButton(settingsBtn and settingsBtn.Parent, settingsBtn, NEXUS_BUTTONS.AdminPanel)) do
+				table.insert(conns, conn)
+			end
+		end
 		return conns
 	end,
 })
@@ -1646,6 +1664,22 @@ if StatisticsMenu2Template then
 	})
 else
 	warn("[CMC] GridTemplates/StatisticsMenu2 not found — skipping registration (still legacy?)")
+end
+
+-- Admin panel (built in code, see AdminPageModule). Only reachable from the admin-only Nexus button.
+if AdminPageModule then
+	AdminPageModule.init(sharedRefs) -- builds the template folder the grid needs
+end
+if AdminPageModule and AdminPageModule.getTemplateFolder() then
+	GridMenuModule.registerPooledGrid("AdminGrid", AdminPageModule.getTemplateFolder(), ADMIN_BUTTONS, {
+		title = "Admin Panel",
+		onPopulate = function(frame)
+			AdminPageModule.populate(frame)
+		end,
+		onDepopulate = function()
+			AdminPageModule.depopulate()
+		end,
+	})
 end
 
 local CollectionsMenu2Template = GridTemplates:FindFirstChild("CollectionsMenu2")

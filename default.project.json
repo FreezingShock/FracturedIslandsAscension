@@ -60,6 +60,12 @@
       "$className": "ReplicatedStorage",
       "Modules": {
         "$className": "Folder",
+        "AdminConfig": {
+          "$path": "src/Shared/Modules/Admin/AdminConfig.lua"
+        },
+        "AdminPageModule": {
+          "$path": "src/Shared/Modules/Menu/Pages/AdminPageModule.lua"
+        },
         "AdminPanelModule": {
           "$path": "src/Shared/Modules/Admin/AdminPanelModule.lua"
         },
