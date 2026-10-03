@@ -34,6 +34,27 @@ local ItemRegistry = require(Modules:WaitForChild("ItemRegistry")) :: any
 local MenuBridge = require(Modules:WaitForChild("MenuBridge")) :: any
 local LiquidGlassHandler = require(Modules:WaitForChild("LiquidGlassHandler")) :: any
 
+-- ===================== ENSURE MENUBRIDGE CALLBACKS REGISTERED =====================
+-- CentralizedMenuController registers these callbacks.
+-- Wait for them to ensure proper load order and prevent race conditions.
+local function waitForMenuBridgeReady(timeout)
+	timeout = timeout or 5
+	local startTime = tick()
+	while (not MenuBridge._openFullMode or not MenuBridge._openInventoryMode)
+		and (tick() - startTime) < timeout do
+		task.wait(0.05)
+	end
+	if not MenuBridge._openFullMode then
+		error("[InventoryController] MenuBridge._openFullMode not registered (CentralizedMenuController may not have loaded)")
+	end
+	if not MenuBridge._openInventoryMode then
+		error("[InventoryController] MenuBridge._openInventoryMode not registered (CentralizedMenuController may not have loaded)")
+	end
+end
+
+-- Wait for MenuBridge to be fully initialized
+task.spawn(waitForMenuBridgeReady)
+
 local StarterGui = game:GetService("StarterGui")
 
 -- Disable default Roblox backpack/inventory
@@ -262,29 +283,14 @@ end
 -- ===================== TOOLTIP HELPERS =====================
 local TOOLTIP_SOURCE = "inventory"
 
-local function buildTooltipData(toolInfo)
-	if not toolInfo then
-		return nil
-	end
-	local rarity = toolInfo.rarity or 0
-	local rarityConf = ItemRegistry.getRarity(rarity)
-	local prefix = rarityConf and rarityConf.tooltipPrefix or '<font color="#AAAAAA">'
-	local rarityName = rarityConf and rarityConf.name or "Common"
-
-	local title = prefix .. "<b>" .. (toolInfo.displayName or toolInfo.name) .. "</b></font>"
-	local desc = '<font color="#AAAAAA">' .. rarityName .. " — " .. tostring(toolInfo.count) .. "x</font>"
-
-	return { title = title, desc = desc, click = "" }
-end
-
+--- Build and show the tooltip for an inventory item. All layout and
+--- section toggling lives in TooltipModule; item data -> tooltip mapping
+--- lives in TooltipModule.Items (so new item fields never touch this file).
 local function showItemTooltip(toolInfo)
 	if suppressTooltip or not toolInfo then
 		return
 	end
-	local data = buildTooltipData(toolInfo)
-	if data then
-		TooltipModule.show(data, TOOLTIP_SOURCE)
-	end
+	TooltipModule.show(TooltipModule.Items.fromTool(toolInfo), TOOLTIP_SOURCE)
 end
 
 local function hideItemTooltip()
@@ -484,6 +490,7 @@ local function createGridSlots()
 				color = Color3.fromRGB(255, 255, 255),
 			},
 		})
+		LiquidGlassHandler.setGlassVisible(newSlot, false)
 
 		-- Start as blank
 		renderSlotBlank(newSlot)
@@ -540,6 +547,7 @@ local function getOrCreateOverflowSlot(index)
 			color = Color3.fromRGB(255, 255, 255),
 		},
 	})
+	LiquidGlassHandler.setGlassVisible(newSlot, false)
 
 	newSlot.MouseEnter:Connect(function()
 		slotData.hovered = true
@@ -560,6 +568,27 @@ local function getOrCreateOverflowSlot(index)
 	end)
 
 	return slotData
+end
+
+local hotbarShowAllPref = false -- mirrors server-saved preference
+-- Applies the current visibility preference (or drag override).
+-- dragOverride=true forces all slots visible (drag in progress).
+local function applyHotbarVisibility(dragOverride)
+	local showAll = dragOverride or hotbarShowAllPref
+	for i = 1, MAX_HOTBAR - 1 do
+		local slotData = hotbarSlots[i]
+		if showAll then
+			slotData.frame.Visible = true
+		else
+			-- Only show if filled
+			slotData.frame.Visible = (slotData.toolInfo ~= nil)
+		end
+	end
+end
+
+-- Show all 8 item hotbar slots (not slot 9) during drag
+local function _showAllHotbarSlots()
+	applyHotbarVisibility(true) -- drag override = force all visible
 end
 
 -- ===================== SCROLLING LOGIC =====================
@@ -589,6 +618,7 @@ local function refreshHotbar()
 
 		slotData.frame.Visible = hasItem
 	end
+	applyHotbarVisibility(false) -- apply visibility based on current preference (no drag override)
 end
 
 local function refreshInventory()
@@ -642,28 +672,6 @@ end
 local function refreshAll()
 	refreshHotbar()
 	refreshInventory()
-end
-
-local hotbarShowAllPref = false -- mirrors server-saved preference
-
--- Applies the current visibility preference (or drag override).
--- dragOverride=true forces all slots visible (drag in progress).
-local function applyHotbarVisibility(dragOverride)
-	local showAll = dragOverride or hotbarShowAllPref
-	for i = 1, MAX_HOTBAR - 1 do
-		local slotData = hotbarSlots[i]
-		if showAll then
-			slotData.frame.Visible = true
-		else
-			-- Only show if filled
-			slotData.frame.Visible = (slotData.toolInfo ~= nil)
-		end
-	end
-end
-
--- Show all 8 item hotbar slots (not slot 9) during drag
-local function _showAllHotbarSlots()
-	applyHotbarVisibility(true) -- drag override = force all visible
 end
 
 -- ===================== EQUIP TRACKING =====================
@@ -803,6 +811,7 @@ local function _createDragGhost(sourceFrame)
 end
 
 local function _cleanupDrag()
+	MenuBridge.updateEquipDrag(nil) -- clear armor-slot hover highlight
 	if dragState then
 		if dragState.sourceFrame then
 			-- Restore appropriate transparency based on whether source was grid-blank
@@ -846,6 +855,8 @@ local function _startDragOnSlot(toolInfo, slotFrame, location, slotIndex, mouseP
 
 	dragState = {
 		toolName = toolInfo.name,
+		itemId = toolInfo.itemId,
+		equipSlot = toolInfo.slot, -- armor / accessory slot this item fits, if any
 		sourceFrame = slotFrame,
 		sourceLocation = location, -- "hotbar", "grid", "overflow"
 		slotIndex = slotIndex,
@@ -881,7 +892,11 @@ local function onDragMove(mousePos)
 	-- Hit test uses viewport-relative coords (matches AbsolutePosition)
 	local screenPos = Vector2.new(mousePos.X, mousePos.Y)
 	local targetSlot, _, _, _ = findSlotAtPosition(screenPos)
-	if targetSlot and targetSlot.frame ~= dragState.sourceFrame then
+	local overEquipSlot = MenuBridge.updateEquipDrag(screenPos, dragState.equipSlot)
+	if overEquipSlot then
+		_clearDragHighlight()
+		_updateTransferHover(false)
+	elseif targetSlot and targetSlot.frame ~= dragState.sourceFrame then
 		_setDragHighlight(targetSlot.frame, true)
 		_updateTransferHover(false)
 	elseif _isOverTransferFrame(screenPos) then
@@ -901,6 +916,8 @@ local function onDragEnd(mousePos)
 
 	local wasDragging = dragState.isDragging
 	local toolName = dragState.toolName
+	local itemId = dragState.itemId
+	local equipSlot = dragState.equipSlot
 	local sourceLocation = dragState.sourceLocation
 	local sourceSlotIndex = dragState.slotIndex
 
@@ -908,8 +925,10 @@ local function onDragEnd(mousePos)
 	local targetSlot, targetLocation, targetSlotIndex, targetIsBlank
 	local overInventory = false
 	local overTransfer = false
+	local overEquipSlot = nil
 	if wasDragging then
 		local adjustedPos = Vector2.new(mousePos.X, mousePos.Y)
+		overEquipSlot = MenuBridge.updateEquipDrag(adjustedPos, equipSlot)
 		targetSlot, targetLocation, targetSlotIndex, targetIsBlank = findSlotAtPosition(adjustedPos)
 		overInventory = isOverInventoryArea(adjustedPos)
 		overTransfer = _isOverTransferFrame(adjustedPos)
@@ -931,6 +950,20 @@ local function onDragEnd(mousePos)
 	end
 
 	-- ── Drag completed → determine action ──
+
+	-- Dropped on an armor / accessory slot → equip if it fits that slot
+	if overEquipSlot then
+		if equipSlot and overEquipSlot == equipSlot and itemId then
+			local equipItemFunc = ReplicatedStorage:FindFirstChild("EquipItem")
+			if equipItemFunc then
+				equipItemFunc:InvokeServer(equipSlot, itemId)
+				if selectSound2 then
+					selectSound2:Play()
+				end
+			end
+		end
+		return
+	end
 
 	-- Dropped on transfer frame → move hotbar item to inventory
 	if overTransfer then
@@ -1220,11 +1253,8 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
 
 	local key = input.KeyCode
 
-	-- E key → toggle inventory-only mode
-	if key == Enum.KeyCode.E then
-		MenuBridge.openInventory()
-		return
-	end
+	-- (E toggles the menu in CentralizedMenuController; handling it here too
+	--  opened then immediately closed the inventory.)
 
 	-- G key → close everything
 	if key == Enum.KeyCode.G then
@@ -1311,5 +1341,3 @@ for i = 1, GRID_SLOTS do
 end
 
 hotbarFrame.Visible = true
-
-print("[InventoryController] Ready ✓")

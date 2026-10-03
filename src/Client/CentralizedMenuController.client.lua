@@ -16,18 +16,38 @@ local Modules = ReplicatedStorage:WaitForChild("Modules")
 local LiquidGlassHandler = require(Modules:WaitForChild("LiquidGlassHandler")) :: any
 
 -- ===================== AUDIO =====================
-local UIClick = workspace:WaitForChild("UISounds"):WaitForChild("Click")
-local UIClick3 = workspace:WaitForChild("UISounds"):WaitForChild("Click3")
-local UIIn = workspace:WaitForChild("UISounds"):WaitForChild("In")
-local UIOut = workspace:WaitForChild("UISounds"):WaitForChild("Out")
+local UIClick, UIClick3, UIIn, UIOut
+do
+	local success, err = pcall(function()
+		UIClick = workspace:WaitForChild("UISounds", 3):WaitForChild("Click")
+		UIClick3 = workspace:WaitForChild("UISounds", 3):WaitForChild("Click3")
+		UIIn = workspace:WaitForChild("UISounds", 3):WaitForChild("In")
+		UIOut = workspace:WaitForChild("UISounds", 3):WaitForChild("Out")
+	end)
+	if not success then
+		UIClick = Instance.new("Sound")
+		UIClick3 = Instance.new("Sound")
+		UIIn = Instance.new("Sound")
+		UIOut = Instance.new("Sound")
+	end
+end
 
 -- ===================== GUI REFERENCES =====================
-local CentralizedMenu = playerGui:WaitForChild("CentralizedAscensionMenu")
-local BoundingBox = CentralizedMenu:WaitForChild("BoundingBox")
+local CentralizedMenu = playerGui:WaitForChild("CentralizedAscensionMenu", 5)
+if not CentralizedMenu then
+	error("[CentralizedMenuController] CentralizedAscensionMenu not found in PlayerGui")
+end
+
+local BoundingBox = CentralizedMenu:WaitForChild("BoundingBox", 3)
+if not BoundingBox then
+	error("[CentralizedMenuController] BoundingBox not found in CentralizedAscensionMenu")
+end
 local outerFrame = BoundingBox:WaitForChild("outerFrame")
 local innerFrame = outerFrame:WaitForChild("innerFrame")
 local menuClip = innerFrame:WaitForChild("MenuClip")
-local menuFrame = innerFrame:WaitForChild("MenuClip"):WaitForChild("Menu")
+local menuFrame = menuClip:WaitForChild("Menu")
+local gridBufferA = menuFrame:WaitForChild("GridBufferA")
+local gridBufferB = menuFrame:WaitForChild("GridBufferB")
 local topBarFrame = innerFrame:WaitForChild("topBarFrame")
 local menuTitleLabel = topBarFrame:WaitForChild("MenuTitleLabel")
 local inventoryPanel = innerFrame:WaitForChild("Inventory")
@@ -40,16 +60,46 @@ local Sidebar = playerGui:WaitForChild("Sidebar")
 local SidebarBB = Sidebar:WaitForChild("SidebarBB")
 local NexusBtn = SidebarBB:WaitForChild("Nexus")
 
+-- ===================== ARMOR ACCESSORIES CLIP =====================
+local ArmorAccessoriesClip = innerFrame:WaitForChild("ArmorAccessoriesClip")
+
 -- ===================== MODULES =====================
-local TooltipModule = require(Modules:WaitForChild("TooltipModule")) :: any
-local GridMenuModule = require(Modules:WaitForChild("GridMenuModule")) :: any
-local SkillsPageModule = require(Modules:WaitForChild("SkillsPageModule")) :: any
-local ProfilePageModule = require(Modules:WaitForChild("ProfilePageModule")) :: any
-local ProfileConfig = require(Modules:WaitForChild("ProfileConfig")) :: any
-local SettingsPageModule = require(Modules:WaitForChild("SettingsPageModule")) :: any
-local StatisticsPageModule = require(Modules:WaitForChild("StatisticsPageModule")) :: any
-local CollectionsPageModule = require(Modules:WaitForChild("CollectionsPageModule")) :: any
-local MenuBridge = require(Modules:WaitForChild("MenuBridge")) :: any
+local function safeRequire(moduleName, critical)
+	critical = critical ~= false
+	local success, result = pcall(function()
+		return require(Modules:WaitForChild(moduleName, 5))
+	end)
+	if success then
+		return result
+	else
+		local msg = "[CentralizedMenuController] " .. moduleName .. " failed to load: " .. tostring(result)
+		if critical then
+			error(msg)
+		else
+			warn(msg)
+			return nil
+		end
+	end
+end
+
+local TooltipModule = safeRequire("TooltipModule", true)
+local GridMenuModule = safeRequire("GridMenuModule", true)
+local SkillsPageModule = safeRequire("SkillsPageModule", true)
+local ProfilePageModule = safeRequire("ProfilePageModule", true)
+local ProfileConfig = safeRequire("ProfileConfig", true)
+local SettingsPageModule = safeRequire("SettingsPageModule", true)
+local StatisticsPageModule = safeRequire("StatisticsPageModule", true)
+local CollectionsPageModule = safeRequire("CollectionsPageModule", true)
+local MenuBridge = safeRequire("MenuBridge", true)
+
+-- Register MenuBridge callbacks IMMEDIATELY (before InventoryController tries to use them)
+MenuBridge._openInventoryMode = function() end
+MenuBridge._openFullMode = function() end
+MenuBridge._closeAll = function() end
+MenuBridge._isOpen = function() return false end
+MenuBridge._getMode = function() return nil end
+
+local ArmorAccessoriesController = safeRequire("ArmorAccessoriesController", true)
 
 local Lighting = game:GetService("Lighting")
 
@@ -83,6 +133,12 @@ local menuPanelTween = nil
 local INVFRAME_SIZE_DEFAULT = UDim2.new(1, 0, 0, 205)
 local INVFRAME_SIZE_NEXUS = UDim2.new(1, 0, 0, 140)
 local invFrameTweenInfo = TweenInfo.new(0.35, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
+
+-- Armor/Accessories clip tween
+local ARMOR_CLIP_OPEN = UDim2.fromScale(0.5, 0.5)
+local ARMOR_CLIP_CLOSED = UDim2.fromScale(0, 0)
+local armorClipTweenInfo = TweenInfo.new(0.5, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+local armorClipActiveTween = nil
 
 -- ===================== STATE =====================
 local menuOpen = false
@@ -149,31 +205,113 @@ local function hideSidebar()
 	sidebarActiveTween:Play()
 end
 
+-- ===================== ARMOR CLIP TWEEN HELPERS =====================
+local function tweenArmorClip(visible)
+	if armorClipActiveTween then
+		armorClipActiveTween:Cancel()
+	end
+
+	local targetSize = visible and ARMOR_CLIP_OPEN or ARMOR_CLIP_CLOSED
+	ArmorAccessoriesClip.Visible = true
+
+	armorClipActiveTween = TweenService:Create(ArmorAccessoriesClip, armorClipTweenInfo, { Size = targetSize })
+	armorClipActiveTween:Play()
+
+	armorClipActiveTween.Completed:Once(function()
+		if not visible then
+			ArmorAccessoriesClip.Visible = false
+		end
+		armorClipActiveTween = nil
+	end)
+end
+
 -- ===================== MENU PANEL TWEEN HELPERS =====================
+-- MenuAnimationContainer tweens Size.Y from 0 to 280px (not scale, use offset pixels)
+
+-- ===================== MENU PANEL TWEEN HELPERS =====================
+-- Match armor accessories pattern: tween MenuClip size + Menu position simultaneously
+-- Menu slides up from below screen while clip expands to show it
+
+local menuSlideTween = nil -- Track both tweens separately
+
 local function _openMenuPanel()
 	if menuPanelTween then
 		menuPanelTween:Cancel()
 	end
+	if menuSlideTween then
+		menuSlideTween:Cancel()
+	end
+
 	menuClip.Visible = true
-	menuFrame.Position = MENU_PANEL_HIDDEN
 	menuFrame.Visible = true
-	menuPanelTween = TweenService:Create(menuFrame, menuPanelTweenIn, { Position = MENU_PANEL_SHOWN })
+
+	-- Menu starts off-screen below (NOT visible yet)
+	menuFrame.Position = UDim2.new(0, 0, 0, -1)
+
+	-- Disable AutomaticSize so we can tween the size (like armor)
+	menuClip.AutomaticSize = Enum.AutomaticSize.None
+	menuClip.Size = UDim2.new(0, 0, 0, 0) -- Start at Y=0
+
+	-- TWEEN 1: MenuClip expands from Y=0 to Y=365 (actual needed height)
+	menuPanelTween = TweenService:Create(menuClip, menuPanelTweenIn, { Size = UDim2.new(0, 0, 0, 365) })
 	menuPanelTween:Play()
+
+	-- TWEEN 2: Menu slides from below (-1 scale) to visible (0,0) simultaneously
+	menuSlideTween = TweenService:Create(menuFrame, menuPanelTweenIn, { Position = UDim2.new(0, 0, 0, 0) })
+	menuSlideTween:Play()
+
+	-- Wait for BOTH tweens to complete
+	menuPanelTween.Completed:Once(function(state)
+		if state == Enum.PlaybackState.Completed then
+			menuClip.AutomaticSize = Enum.AutomaticSize.Y
+		end
+		menuPanelTween = nil
+	end)
+
+	menuSlideTween.Completed:Once(function(state)
+		if state == Enum.PlaybackState.Completed then
+			-- Grid is now fully visible
+		end
+		menuSlideTween = nil
+	end)
 end
 
 local function _closeMenuPanel()
 	if menuPanelTween then
 		menuPanelTween:Cancel()
 	end
-	menuPanelTween = TweenService:Create(menuFrame, menuPanelTweenOut, { Position = MENU_PANEL_HIDDEN })
+	if menuSlideTween then
+		menuSlideTween:Cancel()
+	end
+
+	-- Disable AutomaticSize for close tween
+	menuClip.AutomaticSize = Enum.AutomaticSize.None
+
+	-- TWEEN 1: MenuClip shrinks from Y=365 to Y=0
+	menuPanelTween = TweenService:Create(menuClip, menuPanelTweenOut, { Size = UDim2.new(0, 0, 0, 0) })
+	menuPanelTween:Play()
+
+	-- TWEEN 2: Menu slides down off-screen to 1.2 scale (further below) so it's fully gone
+	menuSlideTween = TweenService:Create(menuFrame, menuPanelTweenOut, { Position = UDim2.new(0, 0, 0, 1.2) })
+	menuSlideTween:Play()
+
+	-- Wait for BOTH tweens to complete before hiding
 	menuPanelTween.Completed:Once(function(state)
 		if state == Enum.PlaybackState.Completed then
-			menuFrame.Visible = false
-			menuFrame.Position = MENU_PANEL_HIDDEN
+			menuClip.Size = UDim2.new(0, 0, 0, 0)
 			menuClip.Visible = false
+			menuClip.AutomaticSize = Enum.AutomaticSize.Y
 		end
+		menuPanelTween = nil
 	end)
-	menuPanelTween:Play()
+
+	menuSlideTween.Completed:Once(function(state)
+		if state == Enum.PlaybackState.Completed then
+			menuFrame.Position = UDim2.new(0, 0, 0, 1.2) -- Ensure it stays off-screen
+			menuFrame.Visible = false -- Only hide AFTER tween completes
+		end
+		menuSlideTween = nil
+	end)
 end
 
 -- ===================== TYPEWRITER (title label) =====================
@@ -362,6 +500,14 @@ local NEXUS_BUTTONS = {
 			closeNexusPanel()
 		end,
 	},
+	AdminPanel = {
+		tooltipData = {
+			title = '<font color="#FF55FF"><b>Admin Panel</b></font>',
+			desc = '<font color="#AAAAAA">Create and spawn test items for development.</font>',
+			click = '<font color="#555555">Coming Soon</font>',
+		},
+		action = nil,
+	},
 }
 
 local COLLECTION_BUTTONS = {
@@ -492,67 +638,19 @@ local COLLECTION_MENU3_BUTTONS = {
 	},
 }
 
+-- ===================== STATISTICS ROUTING =====================
+-- Hub (StatisticsGrid): one button per skill, tooltip is dynamic (see the grid's
+-- onWireTooltips). Page (StatisticsMenu2): built by StatisticsPageModule.populate.
+-- Statistics are READ-ONLY here - they are earned from world buttons.
+local STATISTICS_SKILLS = { "Farming", "Foraging", "Fishing", "Mining", "General", "Combat" }
+
+local function openStatistics(skillName)
+	StatisticsPageModule.setPendingSkill(skillName)
+	GridMenuModule.setGridTitle("StatisticsMenu2", StatisticsPageModule.titleFor(skillName))
+	GridMenuModule.navigateToGrid("StatisticsMenu2") -- onPopulate builds the page
+end
+
 local STATISTICS_BUTTONS = {
-	FarmingStatistics = {
-		tooltipData = {
-			title = '<font color="#FFAA00"><b>Farming</b></font><font color="#FFFF55"> Statistics</font>',
-			desc = '<font color="#AAAAAA">View your Farming statistics!</font>',
-			click = '<font color="#FFFF55">Click to view!</font>',
-		},
-		action = "callback",
-		callback = function()
-			GridMenuModule.navigateToGrid("StatisticsMenu2")
-			StatisticsPageModule.openSkill("Farming", GridMenuModule.getActiveGridFrame())
-			typewriteTitle("Farming Statistics")
-		end,
-	},
-	ForagingStatistics = {
-		tooltipData = {
-			title = '<font color="#00AA00"><b>Foraging</b></font><font color="#FFFF55"> Statistics</font>',
-			desc = '<font color="#AAAAAA">View your Foraging statistics!</font>',
-			click = '<font color="#FFFF55">Click to view!</font>',
-		},
-		action = "callback",
-		callback = function()
-			GridMenuModule.navigateToGrid("StatisticsMenu2")
-			StatisticsPageModule.openSkill("Foraging", GridMenuModule.getActiveGridFrame())
-			typewriteTitle("Foraging Statistics")
-		end,
-	},
-	FishingStatistics = {
-		tooltipData = {
-			title = '<font color="#00AAAA"><b>Fishing</b></font><font color="#FFFF55"> Statistics</font>',
-			desc = '<font color="#AAAAAA">View your Fishing statistics!</font>',
-			click = '<font color="#555555">Coming Soon</font>',
-		},
-	},
-	MiningStatistics = {
-		tooltipData = {
-			title = '<font color="#5555FF"><b>Mining</b></font><font color="#FFFF55"> Statistics</font>',
-			desc = '<font color="#AAAAAA">View your Mining statistics!</font>',
-			click = '<font color="#555555">Coming Soon</font>',
-		},
-	},
-	GeneralStatistics = {
-		tooltipData = {
-			title = '<font color="#FFFF55"><b>General</b></font><font color="#FFFF55"> Statistics</font>',
-			desc = '<font color="#AAAAAA">View your currency and general statistics!</font>',
-			click = '<font color="#FFFF55">Click to view!</font>',
-		},
-		action = "callback",
-		callback = function()
-			GridMenuModule.navigateToGrid("StatisticsMenu2")
-			StatisticsPageModule.openSkill("General", GridMenuModule.getActiveGridFrame())
-			typewriteTitle("General Statistics")
-		end,
-	},
-	CombatStatistics = {
-		tooltipData = {
-			title = '<font color="#FF5555"><b>Combat</b></font><font color="#FFFF55"> Statistics</font>',
-			desc = '<font color="#AAAAAA">View your Combat statistics!</font>',
-			click = '<font color="#555555">Coming Soon</font>',
-		},
-	},
 	BackButton = {
 		tooltipData = {
 			title = '<font color="#55FF55"><b>Go back</b></font>',
@@ -573,6 +671,14 @@ local STATISTICS_BUTTONS = {
 		action = "close",
 	},
 }
+for _, skillName in ipairs(STATISTICS_SKILLS) do
+	STATISTICS_BUTTONS[skillName .. "Statistics"] = {
+		action = "callback",
+		callback = function()
+			openStatistics(skillName)
+		end,
+	}
+end
 
 local STATS_MENU2_BUTTONS = {
 	BackButton = {
@@ -583,8 +689,7 @@ local STATS_MENU2_BUTTONS = {
 		},
 		action = "callback",
 		callback = function()
-			StatisticsPageModule.close()
-			GridMenuModule.navigateBack()
+			GridMenuModule.navigateBack() -- onDepopulate clears the page + tooltip
 		end,
 	},
 	CloseSlot = {
@@ -753,11 +858,21 @@ local SKILLS_BUTTONS = {
 local pendingProfileSkill = nil
 
 local function openProfileMenu2(skillName)
-	pendingProfileSkill = skillName
-	local displayName = ProfileConfig.PROFILE_MENU2_TITLES and ProfileConfig.PROFILE_MENU2_TITLES[skillName]
-		or skillName
-	GridMenuModule.setGridTitle("ProfileMenu2", displayName .. " Attributes")
-	GridMenuModule.navigateToGrid("ProfileMenu2")
+	ProfilePageModule.setPendingSkill(skillName)
+	local color = ProfileConfig.SKILL_COLORS[skillName] or "#FFFFFF"
+	GridMenuModule.setGridTitle("ProfileMenu2", string.format('<font color="%s">%s</font> Attributes', color, skillName))
+	GridMenuModule.navigateToGrid("ProfileMenu2") -- onPopulate fills it (and refills on Back)
+end
+
+-- Layer 3: one attribute's sources (clicked from ProfileMenu2).
+local function openProfileMenu3(skillName, attrConfig)
+	ProfilePageModule.setPendingAttribute(skillName, attrConfig)
+	local color = attrConfig.color or "#FFFFFF"
+	GridMenuModule.setGridTitle(
+		"ProfileMenu3",
+		string.format('<font color="%s">%s</font> Breakdown', color, attrConfig.name or "Attribute")
+	)
+	GridMenuModule.navigateToGrid("ProfileMenu3")
 end
 
 -- ===================== PROFILE GRID BUTTON CONFIGS =====================
@@ -765,38 +880,7 @@ local PROFILE_BUTTONS = {
 	MyProfile = {
 		action = nil,
 	},
-	Helmet = {
-		tooltipData = {
-			title = '<font color="#AAAAAA"><b>Helmet Slot</b></font>',
-			desc = '<font color="#555555">Empty</font>',
-			click = "",
-		},
-		action = nil,
-	},
-	Chestplate = {
-		tooltipData = {
-			title = '<font color="#AAAAAA"><b>Chestplate Slot</b></font>',
-			desc = '<font color="#555555">Empty</font>',
-			click = "",
-		},
-		action = nil,
-	},
-	Leggings = {
-		tooltipData = {
-			title = '<font color="#AAAAAA"><b>Leggings Slot</b></font>',
-			desc = '<font color="#555555">Empty</font>',
-			click = "",
-		},
-		action = nil,
-	},
-	Boots = {
-		tooltipData = {
-			title = '<font color="#AAAAAA"><b>Boots Slot</b></font>',
-			desc = '<font color="#555555">Empty</font>',
-			click = "",
-		},
-		action = nil,
-	},
+	-- Helmet..Belt (equipment slots) are driven by ArmorAccessoriesController.
 	AethericNexus = {
 		tooltipData = {
 			title = '<font color="#FF55FF"><b>Aetheric Nexus Level</b></font>',
@@ -808,49 +892,37 @@ local PROFILE_BUTTONS = {
 	FarmingAttributes = {
 		action = "callback",
 		callback = function()
-			GridMenuModule.navigateToGrid("ProfileMenu2")
-			ProfilePageModule.openAttributeGrid("Farming", GridMenuModule.getActiveGridFrame())
-			typewriteTitle('<font color="#FFAA00">Farming</font> Attributes')
+			openProfileMenu2("Farming")
 		end,
 	},
 	ForagingAttributes = {
 		action = "callback",
 		callback = function()
-			GridMenuModule.navigateToGrid("ProfileMenu2")
-			ProfilePageModule.openAttributeGrid("Foraging", GridMenuModule.getActiveGridFrame())
-			typewriteTitle('<font color="#00AA00">Foraging</font> Attributes')
+			openProfileMenu2("Foraging")
 		end,
 	},
 	MiningAttributes = {
 		action = "callback",
 		callback = function()
-			GridMenuModule.navigateToGrid("ProfileMenu2")
-			ProfilePageModule.openAttributeGrid("Mining", GridMenuModule.getActiveGridFrame())
-			typewriteTitle('<font color="#5555FF">Mining</font> Attributes')
+			openProfileMenu2("Mining")
 		end,
 	},
 	MiscAttributes = {
 		action = "callback",
 		callback = function()
-			GridMenuModule.navigateToGrid("ProfileMenu2")
-			ProfilePageModule.openAttributeGrid("Misc", GridMenuModule.getActiveGridFrame())
-			typewriteTitle('<font color="#FFFF55">Misc</font> Attributes')
+			openProfileMenu2("Misc")
 		end,
 	},
 	FishingAttributes = {
 		action = "callback",
 		callback = function()
-			GridMenuModule.navigateToGrid("ProfileMenu2")
-			ProfilePageModule.openAttributeGrid("Fishing", GridMenuModule.getActiveGridFrame())
-			typewriteTitle('<font color="#00AAAA">Fishing</font> Attributes')
+			openProfileMenu2("Fishing")
 		end,
 	},
 	GeneralAttributes = {
 		action = "callback",
 		callback = function()
-			GridMenuModule.navigateToGrid("ProfileMenu2")
-			ProfilePageModule.openAttributeGrid("General", GridMenuModule.getActiveGridFrame())
-			typewriteTitle('<font color="#FFFFFF">General</font> Attributes')
+			openProfileMenu2("General")
 		end,
 	},
 	Milestones = {
@@ -907,7 +979,28 @@ local PROFILE_MENU2_BUTTONS = {
 		},
 		action = "callback",
 		callback = function()
-			ProfilePageModule.closeAttributeGrid()
+			GridMenuModule.navigateBack()
+		end,
+	},
+	CloseSlot = {
+		tooltipData = {
+			title = '<font color="#FF5555"><b>Close Menu</b></font>',
+			desc = "",
+			click = "",
+		},
+		action = "close",
+	},
+}
+
+local PROFILE_MENU3_BUTTONS = {
+	BackButton = {
+		tooltipData = {
+			title = '<font color="#55FF55"><b>Go back</b></font>',
+			desc = '<font color="#AAAAAA">Return to the previous menu.</font>',
+			click = "",
+		},
+		action = "callback",
+		callback = function()
 			GridMenuModule.navigateBack()
 		end,
 	},
@@ -1333,8 +1426,14 @@ GridMenuModule.init(sharedRefs, {
 	end,
 })
 
--- ===================== REGISTER MENUBRIDGE CALLBACKS =====================
-MenuBridge._openInventoryMode = function() end
+-- ===================== REGISTER MENUBRIDGE CALLBACKS (IMPLEMENTATION) =====================
+MenuBridge._openInventoryMode = function()
+	if menuOpen and openMode == "inventory" then
+		closeMenu()
+	else
+		openMenu("inventory")
+	end
+end
 
 MenuBridge._openFullMode = function()
 	if menuOpen and openMode == "full" then
@@ -1347,9 +1446,11 @@ end
 MenuBridge._closeAll = function()
 	closeMenu()
 end
+
 MenuBridge._isOpen = function()
 	return menuOpen
 end
+
 MenuBridge._getMode = function()
 	return openMode
 end
@@ -1407,6 +1508,27 @@ GridMenuModule.registerPooledGrid("StatisticsGrid", GridTemplates:WaitForChild("
 	title = "Statistics",
 	blankGroups = STATISTICS_BLANK_GROUPS,
 	itemOrders = {},
+	onWireTooltips = function(clonedButtons)
+		local conns = {}
+		for _, skillName in ipairs(STATISTICS_SKILLS) do
+			local btn = clonedButtons[skillName .. "Statistics"]
+			if btn then
+				table.insert(
+					conns,
+					btn.MouseEnter:Connect(function()
+						StatisticsPageModule.showSkillTooltip(skillName, btn)
+					end)
+				)
+				table.insert(
+					conns,
+					btn.MouseLeave:Connect(function()
+						StatisticsPageModule.hideSkillTooltip()
+					end)
+				)
+			end
+		end
+		return conns
+	end,
 })
 
 GridMenuModule.registerPooledGrid("SettingsGrid", GridTemplates:WaitForChild("SettingsMenu1"), SETTINGS_BUTTONS, {
@@ -1475,6 +1597,17 @@ GridMenuModule.registerPooledGrid("ProfileGrid", GridTemplates:WaitForChild("Pro
 				)
 			end
 		end
+		-- Armor + accessory slots: show / equip / unequip (same logic as the inventory clip)
+		local equipButtons = {}
+		for _, slotId in ipairs(ProfileConfig.EQUIPMENT_BUTTONS) do
+			equipButtons[slotId] = clonedButtons[slotId]
+		end
+		local unbindEquipment = ArmorAccessoriesController.bindExternal(equipButtons)
+		table.insert(conns, {
+			Disconnect = function()
+			unbindEquipment()
+			end,
+		})
 		-- MyProfile full tooltip
 		local myProfileBtn = clonedButtons["MyProfile"]
 		if myProfileBtn then
@@ -1504,6 +1637,12 @@ local StatisticsMenu2Template = GridTemplates:FindFirstChild("StatisticsMenu2")
 if StatisticsMenu2Template then
 	GridMenuModule.registerPooledGrid("StatisticsMenu2", StatisticsMenu2Template, STATS_MENU2_BUTTONS, {
 		title = "Statistics",
+		onPopulate = function(frame)
+			StatisticsPageModule.populate(frame)
+		end,
+		onDepopulate = function()
+			StatisticsPageModule.depopulate()
+		end,
 	})
 else
 	warn("[CMC] GridTemplates/StatisticsMenu2 not found — skipping registration (still legacy?)")
@@ -1531,25 +1670,70 @@ GridMenuModule.registerPooledGrid("ProfileMenu2", GridTemplates:WaitForChild("Pr
 	title = "Attributes",
 	blankGroups = ProfileConfig.PROFILE_MENU2_BLANK_GROUPS,
 	itemOrders = ProfileConfig.PROFILE_MENU2_ITEM_ORDERS,
+	onPopulate = function(frame)
+		ProfilePageModule.populateAttributeGrid(frame)
+	end,
+	onDepopulate = function()
+		ProfilePageModule.closeAttributeGrid()
+	end,
 })
+
+local ProfileMenu3Template = GridTemplates:FindFirstChild("ProfileMenu3")
+if ProfileMenu3Template then
+	GridMenuModule.registerPooledGrid("ProfileMenu3", ProfileMenu3Template, PROFILE_MENU3_BUTTONS, {
+		title = "Attribute Breakdown",
+		blankGroups = ProfileConfig.PROFILE_MENU3_BLANK_GROUPS,
+		itemOrders = ProfileConfig.PROFILE_MENU3_ITEM_ORDERS,
+		onPopulate = function(frame)
+			ProfilePageModule.openAttributeDetail(frame)
+		end,
+		onDepopulate = function()
+			ProfilePageModule.closeAttributeDetail()
+		end,
+	})
+else
+	warn("[CMC] ReplicatedStorage.GridTemplates.ProfileMenu3 not found - attribute breakdown layer disabled")
+end
 
 -- ===================== INITIALIZE PAGE MODULES =====================
 SkillsPageModule.init(sharedRefs, menuChildFrames["SkillsMenu"])
 ProfilePageModule.init(sharedRefs)
+ProfilePageModule.setAttributeClickHandler(function(skillName, attrConfig)
+	if GridMenuModule.hasGrid("ProfileMenu3") then
+		openProfileMenu3(skillName, attrConfig)
+	end
+end)
 SettingsPageModule.init(sharedRefs, menuChildFrames["SettingsMenu"])
 StatisticsPageModule.init(sharedRefs)
 CollectionsPageModule.init(sharedRefs)
+ArmorAccessoriesController.init()
+
 sharedRefs.SkillsPageModule = SkillsPageModule
 sharedRefs.ProfilePageModule = ProfilePageModule
+sharedRefs.ArmorAccessoriesController = ArmorAccessoriesController
+
+-- ===================== WIRE UpdateEquipped REMOTE EVENT =====================
+local UpdateEquippedEvent = ReplicatedStorage:FindFirstChild("UpdateEquipped")
+if UpdateEquippedEvent then
+	UpdateEquippedEvent.OnClientEvent:Connect(function(equippedSlots)
+		ArmorAccessoriesController.loadEquipped(equippedSlots)
+	end)
+else
+	warn("[CentralizedMenuController] UpdateEquipped event not found")
+end
 
 -- ===================== INITIAL STATE =====================
 CentralizedMenu.Enabled = false
 menuFrame.Visible = false
-menuFrame.Position = MENU_PANEL_HIDDEN
+menuFrame.Position = UDim2.new(0, 0, 0, -1) -- Off-screen below
+menuClip.Visible = false
+menuClip.Size = UDim2.new(0, 0, 0, 0) -- Y offset 0, not visible
 inventoryPanel.Visible = false
 inventoryFrame.Active = false
 inventoryFrame.Size = INVFRAME_SIZE_DEFAULT
 menuClip.Visible = false
+ArmorAccessoriesClip.Size = UDim2.fromScale(0, 0)
+ArmorAccessoriesClip.Visible = false
 BoundingBox.Position = MENU_CLOSED
 menuTitleLabel.Text = "Your Nexus Menu"
 SidebarBB.Position = SIDEBAR_VISIBLE
@@ -1562,7 +1746,6 @@ end
 -- ===================== TOP BAR CLOSE BUTTON =====================
 local closeButton = topBarFrame:WaitForChild("Close")
 closeButton.MouseButton1Click:Connect(function()
-	print("[CloseBtn] fired | menuOpen:", menuOpen, "| openMode:", openMode)
 	if not menuOpen then
 		return
 	end
@@ -1623,37 +1806,15 @@ NexusBtn.MouseButton1Click:Connect(function()
 	end
 end)
 
+-- (Armor clip tweening subscribes through MenuBridge.onStateChanged inside
+--  ArmorAccessoriesController; nothing to wrap here.)
 LiquidGlassHandler.apply(outerFrame, {
-	SeparatedBorderOutline = {
-		enabled = true,
-		offset = 5,
-		thickness = 3,
-		color = Color3.fromRGB(255, 255, 255),
-	},
-})
-LiquidGlassHandler.apply(topBarFrame, {
-	SeparatedBorderOutline = {
-		enabled = true,
-		offset = 5,
-		thickness = 3,
-		color = Color3.fromRGB(255, 255, 255),
-	},
-})
-LiquidGlassHandler.apply(inventoryPanel, {
-	SeparatedBorderOutline = {
-		enabled = true,
-		offset = 5,
-		thickness = 3,
-		color = Color3.fromRGB(255, 255, 255),
-	},
+	mode = "mosaic",
 })
 
 -- ===================== BLANKSLOT GRADIENT ROTATION =====================
 -- Lerps BG.UIGradient.Rotation toward the cursor-facing angle each Heartbeat.
 -- Takes the shortest arc across the 0/360 boundary (no long-way-around spins).
-
-local gridBufferA = menuFrame:WaitForChild("GridBufferA")
-local gridBufferB = menuFrame:WaitForChild("GridBufferB")
 
 local GRADIENT_LERP_SPEED = 12 -- higher = snappier; tune freely
 
@@ -1719,4 +1880,3 @@ RunService.Heartbeat:Connect(function(dt)
 	end
 end)
 
-print("CentralizedMenuController: Ready ✓")

@@ -3,32 +3,66 @@
 	Place inside: ReplicatedStorage > Modules
 
 	Shared configuration for the Profile system.
-	Defines attribute categories per skill, armor slot definitions,
-	tooltip color constants, and grid layout for ProfileMenu1.
-
-	EXPANDING:
-	  • New attribute  → append to ATTRIBUTE_CATEGORIES[skill]
-	  • New skill      → add key + array to ATTRIBUTE_CATEGORIES,
-	                      add color to SKILL_COLORS,
-	                      add to SKILL_DISPLAY_ORDER,
-	                      add grid button to CentralizedMenuController
-	  • New armor slot → append to ARMOR_SLOTS + update grid layout
-
-	ICON SPRITESHEET COORDINATES:
-	  Icons use {col, row} tables referencing the stat icon spritesheet.
-	  Each cell is 300×300. (0,0) = top-left, (5,1) = bottom-right.
-	  The spritesheet asset ID lives in TooltipModule.STAT_SPRITESHEET.
-
-	  Current spritesheet layout (6 cols × 2 rows):
-	    Row 0: (0,0) Starburst   (1,0) Diamond   (2,0) SmallStar   (3,0) Cross   (4,0) Grid     (5,0) Round
-	    Row 1: (0,1) Heart       (1,1) Shield     (2,1) Swords      (3,1) Chest   (4,1) ArrowUp  (5,1) Swirl
-
-	  To add more icons: expand the spritesheet PNG, re-upload,
-	  update TooltipModule.STAT_SPRITESHEET.assetId, and add new
-	  coordinates here.
+	NOW INCLUDES: BASE_STATS (Health 100, Speed 16, etc.)
+	PLACEHOLDER: EQUIPPED_ACCESSORIES (wired later), ATTRIBUTE_BONUSES (wired later)
 --]]
 
 local ProfileConfig = {}
+
+-- ===================== BASE STATS =====================
+-- These are the starting attribute values all players receive.
+-- Format: { key = string, baseValue = number, description = string }
+--
+-- All players begin with these values. Flat boosts and multipliers are
+-- applied on top of these base amounts. Server-side computation in
+-- AttributeStatManager combines: (baseValue + flatBoosts) × (1 + multipliers)
+
+ProfileConfig.BASE_STATS = {
+	-- Combat-related
+	Health = 100,
+	HealthRegen = 0,
+	Defense = 0,
+	TrueDefense = 0,
+	Strength = 0,
+	Intelligence = 0,
+	CritChance = 0,
+	CritIncrease = 0,
+
+	-- Gathering-related
+	FarmingFortune = 0,
+	FarmingSpeed = 0,
+	FarmingCritChance = 0,
+	FarmingCritIncrease = 0,
+
+	ForagingFortune = 0,
+	ForagingSpeed = 0,
+	ForagingCritChance = 0,
+	ForagingCritIncrease = 0,
+
+	MiningFortune = 0,
+	MiningSpeed = 0,
+	MiningCritChance = 0,
+	MiningCritIncrease = 0,
+	Pristine = 0,
+
+	FishingFortune = 0,
+	FishingSpeed = 0,
+	FishingCritChance = 0,
+	FishingCritIncrease = 0,
+
+	-- Misc / General
+	Speed = 16, -- Roblox default is 16
+	JumpHeight = 0, -- Roblox default; overridden by Humanoid.JumpHeight (7.2 studs base)
+	MagicFind = 0,
+	PetLuck = 0,
+	Wisdom = 0,
+	BreakingPower = 0,
+
+	-- General skills
+	PressSpeed = 0,
+	Luck = 0,
+	Refine = 0,
+}
 
 -- ===================== SKILL COLORS =====================
 -- Mirrors StatisticsConfig.SKILL_COLORS with General added.
@@ -329,32 +363,30 @@ ProfileConfig.ATTRIBUTE_CATEGORIES = {
 	},
 }
 
--- ===================== ARMOR SLOTS =====================
--- Display-only for now. Interactive equip/swap coming later.
--- layoutOrder matches PROFILE_ITEM_ORDERS for the grid position.
-ProfileConfig.ARMOR_SLOTS = {
-	{ key = "Helmet", name = "Helmet", layoutOrder = 10, icon = "", emptyLabel = "Helmet" },
-	{ key = "Chestplate", name = "Chestplate", layoutOrder = 19, icon = "", emptyLabel = "Chestplate" },
-	{ key = "Leggings", name = "Leggings", layoutOrder = 28, icon = "", emptyLabel = "Leggings" },
-	{ key = "Boots", name = "Boots", layoutOrder = 37, icon = "", emptyLabel = "Boots" },
+-- ===================== EQUIPMENT SLOT BUTTONS =====================
+-- Buttons in ProfileMenu1 that show/accept equipped armor + accessories.
+-- Names match Modules/Items/Slots ids; ArmorAccessoriesController drives them.
+ProfileConfig.EQUIPMENT_BUTTONS = {
+	"Helmet", "Chestplate", "Leggings", "Boots", -- armor column
+	"Cloak", "Gloves", "Necklace", "Belt", -- accessory column
 }
 
--- ===================== ACCESSORY SLOTS (planned) =====================
--- Not in the current grid layout. Will be added once armor interactivity
--- is complete.  Placeholder for future expansion.
--- ProfileConfig.ACCESSORY_SLOTS = {}
+-- ===================== ATTRIBUTE BONUSES (PLACEHOLDER) =====================
+-- Will store milestone rewards: { [skill] = { [level] = { [key] = { flatBoost = N, multiplierBoost = N } } } }
+-- Wired in later when MilestoneManager is built.
+ProfileConfig.ATTRIBUTE_BONUSES = {}
 
 -- ===================== GRID LAYOUT CONSTANTS =====================
 -- 9 columns × 6 rows = 54 cells
 --
 -- Row 0: [B][B][B][B][MyProfile][B][B][B][B]
--- Row 1: [B][Helmet][B][B][B][B][B][B][B]
--- Row 2: [B][Chestplate][B][B][AethericNexus][Farming][Foraging][Mining][B]
--- Row 3: [B][Leggings][B][B][Milestones][Misc][Fishing][General][B]
--- Row 4: [B][Boots][B][B][B][B][B][B][B]
+-- Row 1: [B][Helmet][Cloak][B][B][B][B][B][B]
+-- Row 2: [B][Chestplate][Gloves][B][AethericNexus][General][Farming][Foraging][B]
+-- Row 3: [B][Leggings][Necklace][B][Milestones][Misc][Mining][Fishing][B]
+-- Row 4: [B][Boots][Belt][B][B][B][B][B][B]
 -- Row 5: [B][B][B][BackButton][CloseSlot][Bank][B][B][B]
 --
--- Named slots: 16     Blanks: 38     Total: 54
+-- Named slots: 20     Blanks: 34     Total: 54
 
 ProfileConfig.COLUMNS = 9
 ProfileConfig.ROWS = 6
@@ -365,25 +397,29 @@ ProfileConfig.PROFILE_ITEM_ORDERS = {
 	-- Row 0: header
 	MyProfile = 4,
 
-	-- Row 1: armor start
+	-- Row 1: armor + accessory columns start
 	Helmet = 10,
+	Cloak = 11,
 
-	-- Row 2: armor + skills top row
+	-- Row 2: armor/accessories + skills top row
 	Chestplate = 19,
+	Gloves = 20,
 	AethericNexus = 22,
 	GeneralAttributes = 23,
 	FarmingAttributes = 24,
 	ForagingAttributes = 25,
 
-	-- Row 3: armor + skills bottom row
+	-- Row 3: armor/accessories + skills bottom row
 	Leggings = 28,
+	Necklace = 29,
 	Milestones = 31,
 	MiningAttributes = 33,
 	MiscAttributes = 32,
 	FishingAttributes = 34,
 
-	-- Row 4: armor end
+	-- Row 4: armor/accessories end
 	Boots = 37,
+	Belt = 38,
 
 	-- Row 5: footer
 	BackButton = 48,
@@ -399,23 +435,23 @@ ProfileConfig.PROFILE_BLANK_GROUPS = {
 	{ layoutOrder = 0, count = 4 },
 	{ layoutOrder = 5, count = 4 },
 
-	-- Row 1  (1 before Helmet, 7 after)
+	-- Row 1  (1 before Helmet, 6 after Cloak)
 	{ layoutOrder = 9, count = 1 },
-	{ layoutOrder = 11, count = 7 },
+	{ layoutOrder = 12, count = 6 },
 
-	-- Row 2  (1 before Chestplate, 2 gap, 1 trailing)
+	-- Row 2  (1 before Chestplate, 1 gap after Gloves, 1 trailing)
 	{ layoutOrder = 18, count = 1 },
-	{ layoutOrder = 20, count = 2 },
+	{ layoutOrder = 21, count = 1 },
 	{ layoutOrder = 26, count = 1 },
 
-	-- Row 3  (1 before Leggings, 2 gap, 1 trailing)
+	-- Row 3  (1 before Leggings, 1 gap after Necklace, 1 trailing)
 	{ layoutOrder = 27, count = 1 },
-	{ layoutOrder = 29, count = 2 },
+	{ layoutOrder = 30, count = 1 },
 	{ layoutOrder = 35, count = 1 },
 
-	-- Row 4  (1 before Boots, 7 after)
+	-- Row 4  (1 before Boots, 6 after Belt)
 	{ layoutOrder = 36, count = 1 },
-	{ layoutOrder = 38, count = 7 },
+	{ layoutOrder = 39, count = 6 },
 
 	-- Row 5  (3 before BackButton, 3 after Bank)
 	{ layoutOrder = 45, count = 3 },
@@ -442,7 +478,7 @@ ProfileConfig.TOOLTIP_COLORS = {
 	positive = "#55FF55",
 	negative = "#FF5555",
 	accent = "#FFFF55",
-	muted = "#555555",
+	muted = "#AAAAAA", -- was #555555 (too dark to read on the tooltip)
 	comingSoon = "#555555",
 }
 
@@ -570,6 +606,25 @@ ProfileConfig.PROFILE_MENU2_BLANK_GROUPS = {
 	{ layoutOrder = 45, count = 3 },
 	{ layoutOrder = 50, count = 4 },
 }
+
+-- ===================== PROFILE MENU 3 — ATTRIBUTE BREAKDOWN =====================
+-- Third layer: opened by clicking an attribute in ProfileMenu2.
+--
+-- Row 0: [B][B][B][B][ATTRIBUTE][B][B][B][B]      (row 1, slot 5)
+-- Row 1: [B][src1][src2][src3][src4][src5][src6][src7][B]   (row 2, slots 2-8)
+-- Row 2-4: same, 7 sources per row, up to 28 sources
+-- Row 5: [B][B][B][BackButton][CloseSlot][B][B][B][B]
+--
+-- Sources are the attribute's base value plus every equipped item (or other
+-- boost) that adds to it. Same cell positions as ProfileMenu2's content area.
+ProfileConfig.PROFILE_MENU3_ATTRIBUTE_ORDER = 4
+ProfileConfig.PROFILE_MENU3_ITEM_ORDERS = {
+	BackButton = 48,
+	CloseSlot = 49,
+}
+ProfileConfig.PROFILE_MENU3_CONTENT_SLOTS = ProfileConfig.PROFILE_MENU2_CONTENT_SLOTS
+-- Static blanks: row 0 (all but the attribute cell) + borders + footer.
+ProfileConfig.PROFILE_MENU3_BLANK_GROUPS = ProfileConfig.PROFILE_MENU2_BLANK_GROUPS
 
 -- Skill name → top bar title shown when ProfileMenu2 is active.
 ProfileConfig.PROFILE_MENU2_TITLES = {

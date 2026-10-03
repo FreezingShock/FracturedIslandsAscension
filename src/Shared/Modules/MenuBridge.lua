@@ -58,6 +58,31 @@ function M.notifyStateChanged(mode)
 	if M._onStateChanged then
 		M._onStateChanged(mode)
 	end
+	for _, listener in ipairs(M._stateListeners) do
+		local ok, err = pcall(listener, mode)
+		if not ok then
+			warn("[MenuBridge] state listener error: " .. tostring(err))
+		end
+	end
+end
+
+-- Extra subscribers (ArmorAccessoriesController etc.). Use this instead of
+-- overwriting notifyStateChanged / _onStateChanged, which have ONE owner each.
+M._stateListeners = {}
+function M.onStateChanged(listener)
+	table.insert(M._stateListeners, listener)
+end
+
+-- ── Equipment drag support ──
+-- Registered by ArmorAccessoriesController. While an inventory item is being
+-- dragged, InventoryController calls this each move (and with nil to finish).
+--   M.updateEquipDrag(screenPos | nil, itemSlotId | nil) -> slotId under the cursor | nil
+M._updateEquipDrag = nil
+function M.updateEquipDrag(screenPos, itemSlotId)
+	if M._updateEquipDrag then
+		return M._updateEquipDrag(screenPos, itemSlotId)
+	end
+	return nil
 end
 
 -- ── Called by CentralizedMenuController to force refresh ──
@@ -81,5 +106,4 @@ M.setHotbarShowAll = function(showAll)
 	end
 end
 
-print("MenuBridge: Loaded ✓")
 return M

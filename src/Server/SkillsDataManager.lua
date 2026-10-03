@@ -181,9 +181,19 @@ end
 -- toolOrder     : { [itemId] = number } — display sort order
 -- nextOrderIndex: number — auto-increment for new item types
 -- maxCapacity   : number — total item cap across all stacks
+-- gridSlots     : { ["1"] = toolName, ... } (string keys: DataStore-safe)
+-- equippedSlots : { Helmet = "iron_helmet", ... } (Items registry ids)
+-- itemSchema    : bumped when the item system changes shape; a mismatch resets
+--                 items/hotbar/grid/equipped (skills & stats are untouched)
+local ITEM_SCHEMA = 2
+
+-- (itemSchema is deliberately NOT in the template: Reconcile would fill it in
+--  for old profiles and hide the mismatch. sanitizeSkillData stamps it.)
 PROFILE_TEMPLATE._Inventory = {
 	items = {},
 	hotbarSlots = {},
+	gridSlots = {},
+	equippedSlots = {},
 	toolOrder = {},
 	nextOrderIndex = 1,
 	maxCapacity = 1000,
@@ -251,6 +261,9 @@ local function sanitizeSkillData(data)
 	-- ── Sanitize inventory fields ──
 	if type(data._Inventory) ~= "table" then
 		data._Inventory = {
+			itemSchema = ITEM_SCHEMA,
+			gridSlots = {},
+			equippedSlots = {},
 			items = {},
 			hotbarSlots = {},
 			toolOrder = {},
@@ -259,6 +272,22 @@ local function sanitizeSkillData(data)
 		}
 	end
 	local inv = data._Inventory
+	if inv.itemSchema ~= ITEM_SCHEMA then
+		-- Old item format (pre item-system rework): start the inventory fresh.
+		inv.itemSchema = ITEM_SCHEMA
+		inv.items = {}
+		inv.hotbarSlots = {}
+		inv.gridSlots = {}
+		inv.equippedSlots = {}
+		inv.toolOrder = {}
+		inv.nextOrderIndex = 1
+	end
+	if type(inv.gridSlots) ~= "table" then
+		inv.gridSlots = {}
+	end
+	if type(inv.equippedSlots) ~= "table" then
+		inv.equippedSlots = {}
+	end
 	if type(inv.items) ~= "table" then
 		inv.items = {}
 	end

@@ -121,7 +121,7 @@ local function fmtLevelTitle(colorHex, skillName, level)
 	local secondary = displayLevelAlt(level)
 	return string.format(
 		"<font color='%s'><b>%s</b> <b>%s</b></font>"
-			.. "<font family='rbxasset://11598121416' weight='400' color='#555555'> (%s)</font>",
+			.. "<font family='rbxasset://11598121416' weight='400' color='#AAAAAA'> (%s)</font>",
 		colorHex,
 		skillName,
 		primary,
@@ -421,7 +421,7 @@ local function fmtVal(base, level)
 end
 
 local function renderLabel(r)
-	local prefix = "<font color='#555555'>\t+</font>"
+	local prefix = "<font color='#AAAAAA'>\t+</font>"
 	if type(r.label) == "table" then
 		local parts = {}
 		for _, seg in ipairs(r.label) do
@@ -452,7 +452,7 @@ local function buildRewardText(skillName, level)
 					valStr = "<font color='#777777'>"
 						.. prevVal
 						.. "</font>"
-						.. "<font color='#555555'>→</font>"
+						.. "<font color='#AAAAAA'>→</font>"
 						.. "<font color='#55FF55'><b>"
 						.. currVal
 						.. "</b></font>"
@@ -471,12 +471,12 @@ local function buildRewardText(skillName, level)
 			table.insert(lines, "")
 		end
 		for _, r in ipairs(specific) do
-			local prefix = r.special and "<font color='#FFD700'>★ </font>" or "<font color='#555555'>‣ </font>"
+			local prefix = r.special and "<font color='#FFD700'>★ </font>" or "<font color='#AAAAAA'>‣ </font>"
 			table.insert(lines, prefix .. "<font color='" .. r.color .. "'>" .. r.label .. "</font>")
 		end
 	end
 	if #lines == 0 then
-		return "<font color='#555555'>No rewards defined for this level.</font>"
+		return "<font color='#AAAAAA'>No rewards defined for this level.</font>"
 	end
 	return table.concat(lines, "\n")
 end
@@ -726,37 +726,32 @@ local function showLevelTooltip(slotIndex)
 		statusHex = "#FF5555"
 	end
 
-	local tt = TooltipModule.refs
-	tt.Title.Text = fmtLevelTitle(statusHex, config.stat, realLevel)
+	local tooltip = {
+		title = fmtLevelTitle(statusHex, config.stat, realLevel),
+		blocks = {
+			{ title = "Rewards", text = buildRewardText(config.stat, realLevel), align = "Left" },
+		},
+	}
 
-	tt.Desc.Visible = false
-	tt.Rewards.Text = "<font color='#AAAAAA'>Rewards:</font>\n" .. buildRewardText(config.stat, realLevel)
-	tt.Rewards.Visible = true
-	tt.Stats.Visible = false
-	tt.Click.Visible = false
-	tt.Divider1.Visible = false
-	UIClick3:Play()
-
-	local isCurrentGoal = (realLevel == playerLevel + 1)
-	tt.Divider2.Visible = isCurrentGoal
-	tt.ProgressOuter.Visible = isCurrentGoal
-	tt.ProgressLabel.Visible = isCurrentGoal
-
-	if isCurrentGoal then
+	-- Progress bar only on the level the player is currently working toward
+	if realLevel == playerLevel + 1 then
 		local pct = skillData.pct or 0
-		local xp = skillData.xp or 0
-		local xpNeeded = skillData.xpNeeded or 50
-		tt.ProgressLabel.Text = "Progress: <font color='#FFFF55'>" .. math.floor(pct * 100) .. "%</font>"
-		tt.ProgressBL.Text = shorthand(xp) .. "<font color='#FFAA00'>/</font>" .. shorthand(xpNeeded)
-		TooltipModule.tweenProgressFill(pct)
+		tooltip.progress = {
+			pct = pct,
+			color = config.hex,
+			animate = true,
+			label = string.format(
+				'<font color="#FFFF55">%s</font><font color="#FFAA00">/</font><font color="#FFFF55">%s</font> <font color="#AAAAAA">(%d%%)</font>',
+				shorthand(skillData.xp or 0),
+				shorthand(skillData.xpNeeded or 50),
+				math.floor(pct * 100)
+			),
+		}
 	end
 
-	tt.Rewards.LayoutOrder = 4
-	tt.ProgressLabel.LayoutOrder = 7
-	tt.ProgressOuter.LayoutOrder = 8
-
+	UIClick3:Play()
 	tooltipFromLevels = true
-	TooltipModule.showRaw("skillLevels")
+	TooltipModule.show(tooltip, "skillLevels")
 end
 
 local function hideLevelTooltip()
@@ -785,58 +780,45 @@ local function showGridSkillTooltip(statKey, silent)
 	local level = skillData.level or 1
 	local isMax = level >= 50
 
-	local tt = TooltipModule.refs
-	tt.Title.Text = fmtLevelTitle(config.hex, config.stat, level)
+	local tooltip = {
+		title = fmtLevelTitle(config.hex, config.stat, level),
+		description = config.description,
+		click = { text = "CLICK TO VIEW!", color = "#FFFF55" },
+	}
 
-	tt.Stats.Visible = false
-	tt.Desc.Visible = true
-	tt.Divider1.Visible = true
-	tt.Divider3.Visible = true
-	tt.Desc.Text = "<font color='#AAAAAA'>" .. config.description .. "</font>"
-	tt.Click.Text = "Click to view!"
-	tt.Click.Visible = true
+	if isMax then
+		tooltip.blocks = {
+			{ title = "MAX LEVEL", text = "This skill has reached its maximum level.", color = "#FFD700" },
+		}
+	else
+		local nextLevel = level + 1
+		local pct = skillData.pct or 0
+		tooltip.progress = {
+			pct = pct,
+			color = config.hex,
+			label = string.format(
+				'<font color="#FFFF55">%s</font><font color="#FFAA00">/</font><font color="#FFFF55">%s</font> <font color="#AAAAAA">(%d%%)</font>',
+				shorthand(skillData.xp or 0),
+				shorthand(skillData.xpNeeded or 50),
+				math.floor(pct * 100)
+			),
+		}
+		tooltip.blocks = {
+			{
+				title = "Level " .. displayLevel(nextLevel) .. " Rewards",
+				text = buildRewardText(config.stat, nextLevel),
+				align = "Left",
+			},
+		}
+	end
+
 	if not silent then
 		UIClick3:Play()
 	end
 
-	if isMax then
-		tt.Rewards.Text =
-			"<font color='#AAAAAA'>This skill has reached </font><font color='#FFD700'><b>MAX LEVEL</b></font><font color='#AAAAAA'>.</font>"
-		tt.Rewards.Visible = true
-		tt.Divider2.Visible = false
-		tt.ProgressOuter.Visible = false
-		tt.ProgressLabel.Visible = false
-	else
-		local nextLevel = level + 1
-		local pct = skillData.pct or 0
-		local xp = skillData.xp or 0
-		local xpNeeded = skillData.xpNeeded or 50
-
-		tt.ProgressLabel.Text = "Progress to Level "
-			.. displayLevel(nextLevel)
-			.. ": <font color='#FFFF55'>"
-			.. math.floor(pct * 100)
-			.. "%</font>"
-		tt.ProgressBL.Text = shorthand(xp) .. "<font color='#FFAA00'>/</font>" .. shorthand(xpNeeded)
-		TooltipModule.tweenProgressFill(pct)
-		tt.ProgressOuter.Visible = true
-		tt.ProgressLabel.Visible = true
-		tt.Divider2.Visible = true
-
-		tt.Rewards.Text = "<font color='#AAAAAA'>Level "
-			.. displayLevel(nextLevel)
-			.. " Rewards:</font>\n"
-			.. buildRewardText(config.stat, nextLevel)
-		tt.Rewards.Visible = true
-	end
-
-	tt.Rewards.LayoutOrder = 4
-	tt.ProgressLabel.LayoutOrder = 7
-	tt.ProgressOuter.LayoutOrder = 8
-
 	gridTooltipActive = true
 	gridTooltipStatKey = statKey
-	TooltipModule.showRaw("skillGrid")
+	TooltipModule.show(tooltip, "skillGrid")
 end
 
 local function hideGridSkillTooltip()

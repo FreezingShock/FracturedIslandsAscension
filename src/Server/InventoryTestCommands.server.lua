@@ -2,216 +2,320 @@
 --  InventoryTestCommands (Script)
 --  Place inside: ServerScriptService
 --
---  Admin-only chat commands for testing the inventory system.
---  Uses InventoryDataManager.AddItem() so everything goes
---  through the proper pipeline.
+--  Admin slash commands. They work from the chat box (Chatted) and from
+--  AdminCommandEvent (the in-game command bar). Everything goes through the
+--  normal systems (InventoryDataManager, EquipmentService, AttributeStatManager).
 --
---  Commands (type in Roblox chat):
---    /give <itemId> [count]   — give yourself items by registry id
---    /give all                — give 1 of every registered item
---    /give all <count>        — give <count> of every item
---    /clear                   — remove ALL items from your inventory
---    /cap <number>            — set your max inventory capacity
---
---  Examples:
---    /give coal_terrafruit 10
---    /give rarity_test_5 3
---    /give all 5
---    /clear
---    /cap 500
+--  ADD A COMMAND: add one entry to COMMANDS below. `usage` + `help` feed /help
+--  automatically; `aliases` are extra names for the same command.
 -- ============================================================
 
 local Players = game:GetService("Players")
-local ServerScriptService = game:GetService("ServerScriptService")
-local ServerStorage = game:GetService("ServerStorage")
+local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ServerScriptService = game:GetService("ServerScriptService")
 
 local InventoryDataManager = require(ServerScriptService:WaitForChild("InventoryDataManager")) :: any
-local ItemRegistry = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("ItemRegistry")) :: any
+local EquipmentService = require(ServerScriptService:WaitForChild("EquipmentService")) :: any
+local AttributeStatManager = require(ServerScriptService:WaitForChild("AttributeStatManager")) :: any
 local SkillsDataManager = require(ServerScriptService:WaitForChild("SkillsDataManager")) :: any
+local Modules = ReplicatedStorage:WaitForChild("Modules")
+local Items = require(Modules:WaitForChild("Items")) :: any
+local Attributes = require(Modules:WaitForChild("Attributes")) :: any
 
 -- ===================== CONFIG =====================
 local ADMIN_IDS = { 288851273 } -- your Roblox user ID
 
 local function isAdmin(player)
-	for _, id in ipairs(ADMIN_IDS) do
-		if player.UserId == id then
-			return true
-		end
+	if RunService:IsStudio() then
+		return true -- testing in Studio
 	end
-	return false
+	return table.find(ADMIN_IDS, player.UserId) ~= nil
 end
 
--- ===================== ENSURE TOOLS EXIST IN SERVERSTORAGE =====================
--- Auto-create Tool instances for every ItemRegistry entry that has a toolName.
--- This way you don't need to manually build them in Studio for testing.
--- Each tool gets the Rarity attribute set so the existing system picks it up.
+local CATEGORIES = { weapon = true, armor = true, accessory = true, material = true, consumable = true, misc = true }
 
-local function ensureToolsExist()
-	local created = 0
-	for id, config in pairs(ItemRegistry.Items) do
-		local toolName = config.toolName
-		if toolName and toolName ~= "" then
-			local existing = ServerStorage:FindFirstChild(toolName)
-			if not existing then
-				local tool = Instance.new("Tool")
-				tool.Name = toolName
-				tool.CanBeDropped = true
-				tool.RequiresHandle = false -- no handle needed for testing
-				tool:SetAttribute("Rarity", config.rarity or 0)
-				tool.Parent = ServerStorage
-				created = created + 1
-			else
-				-- Ensure rarity attribute is correct
-				existing:SetAttribute("Rarity", config.rarity or 0)
+local function say(player, text: string)
+	print(string.format("[Cmd:%s] %s", player.Name, text))
+end
+
+local function findAttribute(player, name: string?)
+	local def = name and Attributes.find(name)
+	if not def then
+		say(player, "Unknown attribute '" .. tostring(name) .. "'. Try /stats for the list.")
+	end
+	return def
+end
+
+-- ===================== COMMANDS =====================
+local COMMANDS: { [string]: any } = {}
+
+COMMANDS.give = {
+	usage = "/give <itemId|category|all> [count]",
+	help = "Give items. Category: weapon, armor, accessory, material, consumable, misc.",
+	aliases = { "item" },
+	run = function(player, args)
+		local target, count = args[1], tonumber(args[2]) or 1
+		if not target then
+			return say(player, "Usage: " .. COMMANDS.give.usage)
+		end
+		if target == "all" or CATEGORIES[target] then
+			local given = 0
+			for _, def in ipairs(Items.list(target ~= "all" and target or nil)) do
+				given += InventoryDataManager.AddItem(player, def.toolName, count)
+			end
+			return say(player, string.format("Gave %d items (%s, %dx each)", given, target, count))
+		end
+		local def = Items.get(target)
+		if not def then
+			return say(player, "Unknown item '" .. target .. "'. Use /items to list ids.")
+		end
+		local added = InventoryDataManager.AddItem(player, def.toolName, count)
+		say(player, string.format("Gave %dx %s (%s)", added, def.displayName, def.id))
+	end,
+}
+
+COMMANDS.items = {
+	usage = "/items [category]",
+	help = "List item ids.",
+	run = function(player, args)
+		local lines = {}
+		for _, def in ipairs(Items.list(args[1])) do
+			table.insert(lines, string.format("  %-20s %-10s r%d %s", def.id, def.category, def.rarity, def.slot or ""))
+		end
+		say(player, "Items (" .. #lines .. "):\n" .. table.concat(lines, "\n"))
+	end,
+}
+
+COMMANDS.equip = {
+	usage = "/equip <armor/accessory itemId>",
+	help = "Give the item and equip it.",
+	run = function(player, args)
+		local def = args[1] and Items.get(args[1])
+		if not def or not def.slot then
+			return say(player, "Usage: " .. COMMANDS.equip.usage)
+		end
+		if InventoryDataManager.AddItem(player, def.toolName, 1) < 1 then
+			return say(player, "Could not add the item (inventory full?)")
+		end
+		local ok, err = EquipmentService.Equip(player, def.id, def.slot)
+		say(player, ok and ("Equipped " .. def.displayName) or ("Equip failed: " .. tostring(err)))
+	end,
+}
+
+COMMANDS.unequip = {
+	usage = "/unequip <slot|all>",
+	help = "Take armor / accessories off (slots: " .. table.concat(Items.Slots.Order, ", ") .. ").",
+	run = function(player, args)
+		local slot = args[1]
+		if slot == "all" then
+			EquipmentService.ClearAll(player)
+			return say(player, "Unequipped everything")
+		end
+		if slot and Items.Slots.exists(slot) then
+			local ok, err = EquipmentService.Unequip(player, slot)
+			return say(player, ok and ("Unequipped " .. slot) or ("Unequip failed: " .. tostring(err)))
+		end
+		say(player, "Usage: " .. COMMANDS.unequip.usage)
+	end,
+}
+
+COMMANDS.set = {
+	usage = "/set <attribute> <amount>",
+	help = "Set a debug flat bonus on an attribute (shows as 'Admin' in its breakdown).",
+	run = function(player, args)
+		local def, amount = findAttribute(player, args[1]), tonumber(args[2])
+		if not def or not amount then
+			return def and say(player, "Usage: " .. COMMANDS.set.usage)
+		end
+		AttributeStatManager.SetAdminBoost(player, def.key, amount)
+		say(player, string.format("%s admin bonus = %s", def.name, Attributes.format(def.key, amount)))
+	end,
+}
+
+COMMANDS.add = {
+	usage = "/add <attribute> <amount>",
+	help = "Add to the debug flat bonus on an attribute (negative numbers work).",
+	run = function(player, args)
+		local def, amount = findAttribute(player, args[1]), tonumber(args[2])
+		if not def or not amount then
+			return def and say(player, "Usage: " .. COMMANDS.add.usage)
+		end
+		local total = AttributeStatManager.GetAdminBoost(player, def.key) + amount
+		AttributeStatManager.SetAdminBoost(player, def.key, total)
+		say(player, string.format("%s admin bonus = %s", def.name, Attributes.format(def.key, total)))
+	end,
+}
+
+COMMANDS.stats = {
+	usage = "/stats [attribute]",
+	help = "Print an attribute's breakdown, or every attribute that isn't zero.",
+	run = function(player, args)
+		local function describe(def, detailed)
+			local raw = AttributeStatManager.GetAttributeBreakdown(player, def.key)
+			if not raw then
+				return nil
+			end
+			local bd = Attributes.breakdown(def.key, {
+				base = raw.baseValue,
+				final = raw.finalValue,
+				flatBoosts = raw.flatBoosts,
+				multipliers = raw.multipliers,
+			})
+			local line = string.format("%s = %s", def.name, Attributes.format(def.key, bd.final))
+			if detailed then
+				for _, source in ipairs(bd.sources) do
+					line ..= string.format("\n    %s  %s", source.label, Attributes.amountText(def.key, source))
+				end
+			end
+			return line, bd
+		end
+
+		if args[1] then
+			local def = findAttribute(player, args[1])
+			if def then
+				say(player, (describe(def, true)))
+			end
+			return
+		end
+		local lines = {}
+		for _, def in pairs(Attributes.all()) do
+			local line, bd = describe(def, false)
+			if line and (bd.final ~= 0 or bd.base ~= 0) then
+				table.insert(lines, line)
 			end
 		end
-	end
-	if created > 0 then
-		print("[InventoryTestCommands] Auto-created " .. created .. " Tool instances in ServerStorage")
+		table.sort(lines)
+		say(player, "Attributes:\n  " .. table.concat(lines, "\n  "))
+	end,
+}
+
+COMMANDS.reset = {
+	usage = "/reset [stats|items|all]",
+	help = "stats (default): clear /set and /add bonuses. items: remove all items. all: both.",
+	run = function(player, args)
+		local what = args[1] or "stats"
+		if what == "stats" or what == "all" then
+			AttributeStatManager.ClearAdminBoosts(player)
+		end
+		if what == "items" or what == "all" then
+			EquipmentService.ClearAll(player)
+			for _, container in ipairs({ player:FindFirstChild("Backpack"), player.Character }) do
+				if container then
+					for _, child in ipairs(container:GetChildren()) do
+						if child:IsA("Tool") then
+							child:Destroy()
+						end
+					end
+				end
+			end
+			local invData = SkillsDataManager.GetInventoryData(player)
+			if invData then
+				invData.hotbarSlots = {}
+			end
+			InventoryDataManager.SendUpdate(player)
+		end
+		say(player, "Reset " .. what)
+	end,
+}
+
+COMMANDS.clear = {
+	usage = "/clear",
+	help = "Same as /reset items.",
+	run = function(player)
+		COMMANDS.reset.run(player, { "items" })
+	end,
+}
+
+COMMANDS.cap = {
+	usage = "/cap <number>",
+	help = "Set your max inventory capacity.",
+	run = function(player, args)
+		local newCap = tonumber(args[1])
+		if not newCap or newCap < 1 then
+			return say(player, "Usage: " .. COMMANDS.cap.usage)
+		end
+		local invData = SkillsDataManager.GetInventoryData(player)
+		if invData then
+			invData.maxCapacity = newCap
+			InventoryDataManager.SendUpdate(player)
+			say(player, "Max capacity = " .. newCap)
+		end
+	end,
+}
+
+COMMANDS.help = {
+	usage = "/help",
+	help = "List all commands.",
+	run = function(player)
+		local names = {}
+		for name in pairs(COMMANDS) do
+			table.insert(names, name)
+		end
+		table.sort(names)
+		local lines = {}
+		for _, name in ipairs(names) do
+			local c = COMMANDS[name]
+			table.insert(lines, string.format("  %-34s %s", c.usage, c.help))
+		end
+		say(player, "Commands:\n" .. table.concat(lines, "\n"))
+	end,
+}
+
+-- alias -> command
+local ALIASES = {}
+for name, command in pairs(COMMANDS) do
+	for _, alias in ipairs(command.aliases or {}) do
+		ALIASES[alias] = name
 	end
 end
 
-ensureToolsExist()
-
--- ===================== COMMAND HANDLERS =====================
-
-local function handleGive(player, args)
-	local itemIdOrAll = args[1]
-	if not itemIdOrAll then
-		warn("[TestCmd] Usage: /give <itemId> [count] OR /give all [count]")
+local function run(player, cmd: string, args)
+	if not isAdmin(player) then
 		return
 	end
-
-	if itemIdOrAll == "all" then
-		local count = tonumber(args[2]) or 1
-		local given = 0
-		for id, config in pairs(ItemRegistry.Items) do
-			if config.toolName and config.toolName ~= "" then
-				local added = InventoryDataManager.AddItem(player, config.toolName, count)
-				given = given + added
-			end
-		end
-		print("[TestCmd] Gave " .. player.Name .. " " .. given .. " total items (all types, " .. count .. "x each)")
-		return
+	local command = COMMANDS[cmd] or COMMANDS[ALIASES[cmd]]
+	if not command then
+		return say(player, "Unknown command '/" .. cmd .. "'. Try /help")
 	end
-
-	-- Specific item
-	local config = ItemRegistry.get(itemIdOrAll)
-	if not config then
-		warn("[TestCmd] Unknown itemId: '" .. itemIdOrAll .. "'. Check ItemRegistry.Items keys.")
-		-- List available ids
-		local ids = {}
-		for id in pairs(ItemRegistry.Items) do
-			table.insert(ids, id)
-		end
-		table.sort(ids)
-		warn("[TestCmd] Available: " .. table.concat(ids, ", "))
-		return
-	end
-
-	local count = tonumber(args[2]) or 1
-	local toolName = config.toolName
-	if not toolName or toolName == "" then
-		warn("[TestCmd] Item '" .. itemIdOrAll .. "' has no toolName set")
-		return
-	end
-
-	local added = InventoryDataManager.AddItem(player, toolName, count)
-	print("[TestCmd] Gave " .. player.Name .. " " .. added .. "x " .. config.displayName .. " (" .. itemIdOrAll .. ")")
-end
-
-local function handleClear(player)
-	local backpack = player:FindFirstChild("Backpack")
-	if backpack then
-		for _, child in ipairs(backpack:GetChildren()) do
-			if child:IsA("Tool") then
-				child:Destroy()
-			end
-		end
-	end
-	if player.Character then
-		for _, child in ipairs(player.Character:GetChildren()) do
-			if child:IsA("Tool") then
-				child:Destroy()
-			end
-		end
-	end
-	-- Clear hotbar assignments
-	local invData = SkillsDataManager.GetInventoryData(player)
-	if invData then
-		invData.hotbarSlots = {}
-	end
-	InventoryDataManager.SendUpdate(player)
-	print("[TestCmd] Cleared all items for " .. player.Name)
-end
-
-local function handleCap(player, args)
-	local newCap = tonumber(args[1])
-	if not newCap or newCap < 1 then
-		warn("[TestCmd] Usage: /cap <number>")
-		return
-	end
-	local invData = SkillsDataManager.GetInventoryData(player)
-	if invData then
-		invData.maxCapacity = newCap
-		InventoryDataManager.SendUpdate(player)
-		print("[TestCmd] Set " .. player.Name .. "'s max capacity to " .. newCap)
+	local ok, err = pcall(command.run, player, args or {})
+	if not ok then
+		warn("[Cmd] /" .. cmd .. " failed: " .. tostring(err))
 	end
 end
 
 -- ===================== CHAT LISTENER =====================
-local function onPlayerChatted(player, message)
-	if not isAdmin(player) then
-		return
-	end
-
-	local parts = {}
-	for word in message:gmatch("%S+") do
-		table.insert(parts, word)
-	end
-
-	local cmd = parts[1]
-	if not cmd then
-		return
-	end
-
-	local args = {}
-	for i = 2, #parts do
-		table.insert(args, parts[i])
-	end
-
-	if cmd == "/give" then
-		handleGive(player, args)
-	elseif cmd == "/clear" then
-		handleClear(player)
-	elseif cmd == "/cap" then
-		handleCap(player, args)
-	end
-end
-
--- ===================== REMOTE COMMAND LISTENER =====================
-local AdminCommandEvent = ReplicatedStorage:WaitForChild("AdminCommandEvent")
-
-AdminCommandEvent.OnServerEvent:Connect(function(player, cmd, args)
-	if not isAdmin(player) then
-		return
-	end -- server-side authority check
-
-	if cmd == "give" then
-		handleGive(player, args)
-	elseif cmd == "clear" then
-		handleClear(player)
-	elseif cmd == "cap" then
-		handleCap(player, args)
-	end
-end)
-
--- Handle players already in game (Studio)
-for _, player in ipairs(Players:GetPlayers()) do
+local function hook(player)
 	player.Chatted:Connect(function(message)
-		onPlayerChatted(player, message)
+		local cmd, rest = message:match("^/(%S+)%s*(.*)$")
+		if not cmd then
+			return
+		end
+		local args = {}
+		for word in rest:gmatch("%S+") do
+			table.insert(args, word)
+		end
+		run(player, cmd:lower(), args)
 	end)
 end
 
-print("[InventoryTestCommands] Loaded ✓")
+Players.PlayerAdded:Connect(hook)
+for _, player in ipairs(Players:GetPlayers()) do
+	hook(player)
+end
+
+-- ===================== REMOTE COMMAND LISTENER =====================
+task.spawn(function()
+	local event = ReplicatedStorage:WaitForChild("AdminCommandEvent", 15)
+	if not event then
+		warn("[InventoryTestCommands] AdminCommandEvent not found; chat commands only")
+		return
+	end
+	event.OnServerEvent:Connect(function(player, cmd, args)
+		if type(cmd) == "string" and (args == nil or type(args) == "table") then
+			run(player, cmd:lower(), args)
+		end
+	end)
+end)
+
+print("[InventoryTestCommands] Loaded ✓ (/help lists commands)")

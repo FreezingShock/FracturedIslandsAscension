@@ -5,3 +5,12 @@ local SkillsDataManager = require(ServerScriptService:WaitForChild("SkillsDataMa
 local StatisticsDataManager =
 	require(game:GetService("ServerScriptService"):WaitForChild("StatisticsDataManager")) :: any
 -- StatManager removed — not needed
+-- ============================================================
+--  AdminToolManager Initializer (LocalScript)
+--  ServerScriptService
+-- ============================================================
+
+local AdminToolManager = require(script.Parent:WaitForChild("AdminToolManager"))
+AdminToolManager.WireRemotes()
+
+print("[Admin System] Initialized ✓")

@@ -20,8 +20,11 @@
 --    hideSkillAttributeTooltip()
 --    getAttributeValue(attrKey)
 --    getAttributeData(attrKey)
---    openAttributeGrid(skillName)
+--    openAttributeGrid(skillName)           (layer 2: a skill's attributes)
 --    closeAttributeGrid()
+--    openAttributeDetail(frame)             (layer 3: one attribute's sources)
+--    setPendingSkill / setPendingAttribute  (what the next populate shows)
+--    setAttributeClickHandler(fn)           (CMC navigates to layer 3)
 -- ============================================================
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -37,9 +40,15 @@ local Modules = ReplicatedStorage:WaitForChild("Modules")
 local ProfileConfig = require(Modules:WaitForChild("ProfileConfig")) :: any
 local MoneyLib = require(Modules:WaitForChild("MoneyLib")) :: any
 local TooltipModuleDirect = require(Modules:WaitForChild("TooltipModule")) :: any
+local Items = require(Modules:WaitForChild("Items")) :: any
+local Attributes = require(Modules:WaitForChild("Attributes")) :: any
+local Sources = require(Modules:WaitForChild("Sources")) :: any
+local SlotFx = require(Modules:WaitForChild("SlotFx")) :: any
+local UIClick = workspace:WaitForChild("UISounds"):WaitForChild("Click")
 
 -- ===================== CONFIG REFERENCES =====================
 local ATTRIBUTE_CATEGORIES = ProfileConfig.ATTRIBUTE_CATEGORIES
+local BASE_STATS = ProfileConfig.BASE_STATS
 local SKILL_COLORS = ProfileConfig.SKILL_COLORS
 local SKILL_DISPLAY_ORDER = ProfileConfig.SKILL_DISPLAY_ORDER
 local TOOLTIP_COLORS = ProfileConfig.TOOLTIP_COLORS
@@ -64,13 +73,25 @@ local statSlotTemplate = nil
 local blankSlotTemplate = nil
 
 -- Cached attribute data from server.
--- Format: { [attrKey] = { flatBoosts = { {label, value, color?} }, multipliers = { {label, value, color?} } } }
+-- Format: { [attrKey] = { base = number, final = number, flatBoosts = { {label, value, color?} }, multipliers = { {label, value, color?} } } }
+-- AttributeStatManager pre-computes and sends this.
 local cachedAttributeData = {}
 
 -- Dynamic slot tracking for ProfileMenu2 (prevents connection stacking — PITFALL 3)
 local dynamicSlots = {} -- array of cloned instances (StatSlots + fill blanks)
 local dynamicConnections = {} -- array of RBXScriptConnections
 local activeGridSkill = nil -- which skill is currently shown in ProfileMenu2
+
+-- Layer 2 / 3 navigation state. CMC sets these before navigating; the pooled
+-- grids' onPopulate hooks read them, so going Back re-populates correctly.
+local pendingSkill = nil
+local pendingAttr = nil -- attribute config table
+local attributeClickHandler = nil -- fn(skillName, attrConfig)
+
+-- Layer 3 (ProfileMenu3) dynamic content, tracked separately from layer 2
+-- because both buffers can briefly exist during the crossfade.
+local detailSlots = {}
+local detailConnections = {}
 
 -- ===================== TOOLTIP LAZY-RESOLVE =====================
 -- TooltipModule is set via init(sharedRefs), but if init timing shifts
@@ -92,8 +113,6 @@ local function resolveTooltip()
 	warn("[ProfilePageModule] TooltipModule is nil — cannot show tooltip")
 	return nil
 end
-
--- ===================== TOOLTIP SOURCES =====================
 
 -- ===================== TOOLTIP SOURCES =====================
 local TOOLTIP_SOURCE = "profile"
@@ -119,35 +138,27 @@ local function formatNumber(n)
 	return string.format("%.2f", n)
 end
 
---- Compute the final value of an attribute from its cached data.
---- Final = sum(flatBoosts) × (1 + sum(multiplier - 1))
+--- Get the final computed value of an attribute from cached data.
+--- AttributeStatManager sends: { base, final, flatBoosts, multipliers }
+--- We just return the pre-computed final value.
 local function computeFinalValue(attrKey)
 	local entry = cachedAttributeData[attrKey]
 	if not entry then
 		return 0
 	end
 
-	local flatTotal = 0
-	if type(entry.flatBoosts) == "table" then
-		for _, boost in ipairs(entry.flatBoosts) do
-			local v = tonumber(boost.value)
-			if v then
-				flatTotal = flatTotal + v
-			end
-		end
-	end
+	-- Server pre-computes: (base + flatBoosts) × (1 + multipliers)
+	-- We just display it
+	return tonumber(entry.final) or 0
+end
 
-	local multBonus = 0
-	if type(entry.multipliers) == "table" then
-		for _, m in ipairs(entry.multipliers) do
-			local v = tonumber(m.value)
-			if v then
-				multBonus = multBonus + (v - 1)
-			end
-		end
+--- Get the base value of an attribute.
+local function getBaseValue(attrKey)
+	local entry = cachedAttributeData[attrKey]
+	if not entry then
+		return BASE_STATS[attrKey] or 0
 	end
-
-	return flatTotal * (1 + multBonus)
+	return tonumber(entry.base) or 0
 end
 
 --- Sanitize incoming stat data — ensure all values are numbers.
@@ -155,14 +166,20 @@ local function sanitizeStatData(data)
 	if type(data) ~= "table" then
 		return
 	end
-	for _, statTable in pairs(data) do
+	for attrKey, statTable in pairs(data) do
 		if type(statTable) == "table" then
-			if type(statTable.flatBoosts) == "table" then
+			statTable.base = tonumber(statTable.base) or 0
+			statTable.final = tonumber(statTable.final) or 0
+			if type(statTable.flatBoosts) ~= "table" then
+				statTable.flatBoosts = {}
+			else
 				for _, b in ipairs(statTable.flatBoosts) do
 					b.value = tonumber(b.value) or 0
 				end
 			end
-			if type(statTable.multipliers) == "table" then
+			if type(statTable.multipliers) ~= "table" then
+				statTable.multipliers = {}
+			else
 				for _, m in ipairs(statTable.multipliers) do
 					m.value = tonumber(m.value) or 1
 				end
@@ -185,7 +202,7 @@ local function needsPercentSuffix(key)
 	return string.find(key, "CritChance") ~= nil or string.find(key, "CritIncrease") ~= nil
 end
 
--- ===================== LEGACY TOOLTIP BUILDERS =====================
+-- ===================== ATTRIBUTE LIST BUILDER =====================
 
 local function buildAttributeListText(skillName)
 	local attrs = ATTRIBUTE_CATEGORIES[skillName]
@@ -199,8 +216,7 @@ local function buildAttributeListText(skillName)
 		local finalVal = computeFinalValue(dataKey)
 		local valStr = formatNumber(finalVal)
 
-		local isCrit = string.find(attr.key, "CritChance") ~= nil
-		if isCrit then
+		if needsPercentSuffix(attr.key) then
 			valStr = valStr .. "%"
 		end
 
@@ -220,27 +236,6 @@ local function buildAttributeListText(skillName)
 	return table.concat(lines, "\n")
 end
 
-local function buildSkillCategoryTooltipData(skillName)
-	local skillColor = SKILL_COLORS[skillName] or "#FFFFFF"
-
-	local title = string.format(
-		'<font color="%s"><b>%s</b></font> <font color="%s">Attributes</font>',
-		skillColor,
-		skillName,
-		TOOLTIP_COLORS.label
-	)
-
-	local desc = string.format('<font color="%s">Your %s attribute bonuses.</font>', TOOLTIP_COLORS.label, skillName)
-	local stats = buildAttributeListText(skillName)
-
-	return {
-		title = title,
-		desc = desc,
-		stats = stats,
-		click = "",
-	}
-end
-
 -- ===================== SUMMARY TOOLTIP CONFIG =====================
 local SUMMARY_STAT_KEYS = {
 	{ skill = "General", key = "Health" },
@@ -250,199 +245,23 @@ local SUMMARY_STAT_KEYS = {
 	{ skill = "General", key = "CritIncrease" },
 }
 
---- Build icon stat lines from an array of attribute config entries.
-local function buildIconLines(attrList, startLO)
-	local count = 0
-	for i, attr in ipairs(attrList) do
+--- Build tooltip stat rows from an array of attribute config entries.
+local function buildStatRows(attrList)
+	local rows = {}
+	for _, attr in ipairs(attrList) do
 		local dataKey = resolveDataKey(attr.key)
-		local finalVal = computeFinalValue(dataKey)
-		local valStr = formatNumber(finalVal)
-
+		local valStr = formatNumber(computeFinalValue(dataKey))
 		if needsPercentSuffix(attr.key) then
 			valStr = valStr .. "%"
 		end
-
-		local clone = TooltipModule.createIconStatLine({
-			icon = attr.icon,
-			color = attr.color or "#FFFFFF",
+		table.insert(rows, {
 			name = attr.name or "???",
 			value = valStr,
-			layoutOrder = startLO + (i - 1),
+			color = attr.color or "#FFFFFF",
+			icon = attr.icon,
 		})
-
-		-- Belt-and-suspenders
-		local statLabel = clone:FindFirstChild("StatLabel", true)
-		if statLabel then
-			statLabel.RichText = true
-			statLabel.TextColor3 = Color3.fromHex(attr.color or "#FFFFFF")
-			statLabel.Text = string.format('%s <font color="#FFFFFF">%s</font>', attr.name or "???", valStr)
-		end
-
-		local img = clone:FindFirstChild("ImageLabel", true)
-		if img then
-			local iconData = attr.icon
-			if type(iconData) == "table" then
-				local sheet = TooltipModule.STAT_SPRITESHEET
-				local col = iconData[1] or 0
-				local row = iconData[2] or 0
-				local cs = sheet.cellSize
-				img.Image = sheet.assetId
-				img.ImageRectSize = Vector2.new(cs, cs)
-				img.ImageRectOffset = Vector2.new(col * cs, row * cs)
-				img.ImageColor3 = Color3.fromHex(attr.color or "#FFFFFF")
-				img.ImageTransparency = 0
-			elseif type(iconData) == "string" and iconData ~= "" then
-				img.Image = iconData
-				img.ImageRectSize = Vector2.new(0, 0)
-				img.ImageRectOffset = Vector2.new(0, 0)
-				img.ImageColor3 = Color3.fromHex(attr.color or "#FFFFFF")
-				img.ImageTransparency = 0
-			else
-				img.ImageTransparency = 1
-			end
-		end
-
-		count = count + 1
 	end
-	return count
-end
-
--- ===================== STAT BREAKDOWN TOOLTIP BUILDER =====================
-
-local function buildStatBreakdownText(attrConfig)
-	local dataKey = resolveDataKey(attrConfig.key)
-	local entry = cachedAttributeData[dataKey]
-	local lines = {}
-
-	-- Formula placeholder
-	table.insert(
-		lines,
-		string.format(
-			'<font color="%s">Formula:</font> <font color="%s">Coming Soon</font>',
-			TOOLTIP_COLORS.label,
-			TOOLTIP_COLORS.comingSoon
-		)
-	)
-	table.insert(lines, "")
-
-	-- ── Flat Boosts ──
-	local flatTotal = 0
-	local flatBoosts = {}
-	if entry and type(entry.flatBoosts) == "table" then
-		for _, b in ipairs(entry.flatBoosts) do
-			local v = tonumber(b.value) or 0
-			flatTotal = flatTotal + v
-			table.insert(flatBoosts, b)
-		end
-	end
-
-	local flatStr = formatNumber(flatTotal)
-	if needsPercentSuffix(attrConfig.key) then
-		flatStr = flatStr .. "%"
-	end
-
-	table.insert(
-		lines,
-		string.format(
-			'<font color="%s">Flat Amount:</font> <font color="%s">%s</font>',
-			TOOLTIP_COLORS.accent,
-			TOOLTIP_COLORS.value,
-			flatStr
-		)
-	)
-
-	if #flatBoosts == 0 then
-		table.insert(lines, string.format('<font color="%s">‣ None</font>', TOOLTIP_COLORS.muted))
-	else
-		for i = 1, math.min(#flatBoosts, BREAKDOWN_MAX_FLAT) do
-			local b = flatBoosts[i]
-			local labelColor = b.color or "#FFFFFF"
-			local valDisplay = formatNumber(math.abs(tonumber(b.value) or 0))
-			local sign = (tonumber(b.value) or 0) >= 0 and "+" or "-"
-			local valColor = (tonumber(b.value) or 0) >= 0 and TOOLTIP_COLORS.positive or TOOLTIP_COLORS.negative
-			table.insert(
-				lines,
-				string.format(
-					'<font color="%s">‣</font> <font color="%s">%s</font> <font color="%s">%s%s</font>',
-					TOOLTIP_COLORS.muted,
-					labelColor,
-					b.label or "Unknown",
-					valColor,
-					sign,
-					valDisplay
-				)
-			)
-		end
-		if #flatBoosts > BREAKDOWN_MAX_FLAT then
-			local remaining = #flatBoosts - BREAKDOWN_MAX_FLAT
-			table.insert(
-				lines,
-				string.format(
-					'<font color="%s">(%d more flat boost%s...)</font>',
-					TOOLTIP_COLORS.muted,
-					remaining,
-					remaining == 1 and "" or "s"
-				)
-			)
-		end
-	end
-
-	table.insert(lines, "")
-
-	-- ── Multipliers ──
-	local multDisplay = 1
-	local multipliers = {}
-	if entry and type(entry.multipliers) == "table" then
-		for _, m in ipairs(entry.multipliers) do
-			local v = tonumber(m.value) or 1
-			multDisplay = multDisplay + (v - 1)
-			table.insert(multipliers, m)
-		end
-	end
-
-	table.insert(
-		lines,
-		string.format(
-			'<font color="#55FFFF">Multiplier Amount:</font> <font color="%s">%.2fx</font>',
-			TOOLTIP_COLORS.value,
-			multDisplay
-		)
-	)
-
-	if #multipliers == 0 then
-		table.insert(lines, string.format('<font color="%s">‣ None</font>', TOOLTIP_COLORS.muted))
-	else
-		for i = 1, math.min(#multipliers, BREAKDOWN_MAX_MULT) do
-			local m = multipliers[i]
-			local labelColor = m.color or "#FFFFFF"
-			local valStr = string.format("%.2f", tonumber(m.value) or 1)
-			table.insert(
-				lines,
-				string.format(
-					'<font color="%s">‣</font> <font color="%s">%s</font> <font color="%s">×%s</font>',
-					TOOLTIP_COLORS.muted,
-					labelColor,
-					m.label or "Unknown",
-					TOOLTIP_COLORS.positive,
-					valStr
-				)
-			)
-		end
-		if #multipliers > BREAKDOWN_MAX_MULT then
-			local remaining = #multipliers - BREAKDOWN_MAX_MULT
-			table.insert(
-				lines,
-				string.format(
-					'<font color="%s">(%d more multiplier boost%s...)</font>',
-					TOOLTIP_COLORS.muted,
-					remaining,
-					remaining == 1 and "" or "s"
-				)
-			)
-		end
-	end
-
-	return table.concat(lines, "\n")
+	return rows
 end
 
 -- ===================== DYNAMIC SLOT CLEANUP =====================
@@ -581,6 +400,7 @@ function M.init(sharedRefs, menu2Frame)
 		StatUpdated.OnClientEvent:Connect(function(data)
 			sanitizeStatData(data)
 			cachedAttributeData = data
+			print("[ProfilePageModule] StatUpdated received, cached " .. tostring(#data) .. " attributes")
 		end)
 	else
 		warn("[ProfilePageModule] StatUpdated RemoteEvent not found — attribute values will show 0")
@@ -589,7 +409,12 @@ function M.init(sharedRefs, menu2Frame)
 	-- ── Request initial data ──
 	if RequestStats then
 		task.delay(1, function()
-			RequestStats:FireServer()
+			local data = RequestStats:InvokeServer()
+			if data then
+				sanitizeStatData(data)
+				cachedAttributeData = data
+				print("[ProfilePageModule] RequestStats returned, cached " .. tostring(#data) .. " attributes")
+			end
 		end)
 	end
 
@@ -602,38 +427,21 @@ function M.showSkillAttributeTooltip(skillName)
 	if not resolveTooltip() then
 		return
 	end
-	TooltipModule.clearIconStats()
-	TooltipModule.resetTailOrders()
-
-	local refs = TooltipModule.refs
 	local skillColor = SKILL_COLORS[skillName] or "#FFFFFF"
-
-	refs.Title.Text = string.format(
-		'<font color="%s"><b>%s</b></font> <font color="%s">Attributes</font>',
-		skillColor,
-		skillName,
-		TOOLTIP_COLORS.label
-	)
-	refs.Desc.Text =
-		string.format('<font color="%s">Your %s attribute bonuses.</font>', TOOLTIP_COLORS.label, skillName)
-	refs.Desc.Visible = true
-	refs.Divider1.Visible = true
-	refs.Divider2.Visible = false
-	refs.Divider3.Visible = true
-	refs.Stats.Visible = false
-	refs.Rewards.Visible = false
-	refs.ProgressOuter.Visible = false
-	refs.ProgressLabel.Visible = false
-	refs.Click.Visible = true
-	refs.Click.Text = '<font color="#FFFF55">Click to view!</font>'
-
 	local attrs = ATTRIBUTE_CATEGORIES[skillName]
-	if attrs and #attrs > 0 then
-		local count = buildIconLines(attrs, TooltipModule.ICON_STATS_BASE_LO)
-		TooltipModule.adjustForIconCount(count)
-	end
 
-	TooltipModule.showRaw(TOOLTIP_SOURCE)
+	TooltipModule.show({
+		title = string.format(
+			'<font color="%s"><b>%s</b></font> <font color="%s">Attributes</font>',
+			skillColor,
+			skillName,
+			TOOLTIP_COLORS.label
+		),
+		description = string.format("Your %s attribute bonuses.", skillName),
+		statsTitle = false,
+		stats = (attrs and #attrs > 0) and buildStatRows(attrs) or nil,
+		click = { text = "CLICK TO VIEW!", color = "#FFFF55" },
+	}, TOOLTIP_SOURCE)
 end
 
 function M.hideSkillAttributeTooltip()
@@ -649,24 +457,6 @@ function M.showProfileSummaryTooltip()
 	if not resolveTooltip() then
 		return
 	end
-	TooltipModule.clearIconStats()
-	TooltipModule.resetTailOrders()
-
-	local refs = TooltipModule.refs
-
-	refs.Title.Text = '<font color="#55FF55"><b>Your Profile</b></font>'
-	refs.Desc.Text =
-		string.format('<font color="%s">View your equipment, stats, and more.</font>', TOOLTIP_COLORS.label)
-	refs.Desc.Visible = true
-	refs.Divider1.Visible = true
-	refs.Divider2.Visible = false
-	refs.Divider3.Visible = true
-	refs.Stats.Visible = false
-	refs.Rewards.Visible = false
-	refs.ProgressOuter.Visible = false
-	refs.ProgressLabel.Visible = false
-	refs.Click.Text = '<font color="#FFFF55">Click to view!</font>'
-	refs.Click.Visible = true
 
 	local attrList = {}
 	for _, ref in ipairs(SUMMARY_STAT_KEYS) do
@@ -681,12 +471,13 @@ function M.showProfileSummaryTooltip()
 		end
 	end
 
-	if #attrList > 0 then
-		local count = buildIconLines(attrList, TooltipModule.ICON_STATS_BASE_LO)
-		TooltipModule.adjustForIconCount(count)
-	end
-
-	TooltipModule.showRaw(TOOLTIP_SOURCE)
+	TooltipModule.show({
+		title = '<font color="#55FF55"><b>Your Profile</b></font>',
+		description = "View your equipment, stats, and more.",
+		statsTitle = false,
+		stats = #attrList > 0 and buildStatRows(attrList) or nil,
+		click = { text = "CLICK TO VIEW!", color = "#FFFF55" },
+	}, TOOLTIP_SOURCE)
 end
 
 function M.hideProfileSummaryTooltip()
@@ -702,31 +493,14 @@ function M.showFullProfileTooltip()
 	if not resolveTooltip() then
 		return
 	end
-	TooltipModule.clearIconStats()
-	TooltipModule.resetTailOrders()
-
-	local refs = TooltipModule.refs
-
-	refs.Title.Text = '<font color="#55FF55"><b>Your Profile</b></font>'
-	refs.Desc.Text =
-		string.format('<font color="%s">View your equipment, attributes, and more.</font>', TOOLTIP_COLORS.label)
-	refs.Desc.Visible = true
-	refs.Divider1.Visible = true
-	refs.Divider2.Visible = false
-	refs.Divider3.Visible = false
-	refs.Stats.Visible = false
-	refs.Rewards.Visible = false
-	refs.ProgressOuter.Visible = false
-	refs.ProgressLabel.Visible = false
-	refs.Click.Visible = false
-
 	local attrs = ATTRIBUTE_CATEGORIES["General"]
-	if attrs and #attrs > 0 then
-		local count = buildIconLines(attrs, TooltipModule.ICON_STATS_BASE_LO)
-		TooltipModule.adjustForIconCount(count)
-	end
 
-	TooltipModule.showRaw(TOOLTIP_SOURCE)
+	TooltipModule.show({
+		title = '<font color="#55FF55"><b>Your Profile</b></font>',
+		description = "View your equipment, attributes, and more.",
+		statsTitle = false,
+		stats = (attrs and #attrs > 0) and buildStatRows(attrs) or nil,
+	}, TOOLTIP_SOURCE)
 end
 
 function M.hideFullProfileTooltip()
@@ -738,65 +512,13 @@ end
 
 -- ===================== STAT BREAKDOWN TOOLTIP (ProfileMenu2 slots) =====================
 
-function M.showStatBreakdownTooltip(attrConfig)
+function M.showStatBreakdownTooltip(attrConfig, anchor, clickable)
 	if not resolveTooltip() then
 		return
 	end
-	TooltipModule.clearIconStats()
-	TooltipModule.resetTailOrders()
-
-	local refs = TooltipModule.refs
-	local attrColor = attrConfig.color or "#FFFFFF"
-
-	-- Compute value early (needed for both icon title and icon stat line)
 	local dataKey = resolveDataKey(attrConfig.key)
-	local finalVal = computeFinalValue(dataKey)
-	local valStr = formatNumber(finalVal)
-	if needsPercentSuffix(attrConfig.key) then
-		valStr = valStr .. "%"
-	end
-
-	-- Icon title (replaces native TitleLabel with icon + name + value)
-	TooltipModule.createIconTitle({
-		icon = attrConfig.icon,
-		color = attrColor,
-		name = attrConfig.name or "???",
-		value = valStr,
-	})
-
-	-- Description
-	refs.Desc.Text = string.format('<font color="%s">%s</font>', TOOLTIP_COLORS.label, attrConfig.description or "")
-	refs.Desc.Visible = true
-
-	-- Divider1
-	refs.Divider1.Visible = true
-
-	-- Stats: full breakdown
-	refs.Stats.Text = buildStatBreakdownText(attrConfig)
-	refs.Stats.Visible = true
-
-	-- Hidden elements
-	refs.Rewards.Visible = false
-	refs.ProgressOuter.Visible = false
-	refs.ProgressLabel.Visible = false
-
-	-- Divider3 + Cap (only if cap exists)
-	local cap = STAT_CAPS[attrConfig.key]
-	if cap then
-		refs.Divider3.Visible = true
-		refs.Click.Text = string.format(
-			'<font color="%s">Cap:</font> <font color="%s">%s</font>',
-			TOOLTIP_COLORS.label,
-			TOOLTIP_COLORS.accent,
-			formatNumber(cap)
-		)
-		refs.Click.Visible = true
-	else
-		refs.Divider3.Visible = false
-		refs.Click.Visible = false
-	end
-
-	TooltipModule.showRaw(STAT_TOOLTIP_SOURCE)
+	local config = Attributes.tooltipConfig(dataKey, cachedAttributeData[dataKey], { clickable = clickable })
+	TooltipModule.show(config, STAT_TOOLTIP_SOURCE, anchor)
 end
 
 function M.hideStatBreakdownTooltip()
@@ -891,13 +613,23 @@ function M.openAttributeGrid(skillName, activeFrame)
 		local capturedAttr = attr
 		local enterConn = slot.MouseEnter:Connect(function()
 			UIClick3:Play()
-			M.showStatBreakdownTooltip(capturedAttr)
+			M.showStatBreakdownTooltip(capturedAttr, slot, true)
 		end)
 		local leaveConn = slot.MouseLeave:Connect(function()
 			M.hideStatBreakdownTooltip()
 		end)
 		table.insert(dynamicConnections, enterConn)
 		table.insert(dynamicConnections, leaveConn)
+		table.insert(dynamicConnections, SlotFx.bind(slot))
+		table.insert(
+			dynamicConnections,
+			slot.MouseButton1Click:Connect(function()
+				UIClick:Play()
+				if attributeClickHandler then
+					attributeClickHandler(skillName, capturedAttr)
+				end
+			end)
+		)
 	end
 
 	print("[ProfilePageModule] Cloned " .. numAttrs .. " StatSlots")
@@ -928,16 +660,190 @@ function M.closeAttributeGrid()
 	print("[ProfilePageModule] closeAttributeGrid: cleaned up")
 end
 
+-- ===================== PROFILE MENU 3 — ATTRIBUTE SOURCES =====================
+
+local function cleanupDetail()
+	for _, conn in ipairs(detailConnections) do
+		conn:Disconnect()
+	end
+	table.clear(detailConnections)
+	for _, inst in ipairs(detailSlots) do
+		if inst and inst.Parent then
+			inst:Destroy()
+		end
+	end
+	table.clear(detailSlots)
+end
+
+local FONT_PIXEL = "rbxassetid://12187371840"
+
+local function buildSourceSlot(source, attrConfig, dataKey, breakdown, layoutOrder, frame)
+	local hex = Sources.hex(source)
+
+	local slot = statSlotTemplate:Clone()
+	slot.Name = "Source_" .. tostring(source.id or source.type)
+	slot.LayoutOrder = layoutOrder
+	slot.Visible = true
+	setupStatSlotIcon(slot, { color = hex }) -- tint only (no icon)
+
+	-- Initials in the source's color; amount along the bottom.
+	local letters = Instance.new("TextLabel")
+	letters.Name = "Letters"
+	letters.BackgroundTransparency = 1
+	letters.AnchorPoint = Vector2.new(0.5, 0)
+	letters.Position = UDim2.new(0.5, 0, 0, 5)
+	letters.Size = UDim2.new(1, 0, 0, 18)
+	letters.FontFace = Font.new(FONT_PIXEL)
+	letters.TextSize = 16
+	letters.TextColor3 = Color3.fromHex(hex)
+	letters.TextStrokeTransparency = 0.4
+	letters.Text = Sources.initials(source)
+	letters.ZIndex = 10
+	letters.Parent = slot
+
+	local amount = Attributes.amountText(dataKey, source)
+	local value = Instance.new("TextLabel")
+	value.Name = "Amount"
+	value.BackgroundTransparency = 1
+	value.AnchorPoint = Vector2.new(0.5, 1)
+	value.Position = UDim2.new(0.5, 0, 1, -3)
+	value.Size = UDim2.new(1, -2, 0, 12)
+	value.FontFace = Font.new(FONT_PIXEL)
+	value.TextSize = 11
+	value.TextColor3 = Color3.fromHex(attrConfig.color or "#FFFFFF")
+	value.TextStrokeTransparency = 0.3
+	value.Text = amount
+	value.ZIndex = 10
+	value.Parent = slot
+
+	slot.Parent = frame
+	table.insert(detailSlots, slot)
+	table.insert(detailConnections, SlotFx.bind(slot))
+
+	local attrDef = Attributes.get(dataKey)
+	table.insert(
+		detailConnections,
+		slot.MouseEnter:Connect(function()
+			UIClick3:Play()
+			TooltipModule.show(
+				Sources.tooltip(source, attrDef, {
+					TooltipModule = TooltipModule,
+					amount = amount,
+					breakdown = breakdown,
+					totalText = Attributes.format(dataKey, breakdown.final),
+				}),
+				STAT_TOOLTIP_SOURCE,
+				slot
+			)
+		end)
+	)
+	table.insert(
+		detailConnections,
+		slot.MouseLeave:Connect(function()
+			M.hideStatBreakdownTooltip()
+		end)
+	)
+	return slot
+end
+
+--- Remember what ProfileMenu2 / ProfileMenu3 should show on their next populate.
+function M.setPendingSkill(skillName)
+	pendingSkill = skillName
+end
+
+function M.setPendingAttribute(skillName, attrConfig)
+	pendingSkill = skillName
+	pendingAttr = attrConfig
+end
+
+function M.getPendingSkill()
+	return pendingSkill
+end
+
+function M.getPendingAttribute()
+	return pendingAttr
+end
+
+--- CMC registers how to navigate to layer 3 when an attribute slot is clicked.
+function M.setAttributeClickHandler(fn)
+	attributeClickHandler = fn
+end
+
+--- onPopulate hook for ProfileMenu2 (also runs when navigating Back to it).
+function M.populateAttributeGrid(frame)
+	if pendingSkill then
+		M.openAttributeGrid(pendingSkill, frame)
+	end
+end
+
+--- Populate ProfileMenu3 with the pending attribute and its sources.
+--- Called from the grid's onPopulate hook with the active buffer frame.
+function M.openAttributeDetail(frame)
+	cleanupDetail()
+	local attrConfig = pendingAttr
+	if not frame or not attrConfig or not statSlotTemplate or not blankSlotTemplate then
+		warn("[ProfilePageModule] openAttributeDetail: missing frame / attribute / templates")
+		return
+	end
+
+	-- ── Row 0: the attribute itself (row 1, slot 5) ──
+	local header = statSlotTemplate:Clone()
+	header.Name = "AttributeHeader"
+	header.LayoutOrder = ProfileConfig.PROFILE_MENU3_ATTRIBUTE_ORDER
+	header.Visible = true
+	setupStatSlotIcon(header, attrConfig)
+	header.Parent = frame
+	table.insert(detailSlots, header)
+	table.insert(detailConnections, SlotFx.bind(header))
+	SlotFx.setSelected(header, true) -- the attribute being inspected
+	table.insert(
+		detailConnections,
+		header.MouseEnter:Connect(function()
+			UIClick3:Play()
+			M.showStatBreakdownTooltip(attrConfig, header, false)
+		end)
+	)
+	table.insert(
+		detailConnections,
+		header.MouseLeave:Connect(function()
+			M.hideStatBreakdownTooltip()
+		end)
+	)
+
+	-- ── Rows 1-4: one slot per source, then blanks ──
+	local dataKey = resolveDataKey(attrConfig.key)
+	local breakdown = Attributes.breakdown(dataKey, cachedAttributeData[dataKey])
+	local sources = breakdown.sources
+	for i, layoutOrder in ipairs(ProfileConfig.PROFILE_MENU3_CONTENT_SLOTS) do
+		local source = sources[i]
+		if source then
+			buildSourceSlot(source, attrConfig, dataKey, breakdown, layoutOrder, frame)
+		else
+			local blank = blankSlotTemplate:Clone()
+			blank.Name = "DynBlank"
+			blank.LayoutOrder = layoutOrder
+			blank.Visible = true
+			blank.Parent = frame
+			table.insert(detailSlots, blank)
+		end
+	end
+end
+
+function M.closeAttributeDetail()
+	if resolveTooltip() then
+		TooltipModule.forceHide()
+	end
+	cleanupDetail()
+end
+
 -- ===================== QUERY API =====================
 
 function M.getAttributeValue(attrKey)
-	local dataKey = resolveDataKey(attrKey)
-	return computeFinalValue(dataKey)
+	return computeFinalValue(attrKey)
 end
 
 function M.getAttributeData(attrKey)
-	local dataKey = resolveDataKey(attrKey)
-	return cachedAttributeData[dataKey]
+	return cachedAttributeData[attrKey]
 end
 
 function M.getSkillAttributeValues(skillName)
@@ -948,12 +854,11 @@ function M.getSkillAttributeValues(skillName)
 
 	local results = {}
 	for _, attr in ipairs(attrs) do
-		local dataKey = resolveDataKey(attr.key)
 		table.insert(results, {
 			key = attr.key,
 			name = attr.name,
 			color = attr.color,
-			value = computeFinalValue(dataKey),
+			value = computeFinalValue(attr.key),
 		})
 	end
 	return results

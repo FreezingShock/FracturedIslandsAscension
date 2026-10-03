@@ -17,12 +17,15 @@
 --    - Drop to world (entire stack, Tool clones at character pos)
 --    - Saving on PlayerRemoving (Tool instances → profile data)
 --    - Firing UpdateInventory RemoteEvent on every mutation
+--    (Armor / accessory equipping lives in EquipmentService; clicking such an
+--     item routes there through SetEquipHandler.)
 --
 --  API (for other server scripts):
 --    InventoryDataManager.AddItem(player, toolName, count?)
 --    InventoryDataManager.RemoveItem(player, toolName, count?)
 --    InventoryDataManager.GetTotalItems(player) → number
 --    InventoryDataManager.SendUpdate(player)
+--    InventoryDataManager.SetEquipHandler(fn(player, itemDef) -> bool)
 --
 --  RemoteFunction/Event handlers are wired internally.
 -- ============================================================
@@ -33,8 +36,9 @@ local ServerStorage = game:GetService("ServerStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 
 local SkillsDataManager = require(ServerScriptService:WaitForChild("SkillsDataManager")) :: any
+local ItemTools = require(ServerScriptService:WaitForChild("ItemTools")) :: any
 local Modules = ReplicatedStorage:WaitForChild("Modules")
-local ItemRegistry = require(Modules:WaitForChild("ItemRegistry")) :: any
+local ItemRegistry = require(Modules:WaitForChild("Items")) :: any
 
 local InventoryDataManager = {}
 
@@ -70,6 +74,24 @@ local MoveToEndFunc = ensureRemote("RemoteFunction", "MoveToEnd")
 -- ===================== PER-PLAYER RUNTIME STATE =====================
 -- Mirrors _Inventory profile data at runtime for fast access.
 local playerState = {} -- [userId] = { toolOrder, nextOrderIndex, hotbarSlots, gridSlots }
+
+-- Set by EquipmentService: armor / accessory items equip into their slot
+-- instead of being held as a Tool.
+local equipHandler = nil
+function InventoryDataManager.SetEquipHandler(fn)
+	equipHandler = fn
+end
+
+--- If this tool is an armor / accessory piece, equip it into its slot.
+--- Returns true when handled (so the caller skips the normal hold-the-tool path).
+local function tryEquipEquipment(player, toolName: string): boolean
+	local def = ItemRegistry.getByToolName(toolName)
+	if def and def.slot and equipHandler then
+		equipHandler(player, def)
+		return true
+	end
+	return false
+end
 
 -- ===================== HELPERS =====================
 
@@ -134,6 +156,8 @@ local function buildToolInfo(toolName, info)
 		count = math.min(info.count, MAX_STACK),
 		rarity = rarity,
 		description = description,
+		category = regItem and regItem.category or nil,
+		slot = regItem and regItem.slot or nil, -- armor / accessory slot id
 	}
 end
 
@@ -338,9 +362,9 @@ function InventoryDataManager.AddItem(player, toolName: string, count: number): 
 		return 0
 	end
 
-	local tool = ServerStorage:FindFirstChild(toolName)
-	if not tool or not tool:IsA("Tool") then
-		warn("[InventoryDataManager] Tool not found in ServerStorage: " .. tostring(toolName))
+	local tool = ItemTools.ensure(toolName)
+	if not tool then
+		warn("[InventoryDataManager] Unknown item/tool: " .. tostring(toolName))
 		return 0
 	end
 
@@ -502,6 +526,9 @@ local function equipBySlot(player, slotNumber: number): boolean
 	end
 
 	local toolName = state.hotbarSlots[slotNumber]
+	if tryEquipEquipment(player, toolName) then
+		return true
+	end
 	local character = player.Character
 	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
 	if not humanoid then
@@ -535,6 +562,9 @@ local function equipBySlot(player, slotNumber: number): boolean
 end
 
 local function equipByName(player, toolName: string): boolean
+	if tryEquipEquipment(player, toolName) then
+		return true
+	end
 	local character = player.Character
 	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
 	if not humanoid then
@@ -779,9 +809,18 @@ local function saveInventoryToProfile(player)
 		})
 	end
 
+	-- Save slot maps with string keys: sparse numeric arrays aren't DataStore-safe.
+	local function stringKeyed(t)
+		local out = {}
+		for k, v in pairs(t) do
+			out[tostring(k)] = v
+		end
+		return out
+	end
+
 	invData.items = items
-	invData.hotbarSlots = state.hotbarSlots
-	invData.gridSlots = state.gridSlots
+	invData.hotbarSlots = stringKeyed(state.hotbarSlots)
+	invData.gridSlots = stringKeyed(state.gridSlots)
 	invData.toolOrder = state.toolOrder
 	invData.nextOrderIndex = state.nextOrderIndex
 end
@@ -793,12 +832,25 @@ local function loadInventoryFromProfile(player)
 		return
 	end
 
+	-- Sparse arrays come back from the DataStore with string keys ("2"), so
+	-- turn them back into numeric slot indices.
+	local function indexed(t)
+		local out = {}
+		for k, v in pairs(t or {}) do
+			local n = tonumber(k)
+			if n and type(v) == "string" then
+				out[n] = v
+			end
+		end
+		return out
+	end
+
 	-- Initialize runtime state
 	playerState[player.UserId] = {
 		toolOrder = invData.toolOrder or {},
 		nextOrderIndex = invData.nextOrderIndex or 1,
-		hotbarSlots = invData.hotbarSlots or {},
-		gridSlots = invData.gridSlots or {},
+		hotbarSlots = indexed(invData.hotbarSlots),
+		gridSlots = indexed(invData.gridSlots),
 	}
 
 	-- Spawn Tool clones from saved items
@@ -806,14 +858,14 @@ local function loadInventoryFromProfile(player)
 	for _, entry in ipairs(invData.items) do
 		local toolName = entry.toolName
 		local count = math.min(entry.count or 1, MAX_STACK)
-		local tool = ServerStorage:FindFirstChild(toolName)
-		if tool and tool:IsA("Tool") then
+		local tool = ItemTools.ensure(toolName)
+		if tool then
 			for _ = 1, count do
 				local clone = tool:Clone()
 				clone.Parent = backpack
 			end
 		else
-			warn("[InventoryDataManager] Saved tool not found in ServerStorage: " .. tostring(toolName))
+			warn("[InventoryDataManager] Saved item no longer exists, skipping: " .. tostring(toolName))
 		end
 	end
 
@@ -849,6 +901,7 @@ local function onPlayerReady(player)
 	end
 
 	loadInventoryFromProfile(player)
+	task.wait(0.1)
 
 	-- Wire ChildAdded/Removed listeners for live updates
 	local backpack = player:WaitForChild("Backpack")
@@ -882,7 +935,7 @@ local function onPlayerReady(player)
 	end
 	player.CharacterAdded:Connect(wireCharacter)
 
-	-- Send initial update
+	-- Send initial updates
 	InventoryDataManager.SendUpdate(player)
 	print("[InventoryDataManager] Loaded inventory for " .. player.Name)
 end
