@@ -10,9 +10,15 @@ Roblox incremental/progression game (Hypixel SkyBlock-style skills + stats). Sol
 ## Rojo mapping (`default.project.json`)
 | Disk | Studio |
 |---|---|
-| `src/Server` | `ServerScriptService` |
-| `src/Shared/Modules` | `ReplicatedStorage.Modules` |
-| `src/Client` | `StarterPlayer.StarterPlayerScripts` |
+| `src/Server/**` | `ServerScriptService` (flat) |
+| `src/Shared/**` | `ReplicatedStorage.Modules` (flat) |
+| `src/Client/**` | `StarterPlayer.StarterPlayerScripts` (flat) |
+
+**Layout:** each realm is organised into **system folders** (`Data`, `Inventory`, `Buttons`, `Combat`, `World`, `Chat`, `Admin`; Shared also has `Menu`, `Stats`, `Config`, `Util`; Client also has `Menu`, `HUD`). The folders exist only on disk: in Studio every script is still flat (`ReplicatedStorage.Modules.StatisticsConfig`, `ServerScriptService.SkillsDataManager`), so `WaitForChild("Name")` lookups never change.
+- `default.project.json` is **generated**. After adding, moving, renaming or deleting a script run `python tools/gen_project.py` (or `--check`), then restart `rojo serve` and reconnect the Studio plugin. Never hand-edit the project file.
+- A folder containing `init.lua` / `init.meta.json` is ONE Studio instance (module with children, or a Folder). Plain folders are organisation only. Script instance names must be unique within a realm (the generator errors on duplicates).
+- Folder instances that exist in Studio (`Modules.Config`, `Modules.Button`, client `Button`) are kept by an `init.meta.json` (`{"className":"Folder"}`).
+- Verify a reorganisation with `rojo build default.project.json -o x.rbxlx` before and after and compare the instance trees.
 
 **GUI is NOT in Rojo.** All ScreenGuis/Frames (SkillDescFrame, TemporaryMenus, tooltips, grids) live only in the Studio place file. Scripts reach into them by name with `WaitForChild`. To change UI structure, use the Studio MCP (`inspect_instance`, `execute_luau`, `multi_edit`) and verify with `screen_capture`; renaming an instance breaks the scripts that look it up by name.
 
@@ -20,9 +26,9 @@ Naming: `*.client.lua` = LocalScript, `*.server.lua` = Script, plain `.lua` = Mo
 
 ## Architecture
 - **Server-authoritative.** Clients never compute final stats. Server modules own data; clients get state via RemoteEvents (e.g. `SkillUpdated`) and only render.
-- **Persistence:** `ProfileService` (`src/Server/ProfileService.luau`). One profile per player in `SkillsDataManager` (`PlayerSkills_v1`): skills at top level, inventory under `_Inventory`. `InventoryDataManager` reaches the profile through `SkillsDataManager.GetProfile` / `GetInventoryData`. New fields go in `PROFILE_TEMPLATE`; `Reconcile()` backfills existing players, so don't bump the store name.
+- **Persistence:** `ProfileService` (`src/Server/Data/ProfileService.luau`). One profile per player in `SkillsDataManager` (`PlayerSkills_v1`): skills at top level, inventory under `_Inventory`. `InventoryDataManager` reaches the profile through `SkillsDataManager.GetProfile` / `GetInventoryData`. New fields go in `PROFILE_TEMPLATE`; `Reconcile()` backfills existing players, so don't bump the store name.
 - **Skills:** 6 skills (Farming, Foraging, Fishing, Mining, Combat, Carpentry), levels 1–50, `XP_THRESHOLDS` in `SkillsDataManager`. Client payload = `{level, xp, xpNeeded, roman, pct}` per skill.
-- **UI:** `CentralizedMenuController` (client) owns menu open/close/navigate and passes a `sharedRefs` table to page modules. Page modules in `Shared/Modules` expose `init(sharedRefs, frame)`, `open(arg)`, `close()` (animated), `reset()` (instant). `GridMenuModule` is config-driven grids with stack navigation; `TooltipModule` is a single shared tooltip keyed by source id (`showRaw(key)` / `hide(key)`) so page modules don't clobber each other. `LiquidGlassHandler` is the glass effect.
+- **UI:** `CentralizedMenuController` (client) owns menu open/close/navigate and passes a `sharedRefs` table to page modules. Page modules in `Shared/Menu/Pages` expose `init(sharedRefs, frame)`, `open(arg)`, `close()` (animated), `reset()` (instant). `GridMenuModule` is config-driven grids with stack navigation; `TooltipModule` is a single shared tooltip keyed by source id (`showRaw(key)` / `hide(key)`) so page modules don't clobber each other. `LiquidGlassHandler` is the glass effect.
 - **Stat formula:** `Final = (Base + Flat) x (1 + sum(Multipliers))`.
 
 ## UI conventions (from `SkillsPageModule`)

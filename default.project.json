@@ -2,25 +2,196 @@
   "name": "FracturedIslandsAscension",
   "tree": {
     "$className": "DataModel",
-
     "ServerScriptService": {
       "$className": "ServerScriptService",
-      "$path": "src/Server"
+      "AdminToolManager": {
+        "$path": "src/Server/Admin/AdminToolManager.lua"
+      },
+      "AttributeStatManager": {
+        "$path": "src/Server/Data/AttributeStatManager.lua"
+      },
+      "ButtonServerManager": {
+        "$path": "src/Server/Buttons/ButtonServerManager.server.lua"
+      },
+      "ChatService": {
+        "$path": "src/Server/Chat/ChatService.lua"
+      },
+      "CloudManager": {
+        "$path": "src/Server/World/CloudManager.server.lua"
+      },
+      "EquipmentInit": {
+        "$path": "src/Server/Inventory/EquipmentInit.server.lua"
+      },
+      "EquipmentService": {
+        "$path": "src/Server/Inventory/EquipmentService.lua"
+      },
+      "InventoryDataManager": {
+        "$path": "src/Server/Data/InventoryDataManager.lua"
+      },
+      "InventoryTestCommands": {
+        "$path": "src/Server/Admin/InventoryTestCommands.server.lua"
+      },
+      "ItemTools": {
+        "$path": "src/Server/Inventory/ItemTools.lua"
+      },
+      "Main": {
+        "$path": "src/Server/Main.server.lua"
+      },
+      "ProfileService": {
+        "$path": "src/Server/Data/ProfileService.luau"
+      },
+      "SkillsDataManager": {
+        "$path": "src/Server/Data/SkillsDataManager.lua"
+      },
+      "StatisticsDataManager": {
+        "$path": "src/Server/Data/StatisticsDataManager.lua"
+      },
+      "WeaponInit": {
+        "$path": "src/Server/Combat/WeaponInit.server.lua"
+      },
+      "WeaponManager": {
+        "$path": "src/Server/Combat/WeaponManager.lua"
+      },
+      "ZoneInit": {
+        "$path": "src/Server/World/ZoneInit.server.lua"
+      }
     },
-
     "ReplicatedStorage": {
       "$className": "ReplicatedStorage",
       "Modules": {
         "$className": "Folder",
-        "$path": "src/Shared/Modules"
+        "AdminPanelModule": {
+          "$path": "src/Shared/Admin/AdminPanelModule.lua"
+        },
+        "ArmorAccessoriesController": {
+          "$path": "src/Shared/Inventory/ArmorAccessoriesController.lua"
+        },
+        "Attributes": {
+          "$path": "src/Shared/Stats/Attributes.lua"
+        },
+        "Button": {
+          "$path": "src/Shared/Buttons/Button"
+        },
+        "ButtonConfig": {
+          "$path": "src/Shared/Buttons/ButtonConfig.lua"
+        },
+        "ButtonFX": {
+          "$path": "src/Shared/Buttons/ButtonFX.lua"
+        },
+        "ChatBridge": {
+          "$path": "src/Shared/Chat/ChatBridge.lua"
+        },
+        "CloudSystem": {
+          "$path": "src/Shared/World/CloudSystem.lua"
+        },
+        "CollectionsConfig": {
+          "$path": "src/Shared/Stats/CollectionsConfig.lua"
+        },
+        "CollectionsPageModule": {
+          "$path": "src/Shared/Menu/Pages/CollectionsPageModule.lua"
+        },
+        "Config": {
+          "$path": "src/Shared/Config"
+        },
+        "EquipmentConfig": {
+          "$path": "src/Shared/Inventory/EquipmentConfig.lua"
+        },
+        "GridMenuModule": {
+          "$path": "src/Shared/Menu/GridMenuModule.lua"
+        },
+        "ItemRegistry": {
+          "$path": "src/Shared/Inventory/ItemRegistry.lua"
+        },
+        "Items": {
+          "$path": "src/Shared/Inventory/Items"
+        },
+        "LiquidGlassHandler": {
+          "$path": "src/Shared/Menu/LiquidGlassHandler"
+        },
+        "MenuBridge": {
+          "$path": "src/Shared/Menu/MenuBridge.lua"
+        },
+        "MoneyLib": {
+          "$path": "src/Shared/Util/MoneyLib.lua"
+        },
+        "ProfileConfig": {
+          "$path": "src/Shared/Stats/ProfileConfig.lua"
+        },
+        "ProfilePageModule": {
+          "$path": "src/Shared/Menu/Pages/ProfilePageModule.lua"
+        },
+        "SettingsPageModule": {
+          "$path": "src/Shared/Menu/Pages/SettingsPageModule.lua"
+        },
+        "SkillsPageModule": {
+          "$path": "src/Shared/Menu/Pages/SkillsPageModule.lua"
+        },
+        "SlotFx": {
+          "$path": "src/Shared/Inventory/SlotFx.lua"
+        },
+        "Sources": {
+          "$path": "src/Shared/Stats/Sources.lua"
+        },
+        "StatisticLogModule": {
+          "$path": "src/Shared/Stats/StatisticLogModule.lua"
+        },
+        "StatisticsConfig": {
+          "$path": "src/Shared/Stats/StatisticsConfig.lua"
+        },
+        "StatisticsPageModule": {
+          "$path": "src/Shared/Menu/Pages/StatisticsPageModule.lua"
+        },
+        "TooltipModule": {
+          "$path": "src/Shared/Menu/TooltipModule"
+        },
+        "WeaponFX": {
+          "$path": "src/Shared/Combat/WeaponFX.lua"
+        },
+        "WeaponRegistry": {
+          "$path": "src/Shared/Inventory/WeaponRegistry.lua"
+        },
+        "ZoneManager": {
+          "$path": "src/Shared/World/ZoneManager.lua"
+        }
       }
     },
-
     "StarterPlayer": {
       "$className": "StarterPlayer",
       "StarterPlayerScripts": {
         "$className": "StarterPlayerScripts",
-        "$path": "src/Client"
+        "AdminCommandsClient": {
+          "$path": "src/Client/Admin/AdminCommandsClient.client.lua"
+        },
+        "Button": {
+          "$path": "src/Client/Buttons/Button"
+        },
+        "ButtonClientManager": {
+          "$path": "src/Client/Buttons/ButtonClientManager.client.lua"
+        },
+        "CentralizedMenuController": {
+          "$path": "src/Client/Menu/CentralizedMenuController.client.lua"
+        },
+        "ChatController": {
+          "$path": "src/Client/Chat/ChatController.client.lua"
+        },
+        "CurrencyHUD": {
+          "$path": "src/Client/HUD/CurrencyHUD.client.lua"
+        },
+        "InventoryController": {
+          "$path": "src/Client/Inventory/InventoryController.client.lua"
+        },
+        "LiquidGlassBootstrap": {
+          "$path": "src/Client/Menu/LiquidGlassBootstrap.client.lua"
+        },
+        "UIPlaceholderCleanup": {
+          "$path": "src/Client/HUD/UIPlaceholderCleanup.client.lua"
+        },
+        "WeaponController": {
+          "$path": "src/Client/Combat/WeaponController.client.lua"
+        },
+        "ZoneNotifier": {
+          "$path": "src/Client/World/ZoneNotifier.client.lua"
+        }
       }
     }
   }

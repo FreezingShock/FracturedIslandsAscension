@@ -1,0 +1,10 @@
+# Rojo / Studio build outputs
+*.rbxl
+*.rbxlx
+*.rbxm.lock
+
+# Editor / OS
+.vscode/
+.DS_Store
+Thumbs.db
+*.log

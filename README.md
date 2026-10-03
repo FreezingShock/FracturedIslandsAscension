@@ -1,259 +1,167 @@
-# Fractured Islands: Ascension (FIA)
+<div align="center">
 
-> A Roblox incremental/progression game blending the deep skill and stat ecosystem of Hypixel SkyBlock with the satisfying exponential loop of idle/incremental mechanics. Players ascend from a nobody gathering basic resources to a stat-stacked demigod with specialized skill trees, rare gear multipliers, and a character sheet that tells the story of hundreds of hours of play.
+# ✦ Fractured Islands: Ascension ✦
 
----
+### A Minecraft-flavoured incremental RPG for Roblox — stand on pads, stack stats, ascend.
 
-## Description
+![Roblox](https://img.shields.io/badge/ROBLOX-STUDIO-55FFFF?style=for-the-badge&labelColor=0b0b1a)
+![Luau](https://img.shields.io/badge/LUAU-NONSTRICT-FFAA00?style=for-the-badge&labelColor=0b0b1a)
+![Rojo](https://img.shields.io/badge/ROJO-7.7.0-FF5555?style=for-the-badge&labelColor=0b0b1a)
+![Status](https://img.shields.io/badge/STATUS-IN_DEVELOPMENT-55FF55?style=for-the-badge&labelColor=0b0b1a)
 
-Fractured Islands: Ascension is a **passive, Minecraft-themed incremental game** built in Roblox Studio, authored entirely by a solo developer. Resources generate automatically, skills level through accumulation and XP gain — no clicking required.
+**🟦 [Tooling](#-tooling-and-workflow)**  ·  **🟩 [Systems](#-systems)**  ·  **🟪 [Project structure](#%EF%B8%8F-project-structure)**  ·  **🟨 [Run it locally](#-run-it-locally)**
 
-### Core Fantasy
-Progress must always be **visible**, **satisfying**, and **multi-layered**. Every system is designed so the player can see exactly how far they've come and how far they have left to go.
-
-### Design Pillars
-- **Six Skills** — Farming, Foraging, Fishing, Mining, Combat, Carpentry — each with 50 levels and milestone rewards at levels 5, 10, 15, 25, 30, 40, and 50
-- **Dual-layer stat formula** — `Final = (Base + Flat) × (1 + ΣMultipliers)` — flat bonuses and percentage multipliers tracked separately and combined
-- **Item rarity tiers** — Common → Uncommon → Rare → Epic → Legendary → Mythic
-- **Gear slots** — Helmet, Chest, Legs, Boots, Weapon, Tool, Accessories (×5)
-- **Skill Tokens (ST)** — milestone rewards spendable cross-skill at 2× cost
-- **Carpentry** — economy accelerator providing passive Coins/sec, funding the seventh General Skills tree
-- **Aetheric Nexus** — master leveling system (up to 200 levels) fed by skill progression across all six skills
-- **Currency chain** — Bronze → Silver → Gold → Platinum → Diamond → Emerald → Obsidian → Crystallized → Exotic → Celestial → Void Coins
-
-### Stats
-| Category | Stats |
-|---|---|
-| Combat | Health, Defense, Strength, Crit Chance, Crit Damage, Speed, Attack Speed |
-| Gathering | Farming Fortune, Foraging Fortune, Fishing Speed, Mining Speed, Mining Fortune |
-| Economy | Magic Find, Coins/sec |
-
-### Architecture
-| Layer | Technology |
-|---|---|
-| Client UI & Input | `LocalScript` |
-| Shared Logic | `ModuleScript` in `ReplicatedStorage.Modules` |
-| Server Data & Computation | `ModuleScript` in `ServerScriptService` |
-| Client ↔ Server | `RemoteEvent` |
-| Data Persistence | `ProfileService` |
-| Script Editing | VSCode + Rojo |
-
-All stat computation is server-authoritative. Client never computes final values.
+</div>
 
 ---
 
-## Completed Systems
+## ✧ What is this?
 
-### UI Framework
-- **`CentralizedMenuController`** (LocalScript, `StarterPlayerScripts`) — orchestrates all menus via a `sharedRefs`/`sharedModules` pattern; owns open/close/navigate lifecycle
-- **`GridMenuModule`** — config-driven grid registration, tooltip/click wiring, stack-based navigation with crossfade transitions; `fadeInGrid` / `fadeOutGrid` using `CanvasGroup.GroupTransparency`
-- **Sidebar** — spam-safe tween with `Back` easing, blur tween on menu open/close (`Quint`, 0.35s, Size 18)
+**Fractured Islands: Ascension** (FIA) is a solo-built Roblox game that blends the deep skill-and-stat ecosystem of **Hypixel SkyBlock** with the satisfying exponential loop of an idle/incremental. You start on a floating island with a trickle of Bronze Coins, step on pads to convert one resource into the next, and climb a web of statistics whose owned amounts multiply each other.
 
-### Page Modules
-- **`SkillsPageModule`** — skill card display, level box hover tooltips, XP progress bars, Roman numeral toggle, skill average display, search filter, scroll-idle shadow system, live XP updates via `SkillUpdated` RemoteEvent
-- **`ProfilePageModule`** — player profile display
-- **`SettingsPageModule`** — five settings sub-pages (Personal, Communication, Gameplay, Notifications, Controls, Audio)
-- **`StatisticsPageModule`** with `StatisticsConfig` — 9-column × 6-row grid; per-skill color theming via `applyStatColor` / `revertStatColor`; `SelectedSkill` slot mirrors source button visual properties
+> [!NOTE]
+> FIA is in active development. The core loop, menus, items and statistics are playable; combat, crafting and more world content are still being built.
 
-### Tooltip System (`TooltipModule`)
-- Cursor-following via `RenderStepped`; source-keyed ownership model prevents clobber between page modules
-- Divider visibility logic: `TT_Divider1.Visible = TT_Desc.Visible and TT_Click.Visible`
-- `showRaw` path for full manual control (skill cards, level boxes)
-- Progress fill tween (`tweenProgressFill`) for XP bar animation
-
-### Navigation
-- Return button with hold-to-confirm (0.5s threshold), animated progress bar, cancellable `task.delay` appear guard
-- Token-based animation cancellation (`restoreToken`, `pageAnimToken`, `bdAnimToken`)
-- `navigateBack()` — handles page depth ≥ 2, page depth = 1 (returns to grid), and grid depth > 0
-- Stack-based grid-to-grid traversal via `GridMenuModule`
-
-### Helpers & Patterns
-- **Typewriter system** — silent (`typewrite`) and sound (`typewriteSound`) variants; `typewriteSuffix` for label suffix animation; `titlesLocked` race-condition guard
-- **`applyGridLayout`** — config-driven blank slot generation from a `BlankSlot` template in `TemporaryMenus`
-- **`MoneyLib`** — suffix-based large number formatting (`k`, `M`, `B` … up to `10e123`)
-
-### Collections Grid
-- Farming, Foraging, Fishing, Mining, Combat entries registered and wired; back/close navigation functional
-
-### Server
-- **`SkillsDataManager`** (ServerScriptService) — ProfileService saving, XP threshold tables, level-up logic, fires `SkillUpdated` to clients
-
-### Tooling
-- Rojo + VSCode workflow fully operational
-- `.luaurc` (`"languageMode": "nonstrict"`), `selene.toml` (`global_usage = "allow"`, `unused_variable = "allow"`), `sourcemap` configured
-- Luau LSP, Selene, StyLua active
-- GUI Interface Tools 2 plugin + Material Icons (filled style) for UI construction
-
----
-
-## Planned / In Progress
-
-Items are listed in rough implementation priority.
-
-| # | System | Notes |
-|---|---|---|
-| 1 | **Inventory & Equipment Panel** | Gear slots, drag-and-drop, rarity borders, stat diff preview on hover |
-| 2 | **Click Handler** | 6 skill-themed button types, combo tracking, crit click logic |
-| 3 | **Animated Resource Popups** | Floating `+XP` / `+Gold` text on resource gain |
-| 4 | **ItemManager ModuleScript** | Item definitions, drop tables, stat computation |
-| 5 | **Milestone Tracker GUI** | Scrollable list per skill, lock/unlock animations, Skill Token rewards |
-| 6 | **Aetheric Nexus UI** | Hook into existing `SkillUpdated` events → Nexus XP module → stat multiplier injection → accessory resonance schema → area gating |
-| 7 | **General Skills Tree** | Seventh tree, unlocks after any skill hits Level 25 |
-| 8 | **Recipe Menu** | Complex — full crafting recipe browser |
-| 9 | **Crafting Menu** | Hard — full crafting workflow UI |
-| 10 | **"Next Reward at Level X" Preview** | Inline preview in skill tooltips |
-| 11 | **Total Cumulative XP Tracking** | Overflow XP past Level 50 |
-| 12 | **Leaderboard Panel** | Per-skill and global leaderboard display |
-| 13 | **Reforge Anvil UI** | Item reforge workflow |
-| 14 | **Boost Events System** | Time-limited multiplier events |
-| 15 | **Pet System** | Required before Mythic Weave node 8 is reachable |
-| 16 | **Prestige / Rebirth System** | Design after core loop is fully stable |
-
----
-
-## Project Structure
+### The loop
 
 ```
-FracturedIslandsAscension/
+passive Bronze income ─► stand on a pad (auto-buys every 0.2 s) ─► server validates, deducts, pays
+        ▲                                                                   │
+        └──── owned stats boost the stats below them (multiplier chain) ◄───┘
+```
+
+Every statistic you own multiplies the stats it rewards, so progress is always **visible**, **satisfying** and **multi-layered**.
+
+---
+
+## 🎮 Systems
+
+| | System | What it does |
+|:-:|:--|:--|
+| 🪙 | **Statistics** | 75 statistics across 6 skills (Farming, Foraging, Fishing, Mining, Combat, General). Costs, rewards and multipliers are plain data in `StatisticsConfig`. Menu is read-only: stats are earned from world buttons or passively. |
+| 🔘 | **World buttons** | Pads defined in `ButtonConfig` (`Button.{Key}.{Tier}` models). Server-authoritative auto-buy, sparkle FX, floating `+gain`, purchase log popups. |
+| 🧭 | **Ascension menu** | One centralized menu: Profile, Skills, Statistics, Collections, Settings. A pooled double-buffer grid keeps rapid navigation smooth and leak-free. |
+| 🛡️ | **Items & equipment** | Modular item definitions (24 items): rarities, 4 armor + 4 accessory slots, server-authoritative equip/unequip/swap, stats applied as attribute sources. |
+| 📊 | **Attributes** | 30+ attributes from one config. Profile → skill attributes → per-attribute source breakdown (base, equipment, admin, more to come). |
+| 💬 | **Tooltips** | One data-driven tooltip with collapsible sections (hold **SHIFT**), centered pixel font and Minecraft colour codes (`&a`, `&6` …). |
+| 💾 | **Persistence** | ProfileService stores for skills/inventory, statistics and attributes. Reconcile backfills new fields, so saves survive updates. |
+| 🌫️ | **World** | Floating starter island, cloud system, zone detection scaffolding. |
+| ⚔️ | **Combat** | Weapon registry and ability scaffolding (not the current focus). |
+| 🛠️ | **Admin tools** | Slash commands for testing: `/give /item /set /add /reset /stats /equip /unequip /items /clear /cap /help`. |
+
+### Currency chain
+
+`Bronze → Silver → Gold → Platinum → Diamond → Emerald → Obsidian → Crystallized → Exotic → Celestial → Void`
+
+Each coin tier is bought with the one below it, and owning higher tiers multiplies the tiers beneath.
+
+---
+
+## 🎨 Design language
+
+**Look & feel**
+- Minecraft colour-code palette on dark glass
+- Pixel font (Silkscreen) for dynamic text
+- Liquid-glass menu panels
+- `Quint`/`Out` tweens, 0.3–0.5 s
+- Item and statistic icons from Minecraft item sprites
+
+**The palette**
+
+| Token | Colour |
+| :-- | :-- |
+| `aqua` | ![#55FFFF](https://img.shields.io/badge/-55FFFF-55FFFF?style=flat-square) |
+| `green` | ![#55FF55](https://img.shields.io/badge/-55FF55-55FF55?style=flat-square) |
+| `yellow` | ![#FFFF55](https://img.shields.io/badge/-FFFF55-FFFF55?style=flat-square) |
+| `gold` | ![#FFAA00](https://img.shields.io/badge/-FFAA00-FFAA00?style=flat-square) |
+| `red` | ![#FF5555](https://img.shields.io/badge/-FF5555-FF5555?style=flat-square) |
+| `light-purple` | ![#FF55FF](https://img.shields.io/badge/-FF55FF-FF55FF?style=flat-square) |
+| `gray` | ![#AAAAAA](https://img.shields.io/badge/-AAAAAA-AAAAAA?style=flat-square) |
+
+---
+
+## 🧱 Tech stack
+
+| Layer | Tools |
+| :-- | :-- |
+| **Engine / language** | Roblox Studio, Luau (non-strict) |
+| **Editing** | VS Code + [Rojo](https://rojo.space) 7.7 (`src/` → Studio, one-way) |
+| **Persistence** | [ProfileService](https://madstudioroblox.github.io/ProfileService/) |
+| **Lint** | Selene (`selene.toml`), `.luaurc` |
+| **AI-assisted workflow** | Claude Code + Roblox Studio MCP + an Obsidian vault as memory |
+
+**Architecture rules**
+- Server-authoritative: clients render, servers decide.
+- Final stat formula: `Final = (Base + Flat) × (1 + ΣMultipliers)`.
+- GUI lives in the Studio place; scripts reach it by name with `WaitForChild`.
+
+---
+
+## 🧭 Tooling and workflow
+
+1. **Spec** the feature (design notes live in the vault).
+2. **Branch** — `feature/<name>`, commits titled `3.xx.x - description`.
+3. **Implement** in `src/`; Rojo syncs to Studio.
+4. **Verify** in Studio: wait for sync → play → check console → drive the UI → screenshot.
+5. **Commit and log** — update the systems registry and session log.
+
+---
+
+## 🚀 Run it locally
+
+```bash
+git clone https://github.com/FreezingShock/FracturedIslandsAscension.git
+cd FracturedIslandsAscension
+rojo serve            # then press Connect in the Rojo plugin inside Studio
+```
+
+| Command | Does |
+| :-- | :-- |
+| `rojo serve` | Live-sync `src/` into the open Studio place |
+| `python tools/gen_project.py` | Regenerate `default.project.json` after adding, moving or removing a script |
+| `python tools/gen_project.py --check` | Fail if `default.project.json` is out of date |
+| `rojo sourcemap default.project.json -o sourcemap.json` | Refresh the sourcemap used by Luau tooling |
+
+> [!IMPORTANT]
+> Scripts are organised into **system folders on disk** but appear **flat in Studio** (`ReplicatedStorage.Modules.X`, `ServerScriptService.X`), because the game finds modules by name. `tools/gen_project.py` maps every script individually to make that work. After moving or adding files, run it and restart `rojo serve`.
+
+The GUI (ScreenGuis, templates) is **not** in Rojo — it lives in the place file, so save the place (Ctrl+S) after UI changes.
+
+---
+
+## 🗂️ Project structure
+
+```
 ├── src/
-│   ├── client/                         # StarterPlayerScripts
-│   │   └── CentralizedMenuController.client.lua
-│   ├── server/                         # ServerScriptService
-│   │   └── SkillsDataManager.lua
-│   └── Shared/
-│       └── Modules/                    # ReplicatedStorage/Modules
-│           ├── GridMenuModule.lua
-│           ├── TooltipModule.lua
-│           ├── SkillsPageModule.lua
-│           ├── ProfilePageModule.lua
-│           ├── SettingsPageModule.lua
-│           ├── StatisticsPageModule.lua
-│           └── MoneyLib.lua
-├── default.project.json
-├── selene.toml
-├── .luaurc
-└── README.md
-```
-
-> **Note:** GUI layout (Frames, Buttons, Labels) is authored in Roblox Studio. Scripts are managed exclusively via Rojo/VSCode. Never edit scripts in Studio while Rojo is syncing — Rojo will overwrite Studio edits.
-
----
-
-## Git Setup & Workflow
-
-### First-time setup (new machine)
-
-```bash
-# Clone the repository
-git clone https://github.com/YOUR_USERNAME/fractured-islands-ascension.git
-cd fractured-islands-ascension
-
-# Verify Rojo is installed (requires Aftman or manual install)
-rojo --version
-
-# Start Rojo sync (run this before opening Studio)
-rojo serve default.project.json
-```
-
-### Daily workflow
-
-```bash
-# Pull latest before starting work
-git pull origin main
-
-# Start Rojo sync session
-rojo serve default.project.json
-
-# Stage all changes
-git add -A
-git commit -m ""
-git push
-
-# Commit with a descriptive message
-git commit -m "feat: add StatisticsPageModule skill color theming"
-
-# Push to remote
-git push origin main
-```
-
-### Branching (for larger features)
-
-```bash
-# Create and switch to a new feature branch
-git checkout -b feat/inventory-panel
-
-# Work, commit as normal, then push the branch
-git push origin feat/inventory-panel
-
-# Merge back to main when ready
-git checkout main
-git merge feat/inventory-panel
-git push origin main
-
-# Clean up the branch
-git branch -d feat/inventory-panel
-git push origin --delete feat/inventory-panel
-```
-
-### Useful utility commands
-
-```bash
-# Check what's changed and unstaged
-git status
-
-# View recent commit history (one line per commit)
-git log --oneline -20
-
-# Discard all unstaged changes (use with caution)
-git checkout -- .
-
-# Undo the last commit but keep the changes staged
-git reset --soft HEAD~1
-
-# View the diff of staged changes before committing
-git diff --staged
-
-# Tag a stable build milestone
-git tag -a v0.1.0 -m "Skills + Statistics UI complete"
-git push origin v0.1.0
-```
-
-### Recommended `.gitignore`
-
-```gitignore
-# Rojo sourcemap (auto-generated, not needed in repo)
-sourcemap.json
-
-# Roblox Studio local files
-*.rbxl
-*.rbxlx
-
-# OS files
-.DS_Store
-Thumbs.db
-
-# VSCode local settings (keep .vscode/settings.json if shared)
-.vscode/launch.json
+│   ├── Server/        # → ServerScriptService
+│   │   ├── Data/          # ProfileService, skills, inventory, attributes, statistics
+│   │   ├── Inventory/     # item tools, equipment service
+│   │   ├── Buttons/       # world-button purchase loop
+│   │   ├── Combat/ World/ Chat/ Admin/
+│   │   └── Main.server.lua
+│   ├── Shared/        # → ReplicatedStorage.Modules
+│   │   ├── Menu/          # grid engine, bridge, TooltipModule/, LiquidGlassHandler/, Pages/
+│   │   ├── Inventory/     # Items/ definitions, registries, equipment controller, slot FX
+│   │   ├── Stats/         # Attributes, Sources, Profile/Statistics/Collections configs, stat log
+│   │   ├── Buttons/       # ButtonConfig, ButtonFX, ButtonRegistry
+│   │   ├── Config/        # chat, cloud and zone configs
+│   │   ├── Combat/ World/ Chat/ Admin/ Util/
+│   └── Client/        # → StarterPlayerScripts
+│       ├── Menu/ Inventory/ Buttons/ HUD/ Combat/ World/ Chat/ Admin/
+├── tools/             # gen_project.py — regenerates default.project.json
+├── docs/archive/      # retired notes
+├── assets/blender/    # Blender source files
+├── legacy/            # backups of replaced modules
+├── default.project.json   # generated — do not edit by hand
+└── CLAUDE.md          # instructions for Claude Code in this repo
 ```
 
 ---
 
-## Key Engineering Notes
+<div align="center">
 
-- **Declaration order is critical in Luau** — `local` variables only exist from their declaration line downward. Functions defined before their dependencies silently capture `nil`.
-- **Always use `playerGui`, never `game.StarterGui`** — StarterGui is the template, not the live instance.
-- **Wire connections once at startup** — never inside render loops or repeated function calls. Prevents connection stacking.
-- **Per-entry tween tracking** — use cancellable per-entry tweens, not global boolean locks, for responsive UI.
-- **`GroupTransparency` only works on `CanvasGroup`** — not `Frame`. Use instant visibility swaps or convert to CanvasGroup for fade effects.
-- **`ProfileService` must live in `ServerScriptService`** — not `ReplicatedStorage` (security boundary).
-- **`WaitForChild` with no timeout blocks indefinitely** — use `FindFirstChild` with diagnostic warn loops for GUI children.
+**Built by [Nate](https://github.com/FreezingShock)**  ·  [nateanderson.dev](https://nateanderson.dev/)
 
----
+✦ made with too much rainbow ✦
 
-## Design References
-
-| Reference | What We Borrow |
-|---|---|
-| **Hypixel SkyBlock** | Skill trees, dual-layer stat formula, item modifiers, milestone reward structure |
-| **Untitled Button Simulator** | Incremental loop, exponential scaling, button upgrade trees |
-| **Cookie Clicker** | Passive income structure, prestige loop shape |
+</div>
