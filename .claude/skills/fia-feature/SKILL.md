@@ -1,6 +1,6 @@
 ---
 name: fia-feature
-description: End-to-end pipeline for building a game feature - spec, branch, implement, verify, review, commit. Manual only. Invoke as /fia-feature <short idea>.
+description: End-to-end pipeline for building a game feature - spec, implement, verify, review, commit to main. Manual only. Invoke as /fia-feature <short idea>.
 disable-model-invocation: true
 argument-hint: <feature idea>
 ---
@@ -8,7 +8,7 @@ argument-hint: <feature idea>
 # /fia-feature $ARGUMENTS
 
 ## 0. Size check (decides how much process to use)
-- **Small** (fits in one sentence, 1-3 files, no saved-data or Remote changes): skip the spec, skip review. Branch -> implement -> `/fia-verify` -> `/fia-ship`.
+- **Small** (fits in one sentence, 1-3 files, no saved-data or Remote changes): skip the spec, skip review. Implement -> `/fia-verify` -> `/fia-ship`.
 - **Large** (new system, 4+ files, touches saved data, RemoteEvents/Functions, or the menu/grid engine): run every phase below.
 - If `$ARGUMENTS` already contains a spec (e.g. pasted from `/fia-ideate`), skip phase 1 and start at phase 2.
 
@@ -24,7 +24,7 @@ Run the phases in order. Keep each phase's output short.
   append to the feature note; do not create new vault files unless the user asks.
 
 ## 2. Branch
-`git checkout -b feature/<kebab-name>` from the current branch (never commit to `main`).
+None. Work and commit directly on `main` (no feature branches, no PRs). Make sure you are on `main` first.
 
 ## 3. Implement
 - Follow the repo's conventions (see CLAUDE.md): tabs, config-driven data, server-authoritative, GUI by name.

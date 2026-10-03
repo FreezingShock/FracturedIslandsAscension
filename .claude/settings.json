@@ -14,7 +14,7 @@
       "Bash(git mv *)",
       "Bash(git push)",
       "Bash(git push -u origin *)",
-      "Bash(git push origin feature/*)",
+      "Bash(git push origin main)",
       "Bash(git fetch *)",
       "Bash(git pull --ff-only*)",
       "Bash(python tools/*)",
@@ -47,13 +47,12 @@
       "mcp__plugin_obsidian-second-brain_vault__obsidian_validate_note",
       "mcp__plugin_obsidian-second-brain_vault__obsidian_vault_health",
       "mcp__plugin_obsidian-second-brain_vault__obsidian_list_skills",
-      "mcp__plugin_obsidian-second-brain_vault__obsidian_get_skill"
+      "mcp__plugin_obsidian-second-brain_vault__obsidian_get_skill",
+      "Bash(git checkout main)"
     ],
     "deny": [
       "Bash(git push --force*)",
       "Bash(git push -f *)",
-      "Bash(git push origin main*)",
-      "Bash(git push origin HEAD:main*)",
       "Bash(git reset --hard*)",
       "Bash(git clean *)",
       "Bash(rm -rf *)"

@@ -1,6 +1,6 @@
 ---
 name: fia-ship
-description: Wrap up a work session - commit with the repo's version-title convention, update the vault registry and session log, and push the feature branch. Manual only. Use at the end of a feature or session.
+description: Wrap up a work session - commit with the repo's version-title convention, update the vault registry and session log, and push to `main`. Manual only. Use at the end of a feature or session.
 disable-model-invocation: true
 ---
 
@@ -18,7 +18,7 @@ disable-model-invocation: true
      `8 - Claude/agents/game-dev.md` using its template (Topic, Work Completed, Blockers, Decisions, Next Steps).
    - Durable lessons only -> `8 - Claude/memory/projects/fractured-islands.md` (append).
    - A correction or preference the user stated -> also save it to memory (capture every correction).
-4. **Push** the feature branch: `git push -u origin <branch>`. Never push to `main`. If `gh` exists open a PR,
-   otherwise print the compare URL `https://github.com/FreezingShock/FracturedIslandsAscension/compare/<branch>`.
+4. **Push** straight to `main`: `git push origin main`. No feature branches and no PRs (the user's call, 2026-10-03).
+   Never force-push.
 5. **Report in <=8 lines:** commits (hashes+titles), pushed yes/no, vault updated yes/no, user to-dos
    (save the place with Ctrl+S, restart Rojo, etc.).

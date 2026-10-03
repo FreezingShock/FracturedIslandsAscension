@@ -37,7 +37,7 @@ what it must never do. If it is a restriction, ask the exception cases.
 ## 4. Validate and ship
 1. `python tools/check_skills.py` must pass (frontmatter, name matches folder, description length).
 2. Dry-run the new thing once (pipe sample hook input / run the skill on a tiny case).
-3. Commit as `3.xx.x - skill: <name>` on a feature branch; mention how to invoke it.
+3. Commit as `3.xx.x - skill: <name>` on `main`; mention how to invoke it.
 4. If it is useful outside this repo: `python tools/install_skills.py` copies skills to `~/.claude/skills`
    (all projects); `python tools/package_skills.py` makes zips for claude.ai upload.
 5. Record durable rules in the vault memory (capture every correction) if the user stated a preference.

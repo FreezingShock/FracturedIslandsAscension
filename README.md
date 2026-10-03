@@ -100,7 +100,7 @@ Each coin tier is bought with the one below it, and owning higher tiers multipli
 ## 🧭 Tooling and workflow
 
 1. **Spec** the feature (design notes live in the vault).
-2. **Branch** — `feature/<name>`, commits titled `3.xx.x - description`.
+2. **Commit to `main`** — no feature branches or PRs; commits titled `3.xx.x - description`.
 3. **Implement** in `src/`; Rojo syncs to Studio.
 4. **Verify** in Studio: wait for sync → play → check console → drive the UI → screenshot.
 5. **Commit and log** — update the systems registry and session log.
