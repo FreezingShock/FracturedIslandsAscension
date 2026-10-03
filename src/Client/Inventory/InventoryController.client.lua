@@ -31,6 +31,8 @@ local playerGui = player:WaitForChild("PlayerGui")
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local TooltipModule = require(Modules:WaitForChild("TooltipModule")) :: any
 local ItemRegistry = require(Modules:WaitForChild("ItemRegistry")) :: any
+local ItemIcons = require(Modules:WaitForChild("ItemIcons")) :: any
+ItemIcons.preload()
 local MenuBridge = require(Modules:WaitForChild("MenuBridge")) :: any
 local LiquidGlassHandler = require(Modules:WaitForChild("LiquidGlassHandler")) :: any
 
@@ -298,8 +300,21 @@ local function hideItemTooltip()
 end
 
 -- ===================== SLOT VISUAL HELPERS =====================
+--- Show the item's icon in a slot (hides the name text when a real icon is drawn; tooltip carries the name).
+local function setSlotIcon(slotFrame, toolInfo)
+	local img = ItemIcons.ensureImage(slotFrame)
+	local hasIcon = false
+	if toolInfo then
+		local id = toolInfo.itemId or toolInfo.name
+		hasIcon = ItemIcons.apply(img, ItemRegistry.exists(id) and ItemRegistry.get(id) or { id = id })
+	end
+	img.Visible = hasIcon
+	slotFrame.ToolName.Visible = not hasIcon
+end
+
 local function updateSlotVisual(slotFrame, toolInfo, isEquipped, isHovered)
 	slotFrame.BackgroundTransparency = 0.3
+	setSlotIcon(slotFrame, toolInfo)
 	if not toolInfo then
 		slotFrame.ToolName.Text = ""
 		slotFrame.StackNum.Text = ""
@@ -328,6 +343,7 @@ end
 
 --- Render a grid slot as blank (empty placeholder).
 local function renderSlotBlank(slotFrame)
+	setSlotIcon(slotFrame, nil)
 	slotFrame.ToolName.Text = ""
 	slotFrame.StackNum.Text = ""
 	slotFrame.RarityLabel.Text = ""
@@ -340,6 +356,7 @@ end
 
 --- Render a grid/overflow slot as filled with an item.
 local function renderSlotFilled(slotFrame, toolInfo, isHovered)
+	setSlotIcon(slotFrame, toolInfo)
 	local rarityConf = ItemRegistry.getRarity(toolInfo.rarity or 0)
 	slotFrame.ToolName.Text = toolInfo.displayName or toolInfo.name
 	slotFrame.StackNum.Text = tostring(toolInfo.count) .. "x"

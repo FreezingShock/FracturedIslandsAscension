@@ -105,6 +105,12 @@
         "GridMenuModule": {
           "$path": "src/Shared/Modules/Menu/GridMenuModule.lua"
         },
+        "ItemIconData": {
+          "$path": "src/Shared/Modules/Inventory/ItemIconData.lua"
+        },
+        "ItemIcons": {
+          "$path": "src/Shared/Modules/Inventory/ItemIcons.lua"
+        },
         "ItemRegistry": {
           "$path": "src/Shared/Modules/Inventory/ItemRegistry.lua"
         },

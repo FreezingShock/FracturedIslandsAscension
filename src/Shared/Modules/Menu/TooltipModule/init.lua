@@ -384,7 +384,9 @@ local function applyIcon(img: ImageLabel?, icon: any, tint: any): boolean
 		else
 			return false
 		end
-		tint = icon.color or tint
+		-- `imageColor` tints only the picture; `color` is the legacy shared tint (also used for strokes)
+		tint = icon.imageColor or icon.color or tint
+		img.ResampleMode = icon.imageColor and Enum.ResamplerMode.Pixelated or Enum.ResamplerMode.Default
 	else
 		return false
 	end

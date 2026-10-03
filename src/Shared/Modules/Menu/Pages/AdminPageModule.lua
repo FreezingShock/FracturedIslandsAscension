@@ -30,6 +30,7 @@ local UserInputService = game:GetService("UserInputService")
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local AdminConfig = require(Modules:WaitForChild("AdminConfig")) :: any
 local Items = require(Modules:WaitForChild("Items")) :: any
+local ItemIcons = require(Modules:WaitForChild("ItemIcons")) :: any
 local Attributes = require(Modules:WaitForChild("Attributes")) :: any
 local StatisticsConfig = require(Modules:WaitForChild("StatisticsConfig")) :: any
 local StatisticsPageModule = require(Modules:WaitForChild("StatisticsPageModule")) :: any
@@ -197,7 +198,11 @@ local function newSlot(lo, o)
 	end
 	local icon = slot:FindFirstChild("Icon")
 	if icon then
-		icon.Image = o.icon or ""
+		if o.item then
+			ItemIcons.apply(icon, o.item)
+		else
+			icon.Image = o.icon or ""
+		end
 	end
 	local countLabel = slot:FindFirstChild("ItemCount")
 	if not countLabel and o.count then
@@ -333,11 +338,11 @@ local function buildItems()
 		local rarity = Items.getRarity(def.rarity)
 		local rarityHex = rarity and rarity.hexColor or "#AAAAAA"
 		local stack = (def.maxStack or 1) > 1 and math.min(def.maxStack, STACK_CAP) or 5
-		local hasIcon = type(def.icon) == "string" and def.icon ~= ""
+		local hasIcon = not ItemIcons.resolve(def).placeholder
 		newSlot(9 * row + col, {
 			name = "Item_" .. def.id,
 			color = rarityHex,
-			icon = hasIcon and def.icon or nil,
+			item = def,
 			label = not hasIcon and def.displayName:sub(1, 3):upper() or nil,
 			tip = {
 				title = rich(rarityHex, "<b>" .. (def.displayName or def.id) .. "</b>"),

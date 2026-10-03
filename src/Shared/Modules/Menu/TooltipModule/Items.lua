@@ -41,6 +41,26 @@ local function registry()
 	return ok and result or nil
 end
 
+--- Icon box config: `color` tints the box strokes (rarity), `imageColor` tints the picture itself.
+local function tooltipIcon(def: any, mainColor: string)
+	local modules = script.Parent.Parent
+	local iconsModule = modules and modules:FindFirstChild("ItemIcons")
+	local ok, ItemIcons = pcall(function()
+		return iconsModule and require(iconsModule)
+	end)
+	if not (ok and ItemIcons and def) then
+		return { color = mainColor }
+	end
+	local spec = ItemIcons.resolve(def)
+	return {
+		image = spec.image,
+		rectOffset = spec.rectOffset,
+		rectSize = spec.rectSize,
+		imageColor = spec.tint or Color3.new(1, 1, 1),
+		color = mainColor,
+	}
+end
+
 local function tagFrom(spec)
 	return {
 		text = spec.text or spec.value or spec.label or "?",
@@ -61,7 +81,7 @@ function Items.fromTool(toolInfo: any)
 		title = toolInfo.displayName or toolInfo.name,
 		titleColor = mainColor,
 		stack = (toolInfo.count and toolInfo.count > 1) and toolInfo.count or nil,
-		icon = { image = def and def.icon ~= "" and def.icon or nil, color = mainColor },
+		icon = tooltipIcon(def, mainColor),
 		tags = {},
 	}
 

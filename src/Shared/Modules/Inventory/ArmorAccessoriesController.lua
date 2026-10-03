@@ -28,6 +28,7 @@ local playerGui = player:WaitForChild("PlayerGui")
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 
 local Items = require(Modules:WaitForChild("Items")) :: any
+local ItemIcons = require(Modules:WaitForChild("ItemIcons")) :: any
 local MenuBridge = require(Modules:WaitForChild("MenuBridge")) :: any
 local SlotFx = require(Modules:WaitForChild("SlotFx")) :: any
 local TooltipModule = require(Modules:WaitForChild("TooltipModule")) :: any
@@ -139,6 +140,15 @@ local function renderView(slotId: string, view: View)
 	if def then
 		view.letters.TextTransparency = 0
 	end
+
+	-- Equipped item art replaces the letters; the slot's own placeholder art stays for empty slots.
+	local itemImage = ItemIcons.ensureImage(view.button, { size = UDim2.fromScale(0.7, 0.7), position = UDim2.fromScale(0.5, 0.5), zIndex = (icon and icon.ZIndex or 1) + 1 })
+	local hasItemIcon = def ~= nil and ItemIcons.apply(itemImage, def)
+	itemImage.Visible = hasItemIcon
+	if hasItemIcon then
+		view.letters.Visible = false
+	end
+
 	if icon and icon:IsA("ImageLabel") then
 		-- the slot's own placeholder art shows only when empty and no short label replaces it
 		icon.Visible = def == nil and Items.Slots.get(slotId).short == nil

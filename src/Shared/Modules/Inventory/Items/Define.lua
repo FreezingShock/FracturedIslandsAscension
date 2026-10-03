@@ -25,7 +25,9 @@
 	  footer       small note under the abilities
 	  clickHint    string | { text, color, icon }
 
-	  icon, maxStack, toolName
+	  icon         optional: icon key | "rbxassetid://" | { image, rectOffset, rectSize }; omit to use
+	               ItemIcons (ALIASES[id] or the key equal to the id), see ItemIcons.lua
+	  maxStack, toolName
 --]]
 
 local Slots = require(script.Parent:WaitForChild("Slots"))
