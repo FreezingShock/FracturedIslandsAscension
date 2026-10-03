@@ -64,16 +64,6 @@ local glassHandle = LiquidGlassHandler.apply(TooltipFrame, {
 if glassHandle then
 	glassHandle.setEnabled(false) -- tooltip starts hidden
 end
--- Static separated outline — always visible when tooltip is shown
-local staticOutline = Instance.new("UIStroke")
-staticOutline.Name = "TooltipOutline"
-staticOutline.ApplyStrokeMode = Enum.ApplyStrokeMode.Contextual
-staticOutline.LineJoinMode = Enum.LineJoinMode.Round
-staticOutline.Thickness = 3
-staticOutline.Color = Color3.fromRGB(213, 229, 255)
-staticOutline.Transparency = 1 -- starts hidden
-staticOutline.BorderOffset = UDim.new(0, 7)
-staticOutline.Parent = TooltipFrame
 
 -- ===================== CONFIG =====================
 local TT_OFFSET_X = 18
@@ -336,6 +326,108 @@ function API.resetTailOrders()
 	resetTailOrders()
 end
 
+-- ===================== TAG BADGE API (NEW) =====================
+-- Support for ItemTags frame with badge rendering
+
+local ItemTagsFrame = TooltipFrame:FindFirstChild("ItemTags")
+local TitleFrame = TooltipFrame:FindFirstChild("TitleFrame")
+
+--- Render tag badges to ItemTags frame
+--- tags = { {label, value, color, strokeColor}, ... }
+function API.renderTags(tags)
+	if not ItemTagsFrame then return end
+
+	-- Clear old badges
+	for _, child in ipairs(ItemTagsFrame:GetChildren()) do
+		if child.Name:match("TagBadge") then
+			child:Destroy()
+		end
+	end
+
+	if not tags or #tags == 0 then return end
+
+	-- Create badge for each tag
+	for _, tag in ipairs(tags) do
+		local badgeFrame = Instance.new("Frame")
+		badgeFrame.Name = "TagBadge_" .. (tag.label or "Tag")
+		badgeFrame.Size = UDim2.new(0, 70, 0, 20)
+		badgeFrame.BackgroundColor3 = Color3.fromHex(tag.color or "#AAAAAA")
+		badgeFrame.BackgroundTransparency = 0.2
+		badgeFrame.BorderSizePixel = 0
+		badgeFrame.Parent = ItemTagsFrame
+
+		-- UIStroke for outline
+		local stroke = Instance.new("UIStroke")
+		stroke.Color = Color3.fromHex(tag.strokeColor or "#555555")
+		stroke.Thickness = 1.5
+		stroke.Parent = badgeFrame
+
+		-- UICorner for rounded corners
+		local corner = Instance.new("UICorner")
+		corner.CornerRadius = UDim.new(0, 3)
+		corner.Parent = badgeFrame
+
+		-- Text label inside badge
+		local textLabel = Instance.new("TextLabel")
+		textLabel.Name = "BadgeText"
+		textLabel.Size = UDim2.fromScale(1, 1)
+		textLabel.BackgroundTransparency = 1
+		textLabel.BorderSizePixel = 0
+		textLabel.TextColor3 = Color3.fromHex(tag.color or "#FFFFFF")
+		textLabel.TextSize = 11
+		textLabel.Font = Enum.Font.GothamBold
+		textLabel.Text = tag.value or "Unknown"
+		textLabel.Parent = badgeFrame
+
+		-- UIPadding
+		local padding = Instance.new("UIPadding")
+		padding.PaddingLeft = UDim.new(0, 4)
+		padding.PaddingRight = UDim.new(0, 4)
+		padding.Parent = badgeFrame
+	end
+end
+
+--- Render title to TitleFrame
+function API.renderTitle(titleText, titleColor, titleIcon)
+	if not TitleFrame then return end
+
+	local titleLabel = TitleFrame:FindFirstChild("TitleLabel")
+	if titleLabel and titleLabel:IsA("TextLabel") then
+		titleLabel.Text = titleText or ""
+		if titleColor then
+			titleLabel.TextColor3 = Color3.fromHex(titleColor)
+		end
+	end
+
+	if titleIcon then
+		local iconLabel = TitleFrame:FindFirstChild("TitleIcon")
+		if iconLabel and iconLabel:IsA("ImageLabel") then
+			if type(titleIcon) == "table" then
+				local col = titleIcon[1] or 0
+				local row = titleIcon[2] or 0
+				local cs = STAT_SPRITESHEET.cellSize
+				iconLabel.Image = STAT_SPRITESHEET.assetId
+				iconLabel.ImageRectSize = Vector2.new(cs, cs)
+				iconLabel.ImageRectOffset = Vector2.new(col * cs, row * cs)
+				iconLabel.ImageTransparency = 0
+			elseif type(titleIcon) == "string" and titleIcon ~= "" then
+				iconLabel.Image = titleIcon
+				iconLabel.ImageTransparency = 0
+			end
+		end
+	end
+end
+
+--- Clean tag badges
+function API.clearTags()
+	if not ItemTagsFrame then return end
+	for _, child in ipairs(ItemTagsFrame:GetChildren()) do
+		if child.Name:match("TagBadge") then
+			child:Destroy()
+		end
+	end
+end
+
 -- ===================== SHOW / HIDE API =====================
 
 --- Show a simple tooltip (grid icons, sidebar, etc.)
@@ -373,7 +465,6 @@ function API.show(data, source)
 	TT_Rewards.Visible = false
 
 	TooltipFrame.Visible = true
-	staticOutline.Transparency = 0.15
 end
 
 --- Hide tooltip, but only if the caller is the current owner.
@@ -402,8 +493,6 @@ function API.forceHide()
 	following = false
 	activeSource = nil
 
-	staticOutline.Transparency = 1
-
 	-- Clean up icon clones and reset layout
 	cleanupIcons()
 
@@ -420,7 +509,6 @@ function API.showRaw(source)
 	activeSource = source
 	following = true
 	TooltipFrame.Visible = true
-	staticOutline.Transparency = 0.15
 end
 
 --- Check if a given source currently owns the tooltip.
