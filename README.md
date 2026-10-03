@@ -139,13 +139,13 @@ The GUI (ScreenGuis, templates) is **not** in Rojo — it lives in the place fil
 │   │   ├── Buttons/       # world-button purchase loop
 │   │   ├── Combat/ World/ Chat/ Admin/
 │   │   └── Main.server.lua
-│   ├── Shared/        # → ReplicatedStorage.Modules
+│   ├── Shared/Modules/    # → ReplicatedStorage.Modules
 │   │   ├── Menu/          # grid engine, bridge, TooltipModule/, LiquidGlassHandler/, Pages/
 │   │   ├── Inventory/     # Items/ definitions, registries, equipment controller, slot FX
 │   │   ├── Stats/         # Attributes, Sources, Profile/Statistics/Collections configs, stat log
 │   │   ├── Buttons/       # ButtonConfig, ButtonFX, ButtonRegistry
 │   │   ├── Config/        # chat, cloud and zone configs
-│   │   ├── Combat/ World/ Chat/ Admin/ Util/
+│   │   └── Combat/ World/ Chat/ Admin/ Util/
 │   └── Client/        # → StarterPlayerScripts
 │       ├── Menu/ Inventory/ Buttons/ HUD/ Combat/ World/ Chat/ Admin/
 ├── tools/             # gen_project.py — regenerates default.project.json

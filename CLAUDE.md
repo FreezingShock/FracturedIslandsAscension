@@ -11,10 +11,10 @@ Roblox incremental/progression game (Hypixel SkyBlock-style skills + stats). Sol
 | Disk | Studio |
 |---|---|
 | `src/Server/**` | `ServerScriptService` (flat) |
-| `src/Shared/**` | `ReplicatedStorage.Modules` (flat) |
+| `src/Shared/Modules/**` | `ReplicatedStorage.Modules` (flat) |
 | `src/Client/**` | `StarterPlayer.StarterPlayerScripts` (flat) |
 
-**Layout:** each realm is organised into **system folders** (`Data`, `Inventory`, `Buttons`, `Combat`, `World`, `Chat`, `Admin`; Shared also has `Menu`, `Stats`, `Config`, `Util`; Client also has `Menu`, `HUD`). The folders exist only on disk: in Studio every script is still flat (`ReplicatedStorage.Modules.StatisticsConfig`, `ServerScriptService.SkillsDataManager`), so `WaitForChild("Name")` lookups never change.
+**Layout:** each realm (`src/Server`, `src/Shared/Modules`, `src/Client`) is organised into **system folders** (`Data`, `Inventory`, `Buttons`, `Combat`, `World`, `Chat`, `Admin`; Shared also has `Menu`, `Stats`, `Config`, `Util`; Client also has `Menu`, `HUD`). The folders exist only on disk: in Studio every script is still flat (`ReplicatedStorage.Modules.StatisticsConfig`, `ServerScriptService.SkillsDataManager`), so `WaitForChild("Name")` lookups never change.
 - `default.project.json` is **generated**. After adding, moving, renaming or deleting a script run `python tools/gen_project.py` (or `--check`), then restart `rojo serve` and reconnect the Studio plugin. Never hand-edit the project file.
 - A folder containing `init.lua` / `init.meta.json` is ONE Studio instance (module with children, or a Folder). Plain folders are organisation only. Script instance names must be unique within a realm (the generator errors on duplicates).
 - Folder instances that exist in Studio (`Modules.Config`, `Modules.Button`, client `Button`) are kept by an `init.meta.json` (`{"className":"Folder"}`).

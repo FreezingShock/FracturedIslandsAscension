@@ -2,12 +2,12 @@
 """
 Regenerates default.project.json from the folder layout under src/.
 
-Why: scripts organised into system folders on disk (src/Server/Data/, src/Shared/Stats/ ...)
+Why: scripts organised into system folders on disk (src/Server/Data/, src/Shared/Modules/Stats/ ...)
 must still appear FLAT in Studio (ServerScriptService.X, ReplicatedStorage.Modules.X,
 StarterPlayerScripts.X) because the game finds modules by name with WaitForChild.
 Rojo cannot flatten folders itself, so every script is mapped individually.
 
-Rules (per realm: src/Server, src/Shared, src/Client):
+Rules (per realm: src/Server, src/Shared/Modules, src/Client):
   * a .lua/.luau file                      -> one instance, named after the file
                                               (.client.lua = LocalScript, .server.lua = Script)
   * a folder with init.lua / init.luau /
@@ -79,7 +79,7 @@ def build():
             "ServerScriptService": {"$className": "ServerScriptService", **children("Server")},
             "ReplicatedStorage": {
                 "$className": "ReplicatedStorage",
-                "Modules": {"$className": "Folder", **children("Shared")},
+                "Modules": {"$className": "Folder", **children("Shared/Modules")},
             },
             "StarterPlayer": {
                 "$className": "StarterPlayer",

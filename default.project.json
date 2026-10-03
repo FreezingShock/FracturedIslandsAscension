@@ -61,97 +61,97 @@
       "Modules": {
         "$className": "Folder",
         "AdminPanelModule": {
-          "$path": "src/Shared/Admin/AdminPanelModule.lua"
+          "$path": "src/Shared/Modules/Admin/AdminPanelModule.lua"
         },
         "ArmorAccessoriesController": {
-          "$path": "src/Shared/Inventory/ArmorAccessoriesController.lua"
+          "$path": "src/Shared/Modules/Inventory/ArmorAccessoriesController.lua"
         },
         "Attributes": {
-          "$path": "src/Shared/Stats/Attributes.lua"
+          "$path": "src/Shared/Modules/Stats/Attributes.lua"
         },
         "Button": {
-          "$path": "src/Shared/Buttons/Button"
+          "$path": "src/Shared/Modules/Buttons/Button"
         },
         "ButtonConfig": {
-          "$path": "src/Shared/Buttons/ButtonConfig.lua"
+          "$path": "src/Shared/Modules/Buttons/ButtonConfig.lua"
         },
         "ButtonFX": {
-          "$path": "src/Shared/Buttons/ButtonFX.lua"
+          "$path": "src/Shared/Modules/Buttons/ButtonFX.lua"
         },
         "ChatBridge": {
-          "$path": "src/Shared/Chat/ChatBridge.lua"
+          "$path": "src/Shared/Modules/Chat/ChatBridge.lua"
         },
         "CloudSystem": {
-          "$path": "src/Shared/World/CloudSystem.lua"
+          "$path": "src/Shared/Modules/World/CloudSystem.lua"
         },
         "CollectionsConfig": {
-          "$path": "src/Shared/Stats/CollectionsConfig.lua"
+          "$path": "src/Shared/Modules/Stats/CollectionsConfig.lua"
         },
         "CollectionsPageModule": {
-          "$path": "src/Shared/Menu/Pages/CollectionsPageModule.lua"
+          "$path": "src/Shared/Modules/Menu/Pages/CollectionsPageModule.lua"
         },
         "Config": {
-          "$path": "src/Shared/Config"
+          "$path": "src/Shared/Modules/Config"
         },
         "EquipmentConfig": {
-          "$path": "src/Shared/Inventory/EquipmentConfig.lua"
+          "$path": "src/Shared/Modules/Inventory/EquipmentConfig.lua"
         },
         "GridMenuModule": {
-          "$path": "src/Shared/Menu/GridMenuModule.lua"
+          "$path": "src/Shared/Modules/Menu/GridMenuModule.lua"
         },
         "ItemRegistry": {
-          "$path": "src/Shared/Inventory/ItemRegistry.lua"
+          "$path": "src/Shared/Modules/Inventory/ItemRegistry.lua"
         },
         "Items": {
-          "$path": "src/Shared/Inventory/Items"
+          "$path": "src/Shared/Modules/Inventory/Items"
         },
         "LiquidGlassHandler": {
-          "$path": "src/Shared/Menu/LiquidGlassHandler"
+          "$path": "src/Shared/Modules/Menu/LiquidGlassHandler"
         },
         "MenuBridge": {
-          "$path": "src/Shared/Menu/MenuBridge.lua"
+          "$path": "src/Shared/Modules/Menu/MenuBridge.lua"
         },
         "MoneyLib": {
-          "$path": "src/Shared/Util/MoneyLib.lua"
+          "$path": "src/Shared/Modules/Util/MoneyLib.lua"
         },
         "ProfileConfig": {
-          "$path": "src/Shared/Stats/ProfileConfig.lua"
+          "$path": "src/Shared/Modules/Stats/ProfileConfig.lua"
         },
         "ProfilePageModule": {
-          "$path": "src/Shared/Menu/Pages/ProfilePageModule.lua"
+          "$path": "src/Shared/Modules/Menu/Pages/ProfilePageModule.lua"
         },
         "SettingsPageModule": {
-          "$path": "src/Shared/Menu/Pages/SettingsPageModule.lua"
+          "$path": "src/Shared/Modules/Menu/Pages/SettingsPageModule.lua"
         },
         "SkillsPageModule": {
-          "$path": "src/Shared/Menu/Pages/SkillsPageModule.lua"
+          "$path": "src/Shared/Modules/Menu/Pages/SkillsPageModule.lua"
         },
         "SlotFx": {
-          "$path": "src/Shared/Inventory/SlotFx.lua"
+          "$path": "src/Shared/Modules/Inventory/SlotFx.lua"
         },
         "Sources": {
-          "$path": "src/Shared/Stats/Sources.lua"
+          "$path": "src/Shared/Modules/Stats/Sources.lua"
         },
         "StatisticLogModule": {
-          "$path": "src/Shared/Stats/StatisticLogModule.lua"
+          "$path": "src/Shared/Modules/Stats/StatisticLogModule.lua"
         },
         "StatisticsConfig": {
-          "$path": "src/Shared/Stats/StatisticsConfig.lua"
+          "$path": "src/Shared/Modules/Stats/StatisticsConfig.lua"
         },
         "StatisticsPageModule": {
-          "$path": "src/Shared/Menu/Pages/StatisticsPageModule.lua"
+          "$path": "src/Shared/Modules/Menu/Pages/StatisticsPageModule.lua"
         },
         "TooltipModule": {
-          "$path": "src/Shared/Menu/TooltipModule"
+          "$path": "src/Shared/Modules/Menu/TooltipModule"
         },
         "WeaponFX": {
-          "$path": "src/Shared/Combat/WeaponFX.lua"
+          "$path": "src/Shared/Modules/Combat/WeaponFX.lua"
         },
         "WeaponRegistry": {
-          "$path": "src/Shared/Inventory/WeaponRegistry.lua"
+          "$path": "src/Shared/Modules/Inventory/WeaponRegistry.lua"
         },
         "ZoneManager": {
-          "$path": "src/Shared/World/ZoneManager.lua"
+          "$path": "src/Shared/Modules/World/ZoneManager.lua"
         }
       }
     },
