@@ -180,6 +180,23 @@ local function applyMultiplierBoosts(data, player)
 	-- data["CritChance"].multipliers = { { label = "Ring of Accuracy", value = 1.10 } }
 end
 
+local tempBonuses = {} -- [userId] = { [bonusId] = { id, attr, mode, amount, expiresAt } } (admin panel)
+
+-- Debug boosts ("admin" from /set, "admin:<n>" from the admin panel) never persist.
+local function isAdminBoost(boost)
+	return boost.id == "admin" or (type(boost.id) == "string" and boost.id:sub(1, 6) == "admin:")
+end
+
+local function stripAdminFrom(list)
+	local kept = {}
+	for _, boost in ipairs(list or {}) do
+		if not isAdminBoost(boost) then
+			table.insert(kept, boost)
+		end
+	end
+	return kept
+end
+
 -- ===================== LOAD / RELEASE =====================
 function AttributeStatManager.LoadData(player)
 	local profile = AttributeProfileStore:LoadProfileAsync("Attributes_" .. player.UserId, "ForceLoad")
@@ -202,14 +219,9 @@ function AttributeStatManager.LoadData(player)
 	profile:Reconcile()
 	sanitizeAttributeData(profile.Data)
 	for _, entry in pairs(profile.Data) do
-		if type(entry) == "table" and entry.flatBoosts then
-			local kept = {}
-			for _, boost in ipairs(entry.flatBoosts) do
-				if boost.id ~= "admin" then
-					table.insert(kept, boost)
-				end
-			end
-			entry.flatBoosts = kept
+		if type(entry) == "table" then
+			entry.flatBoosts = stripAdminFrom(entry.flatBoosts)
+			entry.multipliers = stripAdminFrom(entry.multipliers)
 		end
 	end
 	attributeProfiles[player.UserId] = profile
@@ -226,6 +238,7 @@ function AttributeStatManager.ReleaseData(player)
 		profile:Release()
 	end
 	attributeProfiles[player.UserId] = nil
+	tempBonuses[player.UserId] = nil
 end
 
 -- ===================== SANITIZE =====================
@@ -456,6 +469,8 @@ end
 -- removed when the profile loads, so debug values never persist.
 local ADMIN_ID = "admin"
 
+-- The /set boost is the single flat boost with id "admin"; panel bonuses
+-- ("admin:<n>", see below) are left alone.
 local function stripAdmin(entry)
 	local kept = {}
 	for _, boost in ipairs(entry.flatBoosts or {}) do
@@ -510,6 +525,116 @@ function AttributeStatManager.ClearAdminBoosts(player)
 	end
 	fireStatUpdate(player)
 	return true
+end
+
+-- ===================== TEMP BONUSES (admin panel) =====================
+-- Timed or until-cleared bonuses, flat ("flat") or percent ("pct" -> multiplier).
+-- Held in memory and tagged "admin:<n>"; stripped from the profile on load, so they
+-- never persist even if the server crashes mid-bonus.
+local tempBonusCounter = 0
+
+local function removeBoostById(list, id)
+	local kept = {}
+	for _, boost in ipairs(list or {}) do
+		if boost.id ~= id then
+			table.insert(kept, boost)
+		end
+	end
+	return kept
+end
+
+--- Remove one temp bonus. Returns true if it existed.
+function AttributeStatManager.RemoveTempBonus(player, bonusId)
+	local mine = tempBonuses[player.UserId]
+	local bonus = mine and mine[bonusId]
+	if not bonus then
+		return false
+	end
+	mine[bonusId] = nil
+	local data = getAttributeData(player)
+	local entry = data and data[bonus.attr]
+	if entry then
+		entry.flatBoosts = removeBoostById(entry.flatBoosts, bonusId)
+		entry.multipliers = removeBoostById(entry.multipliers, bonusId)
+		fireStatUpdate(player)
+	end
+	return true
+end
+
+--- Add a temp bonus. mode "flat" adds `amount`; "pct" adds amount% (x1 + amount/100).
+--- duration <= 0 means until removed. Returns the bonus id, or nil + reason.
+function AttributeStatManager.AddTempBonus(player, attrKey, mode, amount, duration)
+	local data = getAttributeData(player)
+	if not data or not data[attrKey] then
+		return nil, "Unknown attribute"
+	end
+	if mode ~= "flat" and mode ~= "pct" then
+		return nil, "Mode must be flat or pct"
+	end
+
+	tempBonusCounter += 1
+	local bonusId = "admin:" .. tempBonusCounter
+	local expiresAt = duration > 0 and (os.clock() + duration) or nil
+
+	local mine = tempBonuses[player.UserId]
+	if not mine then
+		mine = {}
+		tempBonuses[player.UserId] = mine
+	end
+	mine[bonusId] = { id = bonusId, attr = attrKey, mode = mode, amount = amount, expiresAt = expiresAt }
+
+	if mode == "flat" then
+		table.insert(data[attrKey].flatBoosts, {
+			id = bonusId,
+			label = "Admin",
+			value = amount,
+			color = "#FF55FF",
+			sourceType = "admin",
+		})
+	else
+		table.insert(data[attrKey].multipliers, {
+			id = bonusId,
+			label = "Admin",
+			value = 1 + amount / 100,
+			color = "#FF55FF",
+			sourceType = "admin",
+		})
+	end
+	fireStatUpdate(player)
+
+	if duration > 0 then
+		task.delay(duration, function()
+			if player.Parent then
+				AttributeStatManager.RemoveTempBonus(player, bonusId)
+			end
+		end)
+	end
+	return bonusId
+end
+
+--- Active temp bonuses: array of { id, attr, mode, amount, remaining (nil = until cleared) }.
+function AttributeStatManager.ListTempBonuses(player)
+	local out = {}
+	for _, bonus in pairs(tempBonuses[player.UserId] or {}) do
+		table.insert(out, {
+			id = bonus.id,
+			attr = bonus.attr,
+			mode = bonus.mode,
+			amount = bonus.amount,
+			remaining = bonus.expiresAt and math.max(0, math.ceil(bonus.expiresAt - os.clock())) or nil,
+		})
+	end
+	table.sort(out, function(a, b)
+		return tonumber(a.id:sub(7)) < tonumber(b.id:sub(7))
+	end)
+	return out
+end
+
+--- Remove every temp bonus (does not touch the /set boost).
+function AttributeStatManager.ClearTempBonuses(player)
+	for bonusId in pairs(tempBonuses[player.UserId] or {}) do
+		AttributeStatManager.RemoveTempBonus(player, bonusId)
+	end
 end
 
 -- ===================== REMOTE FUNCTION HANDLERS =====================

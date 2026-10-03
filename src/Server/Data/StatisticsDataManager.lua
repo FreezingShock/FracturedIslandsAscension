@@ -48,6 +48,7 @@ local StatProfileStore = ProfileService.GetProfileStore("PlayerStatistics_v1", T
 local profiles = {} -- [userId] = profile
 local sessionData = {} -- [userId] = { [skill] = { [key] = gained this session } }
 local dirty = {} -- [Player] = true when a snapshot is owed
+local adminSnapshot = {} -- [userId] = { [skill] = { [key] = { count, lifetime } } } (admin panel undo)
 
 -- ===================== REMOTE EVENTS =====================
 local function ensureRemote(name)
@@ -275,6 +276,7 @@ function StatisticsDataManager.ReleaseData(player)
 	profiles[player.UserId] = nil
 	sessionData[player.UserId] = nil
 	dirty[player] = nil
+	adminSnapshot[player.UserId] = nil
 end
 
 function StatisticsDataManager.Save(player)
@@ -286,6 +288,82 @@ end
 
 function StatisticsDataManager.GetData(player)
 	return getPlayerData(player)
+end
+
+-- ===================== ADMIN (admin panel) =====================
+-- Admin edits write to the real profile, so the first edit of a session snapshots
+-- every count/lifetime and AdminRestore puts them back. The caller (the admin
+-- remote) has already checked the player is an admin.
+local function snapshotOnce(player, data)
+	if adminSnapshot[player.UserId] then
+		return
+	end
+	local snap = {}
+	for _, skill in ipairs(SKILL_NAMES) do
+		snap[skill] = {}
+		for key, entry in pairs(data[skill] or {}) do
+			snap[skill][key] = { count = entry.count, lifetime = entry.lifetime }
+		end
+	end
+	adminSnapshot[player.UserId] = snap
+end
+
+--- Set one stat's owned count. Returns ok, reason.
+function StatisticsDataManager.AdminSetCount(player, skill, statKey, count)
+	local data = getPlayerData(player)
+	if not data then
+		return false, "No data"
+	end
+	if not (statConfigLookup[skill] and statConfigLookup[skill][statKey]) then
+		return false, "Unknown stat"
+	end
+	snapshotOnce(player, data)
+	local entry = ensureStatEntry(data, skill, statKey)
+	entry.count = count
+	entry.lifetime = math.max(entry.lifetime, count)
+	markDirty(player)
+	return true
+end
+
+--- Set every statistic to `count`.
+function StatisticsDataManager.AdminSetAll(player, count)
+	local data = getPlayerData(player)
+	if not data then
+		return false, "No data"
+	end
+	snapshotOnce(player, data)
+	for _, skill in ipairs(SKILL_NAMES) do
+		for _, item in ipairs(STAT_CHAINS[skill]) do
+			local entry = ensureStatEntry(data, skill, item.key)
+			entry.count = count
+			entry.lifetime = math.max(entry.lifetime, count)
+		end
+	end
+	markDirty(player)
+	return true
+end
+
+--- Undo every admin edit this session. Returns ok, reason.
+function StatisticsDataManager.AdminRestore(player)
+	local data = getPlayerData(player)
+	local snap = adminSnapshot[player.UserId]
+	if not data then
+		return false, "No data"
+	end
+	if not snap then
+		return false, "Nothing to restore"
+	end
+	for _, skill in ipairs(SKILL_NAMES) do
+		for _, item in ipairs(STAT_CHAINS[skill]) do
+			local entry = ensureStatEntry(data, skill, item.key)
+			local saved = snap[skill][item.key]
+			entry.count = saved and saved.count or 0
+			entry.lifetime = saved and saved.lifetime or 0
+		end
+	end
+	adminSnapshot[player.UserId] = nil
+	markDirty(player)
+	return true
 end
 
 -- ===================== PASSIVE INCOME =====================

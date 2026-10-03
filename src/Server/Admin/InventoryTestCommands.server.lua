@@ -11,7 +11,6 @@
 -- ============================================================
 
 local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 
@@ -19,19 +18,15 @@ local InventoryDataManager = require(ServerScriptService:WaitForChild("Inventory
 local EquipmentService = require(ServerScriptService:WaitForChild("EquipmentService")) :: any
 local AttributeStatManager = require(ServerScriptService:WaitForChild("AttributeStatManager")) :: any
 local SkillsDataManager = require(ServerScriptService:WaitForChild("SkillsDataManager")) :: any
+local StatisticsDataManager = require(ServerScriptService:WaitForChild("StatisticsDataManager")) :: any
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local Items = require(Modules:WaitForChild("Items")) :: any
 local Attributes = require(Modules:WaitForChild("Attributes")) :: any
+local AdminConfig = require(Modules:WaitForChild("AdminConfig")) :: any
+local StatisticsConfig = require(Modules:WaitForChild("StatisticsConfig")) :: any
 
 -- ===================== CONFIG =====================
-local ADMIN_IDS = { 288851273 } -- your Roblox user ID
-
-local function isAdmin(player)
-	if RunService:IsStudio() then
-		return true -- testing in Studio
-	end
-	return table.find(ADMIN_IDS, player.UserId) ~= nil
-end
+local isAdmin = AdminConfig.isAdmin -- admin ids live in AdminConfig
 
 local CATEGORIES = { weapon = true, armor = true, accessory = true, material = true, consumable = true, misc = true }
 
@@ -45,6 +40,11 @@ local function findAttribute(player, name: string?)
 		say(player, "Unknown attribute '" .. tostring(name) .. "'. Try /stats for the list.")
 	end
 	return def
+end
+
+--- Give `count` of an item definition. Returns how many were added.
+local function giveItem(player, def, count: number): number
+	return InventoryDataManager.AddItem(player, def.toolName, count)
 end
 
 -- ===================== COMMANDS =====================
@@ -70,7 +70,7 @@ COMMANDS.give = {
 		if not def then
 			return say(player, "Unknown item '" .. target .. "'. Use /items to list ids.")
 		end
-		local added = InventoryDataManager.AddItem(player, def.toolName, count)
+		local added = giveItem(player, def, count)
 		say(player, string.format("Gave %dx %s (%s)", added, def.displayName, def.id))
 	end,
 }
@@ -318,4 +318,121 @@ task.spawn(function()
 	end)
 end)
 
-print("[InventoryTestCommands] Loaded ✓ (/help lists commands)")
+-- ===================== ADMIN PANEL REMOTE =====================
+-- One RemoteFunction for the Nexus admin panel. Every call re-checks the admin id
+-- and validates its inputs against config; the client is never trusted.
+local ACTIONS: { [string]: (any, any) -> (boolean, string, any?) } = {}
+
+local function wholeNumber(value: any, min: number, max: number): number?
+	if type(value) ~= "number" or value ~= value or math.abs(value) == math.huge then
+		return nil
+	end
+	return math.clamp(math.floor(value), min, max)
+end
+
+local function realNumber(value: any, limit: number): number?
+	if type(value) ~= "number" or value ~= value or math.abs(value) > limit then
+		return nil
+	end
+	return value
+end
+
+local VALID_SKILL = {}
+for _, skill in ipairs(StatisticsConfig.SKILL_NAMES) do
+	VALID_SKILL[skill] = true
+end
+
+ACTIONS.give = function(player, p)
+	local def = type(p.itemId) == "string" and Items.get(p.itemId)
+	local count = wholeNumber(p.count, 1, AdminConfig.MAX_GIVE)
+	if not def or not count then
+		return false, "Unknown item or bad count"
+	end
+	local added = giveItem(player, def, count)
+	return added > 0, string.format("Gave %dx %s", added, def.displayName)
+end
+
+ACTIONS.setStat = function(player, p)
+	local count = wholeNumber(p.count, 0, AdminConfig.MAX_STAT)
+	if type(p.skill) ~= "string" or not VALID_SKILL[p.skill] or type(p.key) ~= "string" or not count then
+		return false, "Bad stat or amount"
+	end
+	local ok, reason = StatisticsDataManager.AdminSetCount(player, p.skill, p.key, count)
+	return ok, ok and string.format("%s.%s = %d", p.skill, p.key, count) or tostring(reason)
+end
+
+ACTIONS.maxStats = function(player)
+	local ok, reason = StatisticsDataManager.AdminSetAll(player, AdminConfig.MAX_STAT)
+	return ok, ok and "All statistics maxed" or tostring(reason)
+end
+
+ACTIONS.restoreStats = function(player)
+	local ok, reason = StatisticsDataManager.AdminRestore(player)
+	return ok, ok and "Statistics restored" or tostring(reason)
+end
+
+ACTIONS.addBonus = function(player, p)
+	local def = type(p.attr) == "string" and Attributes.get(p.attr)
+	local amount = realNumber(p.amount, AdminConfig.MAX_BONUS_AMOUNT)
+	local duration = wholeNumber(p.duration, 0, AdminConfig.MAX_BONUS_DURATION)
+	if not def or not amount or not duration or amount == 0 then
+		return false, "Bad attribute, amount or duration"
+	end
+	local id, reason = AttributeStatManager.AddTempBonus(player, def.key, p.mode, amount, duration)
+	return id ~= nil, id and string.format("%s %s%s", def.name, p.mode == "pct" and "+" or "", amount) or tostring(reason)
+end
+
+ACTIONS.removeBonus = function(player, p)
+	local ok = type(p.id) == "string" and AttributeStatManager.RemoveTempBonus(player, p.id)
+	return ok, ok and "Bonus removed" or "No such bonus"
+end
+
+ACTIONS.listBonuses = function(player)
+	return true, "ok", AttributeStatManager.ListTempBonuses(player)
+end
+
+ACTIONS.clearBonuses = function(player)
+	AttributeStatManager.ClearTempBonuses(player)
+	AttributeStatManager.ClearAdminBoosts(player)
+	return true, "All bonuses cleared"
+end
+
+ACTIONS.clearItems = function(player)
+	COMMANDS.clear.run(player)
+	return true, "Inventory cleared"
+end
+
+ACTIONS.setCap = function(player, p)
+	local cap = wholeNumber(p.cap, 1, 1000000)
+	if not cap then
+		return false, "Bad capacity"
+	end
+	COMMANDS.cap.run(player, { tostring(cap) })
+	return true, "Max capacity = " .. cap
+end
+
+local AdminAction = ReplicatedStorage:FindFirstChild("AdminAction")
+if not AdminAction then
+	AdminAction = Instance.new("RemoteFunction")
+	AdminAction.Name = "AdminAction"
+	AdminAction.Parent = ReplicatedStorage
+end
+
+AdminAction.OnServerInvoke = function(player, action, payload)
+	if not isAdmin(player) then
+		warn(string.format("[AdminAction] %s (%d) is not an admin", player.Name, player.UserId))
+		return { ok = false, msg = "Not authorized" }
+	end
+	local handler = type(action) == "string" and ACTIONS[action]
+	if not handler or (payload ~= nil and type(payload) ~= "table") then
+		return { ok = false, msg = "Unknown action" }
+	end
+	local success, ok, msg, data = pcall(handler, player, payload or {})
+	if not success then
+		warn("[AdminAction] " .. action .. " failed: " .. tostring(ok))
+		return { ok = false, msg = "Server error" }
+	end
+	return { ok = ok, msg = msg, data = data }
+end
+
+print("[InventoryTestCommands] Loaded ✓ (/help lists commands; AdminAction remote ready)")
