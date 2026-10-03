@@ -26,6 +26,7 @@ local ButtonConfig = require(Modules:WaitForChild("ButtonConfig")) :: any
 local StatisticsConfig = require(Modules:WaitForChild("StatisticsConfig")) :: any
 local MoneyLib = require(Modules:WaitForChild("MoneyLib")) :: any
 local StatisticLogModule = require(Modules:WaitForChild("StatisticLogModule")) :: any
+local ButtonFX = require(Modules:WaitForChild("ButtonFX")) :: any
 
 -- ===================== REMOTE EVENT =====================
 local ButtonPurchaseResult = ReplicatedStorage:WaitForChild("ButtonPurchaseResult")
@@ -316,6 +317,12 @@ ButtonPurchaseResult.OnClientEvent:Connect(function(data)
 	-- data = { skill, statKey, gain, owned, costs }
 	-- costs = { { skill, id, amount, remaining }, ... }
 	UIClick:Play()
+
+	-- Sparkle burst + floating "+gain" off the pad the player is standing on
+	local fxOk, fxErr = pcall(ButtonFX.onPurchase, data)
+	if not fxOk then
+		warn("[ButtonClientManager] ButtonFX failed: " .. tostring(fxErr))
+	end
 
 	local statName, statColor = getStatDisplay(data.skill, data.statKey)
 

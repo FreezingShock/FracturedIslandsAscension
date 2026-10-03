@@ -158,7 +158,7 @@ local function buildStatText(statName, totalAmount, statColor, ownedAmount, stac
 	if stackCount > 1 then
 		base = base
 			.. string.format(
-				' <stroke color="#FFFFFF" thickness="1" joins="round"><font color="#555555">(×%d)</font></stroke>',
+				' <stroke color="#FFFFFF" thickness="1" joins="round"><font color="#AAAAAA">(×%d)</font></stroke>',
 				stackCount
 			)
 	end
@@ -181,7 +181,7 @@ local function buildStatTextNegative(statName, totalAmount, statColor, ownedAmou
 	if stackCount > 1 then
 		base = base
 			.. string.format(
-				' <stroke color="#FFFFFF" thickness="1" joins="round"><font color="#555555">(×%d)</font></stroke>',
+				' <stroke color="#FFFFFF" thickness="1" joins="round"><font color="#AAAAAA">(×%d)</font></stroke>',
 				stackCount
 			)
 	end

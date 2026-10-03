@@ -176,6 +176,58 @@ ButtonConfig.BUTTONS = {
 			},
 		},
 	},
+
+	-- ═══════════════════ FARMING (MVP chain) ═══════════════════
+	-- Costs mirror StatisticsConfig.STAT_CHAINS.Farming so the pads and the
+	-- Statistics menu agree. Each press buys baseGain of the stat; the
+	-- multiplier comes from the higher stats that boost it.
+	Seeds = {
+		skill = "Farming",
+		statKey = "Seeds",
+		tiers = {
+			[1] = {
+				baseGain = 1,
+				cost = { { skill = "General", id = "SilverCoins", amount = 10 } },
+				interval = 0.2,
+			},
+		},
+	},
+
+	Wheat = {
+		skill = "Farming",
+		statKey = "Wheat",
+		tiers = {
+			[1] = {
+				baseGain = 1,
+				cost = { { skill = "Farming", id = "Seeds", amount = 25 } },
+				interval = 0.2,
+			},
+		},
+	},
+
+	Carrots = {
+		skill = "Farming",
+		statKey = "Carrots",
+		tiers = {
+			[1] = {
+				baseGain = 1,
+				cost = { { skill = "Farming", id = "Wheat", amount = 10 } },
+				interval = 0.2,
+			},
+		},
+	},
+
+	Cactus = {
+		skill = "Farming",
+		statKey = "Cactus",
+		tiers = {
+			[1] = {
+				baseGain = 1,
+				cost = { { skill = "Farming", id = "Carrots", amount = 25 } },
+				interval = 0.2,
+			},
+		},
+	},
 	-- Add more as needed — same pattern.
 }
 

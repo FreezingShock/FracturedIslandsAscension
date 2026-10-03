@@ -93,9 +93,15 @@ local function fadeOutGrid(frame, instant)
 		frame.GroupTransparency = 0
 		return
 	end
+	-- A newer fade (in or out) on the same frame supersedes this one.
+	local token = (frame:GetAttribute("FadeToken") or 0) + 1
+	frame:SetAttribute("FadeToken", token)
 	local tw = TweenService:Create(frame, fadeTweenOut, { GroupTransparency = 1 })
 	tw:Play()
-	tw.Completed:Once(function()
+	tw.Completed:Once(function(state)
+		if state ~= Enum.PlaybackState.Completed or frame:GetAttribute("FadeToken") ~= token then
+			return
+		end
 		frame.Visible = false
 		frame.GroupTransparency = 0
 	end)
@@ -108,6 +114,7 @@ local function fadeInGrid(frame, instant)
 		frame.Visible = true
 		return
 	end
+	frame:SetAttribute("FadeToken", (frame:GetAttribute("FadeToken") or 0) + 1) -- cancels pending fade-outs
 	frame.GroupTransparency = 1
 	frame.Visible = true
 	TweenService:Create(frame, fadeTweenIn, { GroupTransparency = 0 }):Play()
@@ -182,6 +189,8 @@ local function depopulateBuffer(label)
 
 	local oldKey = bd.gridKey
 	bd.gridKey = nil
+	-- Anything still scheduled against this buffer's previous contents is stale.
+	bd.gen = (bd.gen or 0) + 1
 
 	print(
 		"[GridPool] Depopulated "
@@ -290,7 +299,7 @@ local function populateBuffer(label, gridKey)
 				bd.connections,
 				btn.MouseEnter:Connect(function()
 					UIClick3:Play()
-					TooltipModule.show(cfg.tooltipData)
+					TooltipModule.show(cfg.tooltipData, nil, btn)
 				end)
 			)
 			table.insert(
@@ -318,6 +327,7 @@ local function populateBuffer(label, gridKey)
 	end
 
 	bd.gridKey = gridKey
+	bd.gen = (bd.gen or 0) + 1
 
 	print("[GridPool] Populated " .. gridKey .. " → buffer " .. label .. ": " .. #bd.connections .. " connections")
 end
@@ -372,6 +382,7 @@ local function performTransition(sourceKey, targetKey, animated)
 
 		local oldFrame = bufferData[oldLabel].frame
 		local newFrame = bufferData[newLabel].frame
+		local oldGen = bufferData[oldLabel].gen
 
 		cancelBufferTween(oldLabel)
 		cancelBufferTween(newLabel)
@@ -383,10 +394,17 @@ local function performTransition(sourceKey, targetKey, animated)
 		local twOut = TweenService:Create(oldFrame, fadeTweenOut, { GroupTransparency = 1 })
 		bufferTweens[oldLabel] = twOut
 		twOut:Play()
-		twOut.Completed:Once(function()
+		twOut.Completed:Once(function(state)
+			-- A cancelled tween also fires Completed. If the buffer was reused by a
+			-- newer navigation (fast Back clicks), touching it would blank the new page.
+			if state ~= Enum.PlaybackState.Completed or bufferData[oldLabel].gen ~= oldGen then
+				return
+			end
 			oldFrame.Visible = false
 			oldFrame.GroupTransparency = 0
-			bufferTweens[oldLabel] = nil
+			if bufferTweens[oldLabel] == twOut then
+				bufferTweens[oldLabel] = nil
+			end
 			depopulateBuffer(oldLabel) -- safe: no-op if already depopulated
 		end)
 
@@ -394,7 +412,9 @@ local function performTransition(sourceKey, targetKey, animated)
 		bufferTweens[newLabel] = twIn
 		twIn:Play()
 		twIn.Completed:Once(function()
-			bufferTweens[newLabel] = nil
+			if bufferTweens[newLabel] == twIn then
+				bufferTweens[newLabel] = nil
+			end
 		end)
 
 		activeBuffer = newLabel
@@ -402,16 +422,22 @@ local function performTransition(sourceKey, targetKey, animated)
 		-- ▸ POOLED → LEGACY: fade out buffer, fade in legacy frame
 		local oldLabel = findBufferForGrid(sourceKey) or activeBuffer
 		local oldFrame = bufferData[oldLabel].frame
+		local oldGen = bufferData[oldLabel].gen
 
 		cancelBufferTween(oldLabel)
 
 		local twOut = TweenService:Create(oldFrame, fadeTweenOut, { GroupTransparency = 1 })
 		bufferTweens[oldLabel] = twOut
 		twOut:Play()
-		twOut.Completed:Once(function()
+		twOut.Completed:Once(function(state)
+			if state ~= Enum.PlaybackState.Completed or bufferData[oldLabel].gen ~= oldGen then
+				return
+			end
 			oldFrame.Visible = false
 			oldFrame.GroupTransparency = 0
-			bufferTweens[oldLabel] = nil
+			if bufferTweens[oldLabel] == twOut then
+				bufferTweens[oldLabel] = nil
+			end
 			depopulateBuffer(oldLabel)
 		end)
 
@@ -438,7 +464,9 @@ local function performTransition(sourceKey, targetKey, animated)
 		bufferTweens[newLabel] = twIn
 		twIn:Play()
 		twIn.Completed:Once(function()
-			bufferTweens[newLabel] = nil
+			if bufferTweens[newLabel] == twIn then
+				bufferTweens[newLabel] = nil
+			end
 		end)
 
 		activeBuffer = newLabel
@@ -533,7 +561,7 @@ function M.registerGrid(gridKey, gridFrame, buttonConfigs, options)
 		if btnConfig.tooltipData then
 			child.MouseEnter:Connect(function()
 				UIClick3:Play()
-				TooltipModule.show(btnConfig.tooltipData)
+				TooltipModule.show(btnConfig.tooltipData, nil, child)
 			end)
 			child.MouseLeave:Connect(function()
 				TooltipModule.hide("generic")

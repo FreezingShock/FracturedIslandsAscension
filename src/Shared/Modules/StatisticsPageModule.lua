@@ -2,40 +2,39 @@
 	StatisticsPageModule (ModuleScript)
 	Place inside: ReplicatedStorage > Modules
 
-	Client-side rendering for the per-skill statistics sub-grid
-	(StatisticsMenu2).  Dynamically clones StatSlot templates and
-	BlankSlots to fill a row-aligned grid.
+	Client side of the Statistics menu. READ-ONLY: statistics are earned from
+	world buttons (and passively), never by clicking a slot here.
 
-	StatSlot hierarchy (in TemporaryMenus):
-	  StatSlot (GuiButton)
-	    UICorner
-	    UIGradient
-	    BG (ImageLabel)
-	      UICorner
-	      UIGradient
-	      UIStroke
-	    Icon (ImageLabel)
+	Two pages:
+	  StatisticsGrid   hub - one button per skill. Each gets a dynamic tooltip
+	                   (showSkillTooltip) summarising that skill's statistics.
+	  StatisticsMenu2  one skill's statistics (up to 28 slots). Hover a slot for a
+	                   Profile-style tooltip: Summary, Cost, Rewards, Boosted By.
 
-	API:
-	  init(sharedRefs, statsMenu2Frame)
-	  openSkill(skillName)
-	  close()
-	  reset()
-	  getActiveSkill()
+	StatSlot hierarchy (TemporaryMenus.StatSlot):
+	  StatSlot (GuiButton) > BG (ImageLabel > UIStroke), Icon (ImageLabel), ItemCount (TextLabel)
+
+	Wiring (CentralizedMenuController):
+	  setPendingSkill(skill)   before navigating to StatisticsMenu2
+	  populate(frame)          grid onPopulate hook - builds the slots
+	  depopulate()             grid onDepopulate hook - drops refs, hides tooltip
+	  showSkillTooltip(skill, anchor) / hideSkillTooltip()   hub buttons
+	  titleFor(skill)          rich-text page title
 --]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
+local ContentProvider = game:GetService("ContentProvider")
 
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local Config = require(Modules:WaitForChild("StatisticsConfig")) :: any
 local MoneyLib = require(Modules:WaitForChild("MoneyLib")) :: any
-
-local ContentProvider = game:GetService("ContentProvider")
+local Attributes = require(Modules:WaitForChild("Attributes")) :: any
 
 local STAT_CHAINS = Config.STAT_CHAINS
 local SKILL_COLORS = Config.SKILL_COLORS
 local statConfigLookup = Config.statConfigLookup
+local boostLookup = Config.boostLookup
 local LAYOUT = Config.LAYOUT
 local COLUMNS = Config.COLUMNS
 local STAT_ROWS = Config.STAT_ROWS
@@ -43,32 +42,29 @@ local STATS_PER_ROW = Config.STATS_PER_ROW
 
 local player = Players.LocalPlayer
 
--- ===================== STATISTIC LOG INTEGRATION =====================
-local StatisticLogModule = require(Modules:WaitForChild("StatisticLogModule")) :: any
-
-local pendingPurchases = {} -- array of { skill = string, statKey = string, oldCount = number, costs = {{ skill, id, amount }} }
+local TOOLTIP_SOURCE = "statistic"
+local TOOLTIP_REFRESH = 0.25 -- min seconds between live tooltip refreshes
+local ZERO = table.freeze({ count = 0, lifetime = 0, session = 0, multiplier = 1 })
 
 -- ===================== AUDIO =====================
-local UIClick = workspace:WaitForChild("UISounds"):WaitForChild("Click")
-local UIClick3 = workspace:WaitForChild("UISounds"):WaitForChild("Click3")
+local UISounds = workspace:WaitForChild("UISounds")
+local UIClick3 = UISounds:WaitForChild("Click3")
 
 -- ===================== STATE =====================
 local shared = nil
 local TooltipModule = nil
-local statsFrame = nil
 local statSlotTemplate = nil
 local blankSlotTemplate = nil
-local selectedSkillFrame = nil
 
-local currentSkill = nil
-local dynamicChildren = {}
-local slotRefs = {}
+local statsFrame = nil -- active StatisticsMenu2 buffer (nil while closed)
+local pendingSkill = nil -- set by the hub before navigating
+local currentSkill = nil -- skill currently built into statsFrame
+local slotRefs = {} -- [statKey] = { frame, countLabel, text }
+local hoveredStatKey = nil
+local tooltipRefreshQueued = false
 local cachedData = nil
-local hoveredStatKey = nil -- tracks which stat slot is currently hovered
 
--- ===================== REMOTES =====================
 local StatisticsUpdated = ReplicatedStorage:WaitForChild("StatisticsUpdated")
-local PurchaseStat = ReplicatedStorage:WaitForChild("PurchaseStat")
 
 -- ===================== MODULE =====================
 local M = {}
@@ -76,10 +72,8 @@ local M = {}
 -- ===================== HELPERS =====================
 local function formatNumber(n)
 	if n == math.floor(n) then
-		-- integer: always use MoneyLib
 		return MoneyLib.DealWithPoints(n)
 	end
-	-- decimal: use MoneyLib if >= 1000, otherwise keep 2dp
 	if n >= 1000 then
 		return MoneyLib.DealWithPoints(math.floor(n))
 	end
@@ -94,43 +88,317 @@ local function hexToColor3(hex)
 	return Color3.fromRGB(r, g, b)
 end
 
-local function getStatData(skill, statKey)
-	if not cachedData or not cachedData.skills then
-		return { count = 0, lifetime = 0, session = 0, multiplier = 1 }
+--- Text color for a stat: very dark stat colors (Void Coins) fall back to white
+--- so names stay readable on the tooltip background.
+local function textColor(hex)
+	hex = hex or "#FFFFFF"
+	local c = hexToColor3(hex)
+	if (c.R * 0.299 + c.G * 0.587 + c.B * 0.114) < 0.28 then
+		return "#FFFFFF"
 	end
-	local skillData = cachedData.skills[skill]
-	if not skillData or not skillData[statKey] then
-		return { count = 0, lifetime = 0, session = 0, multiplier = 1 }
-	end
-	return skillData[statKey]
+	return hex
 end
 
--- ===================== CLONE BLANK SLOT =====================
-local function cloneBlank(layoutOrder)
-	if not blankSlotTemplate then
+local function getStatData(skill, statKey)
+	local skills = cachedData and cachedData.skills
+	local skillData = skills and skills[skill]
+	return skillData and skillData[statKey] or ZERO
+end
+
+local function lookup(skill, key)
+	local skillConfigs = statConfigLookup[skill]
+	return skillConfigs and skillConfigs[key]
+end
+
+local function skillColor(skill)
+	return SKILL_COLORS[skill] or "#FFFFFF"
+end
+
+function M.titleFor(skill)
+	return string.format('<font color="%s">%s</font> Statistics', skillColor(skill), skill)
+end
+
+-- ===================== STAT TOOLTIP =====================
+local OBTAIN_PILLS = {
+	passive = { text = "EARNED PASSIVELY", color = "#55FF55" },
+	button = { text = "OBTAINED FROM BUTTONS", color = "#FFFF55" },
+	locked = { text = "UNOBTAINABLE", color = "#FF5555" },
+}
+
+local function costRows(config)
+	local rows = {}
+	for _, c in ipairs(config.cost or {}) do
+		local cc = lookup(c.skill, c.id)
+		local owned = getStatData(c.skill, c.id).count
+		table.insert(rows, {
+			label = cc and cc.name or c.id,
+			labelColor = textColor(cc and cc.color),
+			value = "-" .. formatNumber(c.amount),
+			color = owned >= c.amount and "#55FF55" or "#FF5555",
+			detail = string.format("(have %s)", formatNumber(owned)),
+		})
+	end
+	return rows
+end
+
+local function rewardRows(skill, config)
+	local rows = {}
+	local topName, topValue
+	for _, reward in ipairs(config.rewards or {}) do
+		local row
+		if reward.type == "stat" then
+			local rs = reward.skill or skill
+			local rc = lookup(rs, reward.target)
+			row = {
+				label = rc and rc.name or reward.target,
+				labelColor = textColor(rc and rc.color),
+				value = "+" .. formatNumber(reward.pct) .. "%",
+				color = "#55FF55",
+				detail = rs ~= skill and ("(" .. rs .. ")") or nil,
+			}
+		elseif reward.type == "gameStat" then
+			local def = Attributes.find(reward.target)
+			row = {
+				label = def and def.name or reward.target,
+				labelColor = def and def.color or "#FF55FF",
+				value = "+" .. (def and Attributes.format(def.key, reward.flat) or tostring(reward.flat)),
+				color = def and def.color or "#FF55FF",
+				detail = "(Attribute)",
+			}
+		end
+		if row then
+			table.insert(rows, row)
+			if not topName then
+				topName, topValue = row.label, row.value
+			end
+		end
+	end
+	return rows, topName, topValue
+end
+
+local function boostRows(skill, key)
+	local rows = {}
+	local total = 0
+	local boosts = boostLookup[skill] and boostLookup[skill][key] or {}
+	for _, b in ipairs(boosts) do
+		local sc = lookup(b.sourceSkill, b.sourceKey)
+		local owned = getStatData(b.sourceSkill, b.sourceKey).count
+		local contribution = owned * b.pct
+		total += contribution
+		table.insert(rows, {
+			sort = contribution,
+			label = sc and sc.name or b.sourceKey,
+			labelColor = textColor(sc and sc.color),
+			value = "+" .. formatNumber(contribution) .. "%",
+			color = contribution > 0 and "#55FF55" or "#AAAAAA",
+			detail = string.format("(%s x %s%%)", formatNumber(owned), formatNumber(b.pct)),
+		})
+	end
+	table.sort(rows, function(a, b)
+		return a.sort > b.sort
+	end)
+	return rows, total
+end
+
+--- Full Profile-style tooltip config for one statistic.
+local function buildStatTooltip(skill, key)
+	local config = lookup(skill, key)
+	if not config then
 		return nil
 	end
-	local blank = blankSlotTemplate:Clone()
-	blank.LayoutOrder = layoutOrder
-	blank.Visible = true
-	blank.Parent = statsFrame
-	table.insert(dynamicChildren, blank)
-	return blank
+	local data = getStatData(skill, key)
+	local accent = textColor(config.color or skillColor(skill))
+
+	local sections = {}
+
+	-- Summary
+	local multBonus = (data.multiplier - 1) * 100
+	table.insert(sections, {
+		type = "list",
+		title = "Summary",
+		color = accent,
+		rows = {
+			{ label = "Owned", value = formatNumber(data.count), labelColor = "#FFAA00" },
+			{ label = "Lifetime", value = formatNumber(data.lifetime), labelColor = "#55FFFF" },
+			{ label = "Session", value = formatNumber(data.session), labelColor = "#FFFF55" },
+			{
+				label = "Multiplier",
+				value = string.format("%.2fx", data.multiplier),
+				detail = multBonus > 0 and string.format("(+%s%%)", formatNumber(math.floor(multBonus + 0.5))) or nil,
+				color = data.multiplier > 1 and "#55FF55" or "#FFFFFF",
+				labelColor = "#55FF55",
+			},
+		},
+	})
+
+	-- Cost / income
+	if config.passive then
+		table.insert(sections, {
+			type = "list",
+			title = "Income",
+			color = "#55FF55",
+			rows = {
+				{
+					label = "Per second",
+					value = "+" .. formatNumber(math.floor((config.passiveGain or 0) * data.multiplier)),
+					color = "#55FF55",
+					labelColor = "#AAAAAA",
+				},
+			},
+		})
+	else
+		local rows = costRows(config)
+		if #rows > 0 then
+			table.insert(sections, { type = "list", title = "Cost per Purchase", color = "#FF5555", rows = rows })
+		end
+	end
+
+	-- Rewards (per owned) - collapsed to a one-line summary until SHIFT is held
+	local rewards, topName, topValue = rewardRows(skill, config)
+	if #rewards > 0 then
+		local summary = string.format("&f%d &7reward%s &7per owned", #rewards, #rewards == 1 and "" or "s")
+		if topName then
+			summary ..= string.format("\n&7First: &f%s &a%s", topName, topValue)
+		end
+		table.insert(sections, {
+			type = "list",
+			title = "Rewards",
+			color = "#55FF55",
+			rows = rewards,
+			collapsible = true,
+			summary = summary,
+		})
+	end
+
+	-- Boosted By - which owned stats are multiplying this one
+	local boosts, boostTotal = boostRows(skill, key)
+	if #boosts > 0 then
+		local summary = string.format("&f%d &7source%s &7· &a+%s%%", #boosts, #boosts == 1 and "" or "s", formatNumber(boostTotal))
+		if boosts[1].sort > 0 then
+			summary ..= string.format("\n&7Top: &f%s &a%s", boosts[1].label, boosts[1].value)
+		end
+		table.insert(sections, {
+			type = "list",
+			title = "Boosted By",
+			color = "#55FFFF",
+			rows = boosts,
+			collapsible = true,
+			summary = summary,
+		})
+	end
+
+	local icon
+	if config.icon and config.icon ~= "" then
+		icon = { image = config.icon, color = config.color }
+	end
+
+	return {
+		title = string.format(
+			'<font color="%s">%s</font> <font color="#FFFFFF">%s</font>',
+			accent,
+			config.name,
+			formatNumber(data.count)
+		),
+		icon = icon,
+		description = config.description or Config.SKILL_BLURBS[skill],
+		sections = sections,
+		footer = skill .. " Statistic",
+		click = OBTAIN_PILLS[config.obtain or "locked"],
+	}
+end
+
+-- ===================== SKILL (HUB) TOOLTIP =====================
+local function buildSkillTooltip(skill)
+	local chain = STAT_CHAINS[skill]
+	if not chain then
+		return nil
+	end
+	local color = skillColor(skill)
+
+	local discovered, obtainable, lifetimeTotal = 0, 0, 0
+	local rows = {}
+	local topItem, topLifetime = nil, 0
+	for _, item in ipairs(chain) do
+		local data = getStatData(skill, item.key)
+		if data.lifetime > 0 then
+			discovered += 1
+		end
+		if item.obtain ~= "locked" then
+			obtainable += 1
+		end
+		lifetimeTotal += data.lifetime
+		if data.lifetime > topLifetime then
+			topItem, topLifetime = item, data.lifetime
+		end
+		table.insert(rows, {
+			label = item.name,
+			labelColor = textColor(item.color),
+			value = formatNumber(data.count),
+			color = data.count > 0 and "#FFFFFF" or "#AAAAAA",
+		})
+	end
+
+	local sections = {
+		{
+			type = "list",
+			title = "Summary",
+			color = color,
+			rows = {
+				{ label = "Statistics", value = tostring(#chain), labelColor = "#FFAA00" },
+				{ label = "Discovered", value = string.format("%d/%d", discovered, #chain), color = "#55FF55", labelColor = "#55FFFF" },
+				{ label = "Obtainable", value = string.format("%d/%d", obtainable, #chain), color = obtainable > 0 and "#FFFF55" or "#FF5555", labelColor = "#FFFF55" },
+				{ label = "Lifetime", value = formatNumber(lifetimeTotal), labelColor = "#55FF55" },
+			},
+		},
+	}
+
+	if #rows > 0 then
+		local summary = string.format("&f%d &7statistics", #chain)
+		if topItem then
+			summary ..= string.format("\n&7Most earned: &f%s", topItem.name)
+		end
+		table.insert(sections, {
+			type = "list",
+			title = "Statistics",
+			color = color,
+			rows = rows,
+			collapsible = true,
+			summary = summary,
+		})
+	end
+
+	return {
+		title = string.format('<font color="%s">%s</font> Statistics', color, skill),
+		description = Config.SKILL_BLURBS[skill],
+		sections = sections,
+		click = #chain > 0 and { text = "CLICK TO VIEW!", color = "#FFFF55" }
+			or { text = "NO STATISTICS YET", color = "#FF5555" },
+	}
+end
+
+function M.showSkillTooltip(skill, anchor)
+	if not TooltipModule then
+		return
+	end
+	UIClick3:Play()
+	local cfg = buildSkillTooltip(skill)
+	if cfg then
+		TooltipModule.show(cfg, TOOLTIP_SOURCE, anchor)
+	end
+end
+
+function M.hideSkillTooltip()
+	if TooltipModule then
+		TooltipModule.hide(TOOLTIP_SOURCE)
+	end
 end
 
 -- ===================== SLOT VISUALS =====================
---- Applies per-stat color theming and icon to a cloned StatSlot.
---- color → StatSlot.BackgroundColor3, BG.ImageColor3, BG.UIStroke.Color
---- icon  → Icon.Image
---- Applies color theming and icon to a cloned StatSlot.
---- Hierarchy: StatSlot > BG > UIStroke, StatSlot > Icon
+--- StatSlot.BackgroundColor3, BG.ImageColor3 + BG.UIStroke.Color, Icon.Image
 local function applySlotVisuals(slot, item)
 	local color = hexToColor3(item.color or "#FFFFFF")
-
-	-- StatSlot.BackgroundColor3
 	slot.BackgroundColor3 = color
 
-	-- BG.ImageColor3 + BG.UIStroke.Color
 	local bg = slot:FindFirstChild("BG")
 	if bg then
 		bg.ImageColor3 = color
@@ -140,224 +408,123 @@ local function applySlotVisuals(slot, item)
 		end
 	end
 
-	-- Icon image
 	local icon = slot:FindFirstChild("Icon")
 	if icon then
-		if item.icon and item.icon ~= "" then
-			icon.Image = item.icon
-		else
-			icon.Image = ""
+		icon.Image = item.icon or ""
+	end
+end
+
+local function cloneBlank(layoutOrder)
+	if not blankSlotTemplate then
+		return
+	end
+	local blank = blankSlotTemplate:Clone()
+	blank.LayoutOrder = layoutOrder
+	blank.Visible = true
+	blank.Parent = statsFrame
+end
+
+-- ===================== LIVE REFRESH =====================
+local function showHoveredTooltip()
+	if hoveredStatKey and currentSkill and slotRefs[hoveredStatKey] then
+		local cfg = buildStatTooltip(currentSkill, hoveredStatKey)
+		if cfg then
+			TooltipModule.show(cfg, TOOLTIP_SOURCE, slotRefs[hoveredStatKey].frame)
 		end
 	end
 end
 
--- ===================== TOOLTIP BUILDER =====================
-local function buildStatTooltip(skill, statKey)
-	local config = statConfigLookup[skill] and statConfigLookup[skill][statKey]
-	if not config then
-		return nil
+local function queueTooltipRefresh()
+	if tooltipRefreshQueued then
+		return
 	end
-
-	local data = getStatData(skill, statKey)
-	local skillColor = SKILL_COLORS[skill] or "#FFFFFF"
-	local itemColor = config.color or skillColor
-
-	-- Title (uses per-stat color)
-	local title = string.format('<font color="%s"><b>%s</b></font>', itemColor, config.name)
-
-	-- Description lines
-	local lines = {}
-
-	-- Counts
-	table.insert(
-		lines,
-		string.format(
-			'<font color="#FFFFFF">Owned: <b>%s</b></font>  '
-				.. '<font color="#AAAAAA">(Lifetime: %s | Session: %s)</font>',
-			formatNumber(data.count),
-			formatNumber(data.lifetime),
-			formatNumber(data.session)
-		)
-	)
-
-	-- Multiplier
-	table.insert(
-		lines,
-		string.format('<font color="#55FF55">Multiplier: <b>×%s</b></font>', formatNumber(data.multiplier))
-	)
-
-	table.insert(lines, "")
-
-	-- Cost
-	table.insert(lines, '<font color="#AAAAAA"><b>Cost:</b></font>')
-	for _, costEntry in ipairs(config.cost or {}) do
-		if costEntry.type == "stat" then
-			local sConfig = statConfigLookup[costEntry.skill] and statConfigLookup[costEntry.skill][costEntry.id]
-			local sName = sConfig and sConfig.name or costEntry.id
-			local sColor = sConfig and sConfig.color or (SKILL_COLORS[costEntry.skill] or "#FFFFFF")
-			local owned = getStatData(costEntry.skill, costEntry.id).count
-			local afford = owned >= costEntry.amount
-			local numColor = afford and "#55FF55" or "#FF5555"
-			table.insert(
-				lines,
-				string.format(
-					'  <font color="#FF5555">-</font><font color="%s">%s</font> <font color="%s">%s</font>',
-					numColor,
-					formatNumber(costEntry.amount),
-					sColor,
-					sName
-				)
-			)
-		end
-	end
-
-	table.insert(lines, "")
-
-	-- Rewards
-	table.insert(lines, '<font color="#AAAAAA"><b>Rewards (per owned):</b></font>')
-	for _, reward in ipairs(config.rewards or {}) do
-		if reward.type == "stat" then
-			local rConfig = statConfigLookup[reward.skill] and statConfigLookup[reward.skill][reward.target]
-			local rName = rConfig and rConfig.name or reward.target
-			local rColor = rConfig and rConfig.color or (SKILL_COLORS[reward.skill] or "#FFFFFF")
-			table.insert(
-				lines,
-				string.format(
-					'  <font color="#55FF55">+%d%%</font> <font color="%s">%s</font>',
-					reward.pct,
-					rColor,
-					rName
-				)
-			)
-		elseif reward.type == "gameStat" then
-			table.insert(
-				lines,
-				string.format('  <font color="#FF55FF">+%s %s</font>', tostring(reward.flat), reward.target)
-			)
-		end
-	end
-
-	local desc = table.concat(lines, "\n")
-
-	-- Click line
-	local canAfford = true
-	for _, costEntry in ipairs(config.cost or {}) do
-		if costEntry.type == "stat" then
-			if getStatData(costEntry.skill, costEntry.id).count < costEntry.amount then
-				canAfford = false
-				break
-			end
-		end
-	end
-
-	local click
-	if config.passive then
-		click = '<font color="#55FF55">Earned passively!</font>'
-	elseif not config.cost or #config.cost == 0 then
-		click = ""
-	elseif canAfford then
-		click = '<font color="#FFFF55">Click to purchase!</font>'
-	else
-		click = '<font color="#FF5555">Not enough resources!</font>'
-	end
-
-	return { title = title, desc = desc, click = click }
+	tooltipRefreshQueued = true
+	task.delay(TOOLTIP_REFRESH, function()
+		tooltipRefreshQueued = false
+		showHoveredTooltip()
+	end)
 end
 
--- ===================== CLEANUP =====================
-local function clearDynamicChildren()
-	for _, child in ipairs(dynamicChildren) do
-		if child and child.Parent then
-			child:Destroy()
-		end
-	end
-	dynamicChildren = {}
-	slotRefs = {}
-end
-
--- ===================== REFRESH COUNTS (silent) =====================
-local function refreshSlotCounts()
+local function refreshSlots()
 	if not currentSkill then
 		return
 	end
 	for statKey, ref in pairs(slotRefs) do
-		local data = getStatData(currentSkill, statKey)
-		if ref.countLabel then
-			ref.countLabel.Text = formatNumber(data.count)
+		local text = formatNumber(getStatData(currentSkill, statKey).count)
+		if ref.countLabel and ref.text ~= text then
+			ref.text = text
+			ref.countLabel.Text = text
 		end
 	end
-
-	-- Live-refresh the tooltip if hovering a stat slot
-	if hoveredStatKey and slotRefs[hoveredStatKey] then
-		local tooltipData = buildStatTooltip(currentSkill, hoveredStatKey)
-		if tooltipData then
-			TooltipModule.show(tooltipData)
-		end
+	if hoveredStatKey then
+		queueTooltipRefresh()
 	end
 end
 
--- ===================== OPEN SKILL =====================
-function M.openSkill(skillName, activeFrame)
-	-- Update frame reference if a new buffer was provided
-	if activeFrame then
-		statsFrame = activeFrame
-		selectedSkillFrame = activeFrame:FindFirstChild("SelectedSkill")
-		-- Wire tooltip on freshly cloned SelectedSkill (GC'd with instance)
-		if selectedSkillFrame then
-			selectedSkillFrame.MouseEnter:Connect(function()
-				if currentSkill and shared.SkillsPageModule then
-					shared.SkillsPageModule.showGridSkillTooltip(currentSkill, false)
-				end
-			end)
-			selectedSkillFrame.MouseLeave:Connect(function()
-				if shared.SkillsPageModule then
-					shared.SkillsPageModule.hideGridSkillTooltip()
-				end
-			end)
-		end
-	end
-	clearDynamicChildren()
-	currentSkill = skillName
+-- ===================== POPULATE / DEPOPULATE =====================
+function M.setPendingSkill(skill)
+	pendingSkill = skill
+end
 
-	local chain = STAT_CHAINS[skillName]
+--- StatisticsMenu2 onPopulate: builds the whole page into the buffer frame.
+function M.populate(frame)
+	local skill = pendingSkill
+	local chain = skill and STAT_CHAINS[skill]
 	if not chain then
-		warn("[StatisticsPageModule] No chain defined for " .. tostring(skillName))
+		warn("[StatisticsPageModule] No chain for " .. tostring(skill))
+		return
+	end
+	if not (statSlotTemplate and blankSlotTemplate) then
+		warn("[StatisticsPageModule] Slot templates missing - cannot build page")
 		return
 	end
 
-	-- ── Update SelectedSkill visuals (icon + colors) ──
-	if selectedSkillFrame then
-		selectedSkillFrame.LayoutOrder = LAYOUT.selectedSkillOrder
+	statsFrame = frame
+	currentSkill = skill
+	hoveredStatKey = nil
+	table.clear(slotRefs)
+
+	-- ── Header: SelectedSkill icon + colors copied from the hub button ──
+	local selected = frame:FindFirstChild("SelectedSkill")
+	if selected then
+		selected.LayoutOrder = LAYOUT.selectedSkillOrder
 
 		local GridTemplates = ReplicatedStorage:FindFirstChild("GridTemplates")
-		local statisticsMenu1 = GridTemplates and GridTemplates:FindFirstChild("StatisticsMenu1")
-		if statisticsMenu1 then
-			local skillButton = statisticsMenu1:FindFirstChild(skillName .. "Statistics")
-			if skillButton then
-				local sourceIcon = skillButton:FindFirstChild("Icon")
-				local icon = selectedSkillFrame:FindFirstChild("Icon")
-				if icon and sourceIcon then
-					icon.Image = sourceIcon.Image
-				end
-
-				local sourceBg = skillButton:FindFirstChild("BG")
-				if sourceBg then
-					selectedSkillFrame.BackgroundColor3 = sourceBg.BackgroundColor3
-					local bg = selectedSkillFrame:FindFirstChild("BG")
-					if bg then
-						bg.ImageColor3 = sourceBg.ImageColor3
-						local bgStroke = bg:FindFirstChildOfClass("UIStroke")
-						local sourceBgStroke = sourceBg:FindFirstChildOfClass("UIStroke")
-						if bgStroke and sourceBgStroke then
-							bgStroke.Color = sourceBgStroke.Color
-						end
+		local hub = GridTemplates and GridTemplates:FindFirstChild("StatisticsMenu1")
+		local skillButton = hub and hub:FindFirstChild(skill .. "Statistics")
+		if skillButton then
+			local sourceIcon = skillButton:FindFirstChild("Icon")
+			local icon = selected:FindFirstChild("Icon")
+			if icon and sourceIcon then
+				icon.Image = sourceIcon.Image
+			end
+			local sourceBg = skillButton:FindFirstChild("BG")
+			if sourceBg then
+				selected.BackgroundColor3 = sourceBg.BackgroundColor3
+				local bg = selected:FindFirstChild("BG")
+				if bg then
+					bg.ImageColor3 = sourceBg.ImageColor3
+					local bgStroke = bg:FindFirstChildOfClass("UIStroke")
+					local sourceStroke = sourceBg:FindFirstChildOfClass("UIStroke")
+					if bgStroke and sourceStroke then
+						bgStroke.Color = sourceStroke.Color
 					end
 				end
 			end
 		end
+
+		selected.MouseEnter:Connect(function()
+			if shared and shared.SkillsPageModule then
+				shared.SkillsPageModule.showGridSkillTooltip(skill, false)
+			end
+		end)
+		selected.MouseLeave:Connect(function()
+			if shared and shared.SkillsPageModule then
+				shared.SkillsPageModule.hideGridSkillTooltip()
+			end
+		end)
 	end
 
-	-- ── Row 0: header blanks ──
 	for i = 0, LAYOUT.headerBlanksBefore - 1 do
 		cloneBlank(i)
 	end
@@ -365,189 +532,90 @@ function M.openSkill(skillName, activeFrame)
 		cloneBlank(LAYOUT.selectedSkillOrder + i)
 	end
 
-	-- ── Rows 1-4: stat rows ──
+	-- ── Stat rows ──
 	local statIndex = 1
 	for row = 0, STAT_ROWS - 1 do
-		local rowBase = LAYOUT.statRowBaseOrder + (row * COLUMNS)
-
-		-- Left pad blanks
+		local rowBase = LAYOUT.statRowBaseOrder + row * COLUMNS
 		for pad = 0, LAYOUT.statRowPadCount - 1 do
 			cloneBlank(rowBase + pad)
 		end
 
-		-- Stat slots or blank fills
 		for col = LAYOUT.statRowPadCount, LAYOUT.statRowPadCount + STATS_PER_ROW - 1 do
 			local lo = rowBase + col
-			if statIndex <= #chain then
-				local item = chain[statIndex]
-
-				local slot = statSlotTemplate:Clone()
-				slot.Name = "Stat_" .. item.key
-				slot.LayoutOrder = lo
-				slot.Visible = true
-				slot.Parent = statsFrame
-
-				-- Apply color + icon from config
-				applySlotVisuals(slot, item)
-
-				local iconLabel = slot:FindFirstChild("Icon")
-				local countLabel = slot:FindFirstChild("ItemCount")
-
-				if countLabel then
-					local data = getStatData(skillName, item.key)
-					countLabel.Text = formatNumber(data.count)
-				end
-
-				slotRefs[item.key] = {
-					frame = slot,
-					iconLabel = iconLabel,
-					countLabel = countLabel,
-				}
-
-				-- Hover tooltip (auto-disconnects on Destroy)
-				slot.MouseEnter:Connect(function()
-					hoveredStatKey = item.key
-					UIClick3:Play()
-					local tooltipData = buildStatTooltip(skillName, item.key)
-					if tooltipData then
-						TooltipModule.show(tooltipData)
-					end
-				end)
-				slot.MouseLeave:Connect(function()
-					hoveredStatKey = nil
-					TooltipModule.hide()
-				end)
-
-				-- Purchase click + hold-to-repeat
-				do
-					local holding = false
-					local holdConn = nil
-
-					slot.MouseButton1Down:Connect(function()
-						if item.passive then
-							return
-						end
-						if not item.cost or #item.cost == 0 then
-							return
-						end
-
-						holding = true
-
-						local function firePurchase()
-							UIClick:Play()
-							local oldCount = getStatData(skillName, item.key).count
-
-							-- Snapshot cost entries so we can log negatives on confirmation
-							local costSnapshot = {}
-							for _, costEntry in ipairs(item.cost) do
-								if costEntry.type == "stat" then
-									table.insert(costSnapshot, {
-										skill = costEntry.skill,
-										id = costEntry.id,
-										amount = costEntry.amount,
-									})
-								end
-							end
-
-							table.insert(pendingPurchases, {
-								skill = skillName,
-								statKey = item.key,
-								oldCount = oldCount,
-								costs = costSnapshot,
-							})
-							PurchaseStat:FireServer(skillName, item.key)
-						end
-
-						-- Immediate first fire
-						firePurchase()
-
-						-- Hold repeat
-						holdConn = task.spawn(function()
-							while holding do
-								task.wait(0.05)
-								if not holding then
-									break
-								end
-								firePurchase()
-							end
-						end)
-					end)
-
-					slot.MouseButton1Up:Connect(function()
-						holding = false
-					end)
-
-					slot.MouseLeave:Connect(function()
-						holding = false
-					end)
-				end
-
-				table.insert(dynamicChildren, slot)
-				statIndex = statIndex + 1
-			else
+			local item = chain[statIndex]
+			if not item then
 				cloneBlank(lo)
+				continue
 			end
+			statIndex += 1
+
+			local slot = statSlotTemplate:Clone()
+			slot.Name = "Stat_" .. item.key
+			slot.LayoutOrder = lo
+			slot.Visible = true
+			applySlotVisuals(slot, item)
+
+			local countLabel = slot:FindFirstChild("ItemCount")
+			local text = formatNumber(getStatData(skill, item.key).count)
+			if countLabel then
+				countLabel.Text = text
+			end
+			slotRefs[item.key] = { frame = slot, countLabel = countLabel, text = text }
+
+			-- Hover tooltip only: slots are not clickable (no purchasing from the menu).
+			slot.MouseEnter:Connect(function()
+				hoveredStatKey = item.key
+				UIClick3:Play()
+				showHoveredTooltip()
+			end)
+			slot.MouseLeave:Connect(function()
+				if hoveredStatKey == item.key then
+					hoveredStatKey = nil
+				end
+				TooltipModule.hide(TOOLTIP_SOURCE)
+			end)
+
+			slot.Parent = frame
 		end
 	end
 
-	-- ── Row 5: footer ──
-	local backBtn = statsFrame:FindFirstChild("BackButton")
+	-- ── Footer ──
+	local backBtn = frame:FindFirstChild("BackButton")
 	if backBtn then
 		backBtn.LayoutOrder = LAYOUT.backButtonOrder
 	end
-	local closeBtn = statsFrame:FindFirstChild("CloseSlot")
+	local closeBtn = frame:FindFirstChild("CloseSlot")
 	if closeBtn then
 		closeBtn.LayoutOrder = LAYOUT.closeSlotOrder
 	end
-
 	for i = 0, LAYOUT.footerBlanksBefore - 1 do
 		cloneBlank(LAYOUT.footerRowStart + i)
 	end
-
 	for i = 1, LAYOUT.footerBlanksAfter do
 		cloneBlank(LAYOUT.closeSlotOrder + i)
 	end
 end
 
--- ===================== CLOSE / RESET =====================
-function M.close()
+--- StatisticsMenu2 onDepopulate. The grid destroys the children itself; this only
+--- drops our references and makes sure no tooltip is left hanging.
+function M.depopulate()
 	hoveredStatKey = nil
-	TooltipModule.hide()
-end
-
-function M.reset()
-	hoveredStatKey = nil
-	clearDynamicChildren()
+	statsFrame = nil
 	currentSkill = nil
-	TooltipModule.forceHide()
-
-	if selectedSkillFrame then
-		selectedSkillFrame.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-		local bg = selectedSkillFrame:FindFirstChild("BG")
-		if bg then
-			bg.ImageColor3 = Color3.fromRGB(255, 255, 255)
-			local bgStroke = bg:FindFirstChildOfClass("UIStroke")
-			if bgStroke then
-				bgStroke.Color = Color3.fromRGB(255, 255, 255)
-			end
-		end
-		local icon = selectedSkillFrame:FindFirstChild("Icon")
-		if icon then
-			icon.Image = ""
-		end
+	table.clear(slotRefs)
+	if TooltipModule then
+		TooltipModule.forceHide()
 	end
 end
 
--- ===================== GETTERS =====================
 function M.getActiveSkill()
 	return currentSkill
 end
 
 -- ===================== INIT =====================
-function M.init(sharedRefs, menu2Frame)
+function M.init(sharedRefs)
 	shared = sharedRefs
 	TooltipModule = sharedRefs.TooltipModule
-	statsFrame = menu2Frame -- may be nil for pooled grids
 
 	local CentralizedMenu = player.PlayerGui:WaitForChild("CentralizedAscensionMenu")
 	local TemporaryMenus = CentralizedMenu:WaitForChild("TemporaryMenus")
@@ -556,91 +624,19 @@ function M.init(sharedRefs, menu2Frame)
 	if not statSlotTemplate then
 		warn("[StatisticsPageModule] StatSlot template NOT FOUND in TemporaryMenus")
 	end
-
 	blankSlotTemplate = TemporaryMenus:FindFirstChild("BlankSlot")
 	if not blankSlotTemplate then
 		warn("[StatisticsPageModule] BlankSlot template NOT FOUND in TemporaryMenus")
 	end
 
-	-- Frame-dependent setup (selectedSkillFrame, tooltip wiring)
-	-- is now handled in openSkill() when the buffer frame is passed.
-	-- StatisticsMenu1 button click wiring is handled by CMC callbacks
-	-- via GridMenuModule — no longer needed here.
-
-	if statsFrame then
-		selectedSkillFrame = statsFrame:FindFirstChild("SelectedSkill")
-	end
-
-	-- Listen for StatisticsUpdated — process confirmed purchases, then refresh
+	-- Latest snapshot from the server (coalesced to ~10/sec). Missing entries mean
+	-- "none owned", so only touched statistics are ever sent.
 	StatisticsUpdated.OnClientEvent:Connect(function(payload)
-		-- Process pending purchases BEFORE updating cache
-		-- Compare new payload counts against old cached counts
-		local toRemove = {}
-		print("[StatisticsPageModule] StatisticsUpdated received, pending count:", #pendingPurchases)
-		for i, pending in ipairs(pendingPurchases) do
-			local newSkillData = payload.skills and payload.skills[pending.skill]
-			local newStatData = newSkillData and newSkillData[pending.statKey]
-			local newCount = newStatData and newStatData.count or 0
-			print(
-				"[StatisticsPageModule] Checking pending:",
-				pending.skill,
-				pending.statKey,
-				"old:",
-				pending.oldCount,
-				"new:",
-				newCount
-			)
-			if newStatData and newStatData.count > pending.oldCount then
-				-- Purchase confirmed — log the GAIN (positive)
-				local config = statConfigLookup[pending.skill] and statConfigLookup[pending.skill][pending.statKey]
-				if config then
-					local gained = newStatData.count - pending.oldCount
-					print("[StatisticsPageModule] CONFIRMED purchase:", config.name, "+", gained)
-					StatisticLogModule.logStat(config.name, gained, config.color, newStatData.count)
-				end
-
-				-- Log each COST as a negative entry
-				for _, costInfo in ipairs(pending.costs or {}) do
-					local costConfig = statConfigLookup[costInfo.skill]
-						and statConfigLookup[costInfo.skill][costInfo.id]
-					if costConfig then
-						local costStatData = payload.skills
-							and payload.skills[costInfo.skill]
-							and payload.skills[costInfo.skill][costInfo.id]
-						local newOwned = costStatData and costStatData.count or 0
-						StatisticLogModule.logStatNegative(costConfig.name, costInfo.amount, costConfig.color, newOwned)
-					end
-				end
-
-				table.insert(toRemove, i)
-			end
-		end
-		-- Remove confirmed entries (reverse to preserve indices)
-		for j = #toRemove, 1, -1 do
-			table.remove(pendingPurchases, toRemove[j])
-		end
-
-		-- Trim stale pending entries if queue grows too large (spam safety)
-		if #pendingPurchases > 20 then
-			local trimCount = math.floor(#pendingPurchases / 2)
-			for _ = 1, trimCount do
-				table.remove(pendingPurchases, 1)
-			end
-		end
-
 		cachedData = payload
-		refreshSlotCounts()
+		refreshSlots()
 	end)
 
-	-- Initialize the statistic log UI (StatisticLog is a separate ScreenGui)
-	local statisticLog = player.PlayerGui:FindFirstChild("StatisticLog")
-	if statisticLog then
-		StatisticLogModule.init(statisticLog)
-	else
-		warn("[StatisticsPageModule] StatisticLog ScreenGui not found in PlayerGui")
-	end
-
-	-- ── Preload all stat icons ──
+	-- Preload stat icons without blocking.
 	local preloadList = {}
 	for _, chain in pairs(STAT_CHAINS) do
 		for _, item in ipairs(chain) do
@@ -657,7 +653,6 @@ function M.init(sharedRefs, menu2Frame)
 			for _, img in ipairs(preloadList) do
 				img:Destroy()
 			end
-			print("[StatisticsPageModule] Preloaded " .. #preloadList .. " stat icons ✓")
 		end)
 	end
 

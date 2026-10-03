@@ -288,10 +288,9 @@ local function buildMenu2Tooltip(skillName, statKey)
 	return { title = title, desc = desc, click = click }
 end
 
---- Shows Menu2 tooltip with progress bar toward next tier.
-local function showMenu2Tooltip(skillName, statKey)
-	local tooltipData = buildMenu2Tooltip(skillName, statKey)
-	if not tooltipData then
+local function showMenu2Tooltip(skillName, statKey, anchor)
+	local base = buildMenu2Tooltip(skillName, statKey)
+	if not base then
 		return
 	end
 
@@ -300,42 +299,34 @@ local function showMenu2Tooltip(skillName, statKey)
 	local nextTier = getNextTier(lifetime)
 	local highestCompleted = getHighestCompletedTier(lifetime)
 
-	TooltipModule.show(tooltipData)
+	local tooltip = { title = base.title, description = base.desc, click = base.click }
 
-	local refs = TooltipModule.refs
 	if nextTier then
 		local prevThreshold = highestCompleted > 0 and COLLECTION_TIERS[highestCompleted].threshold or 0
-		local range = nextTier.threshold - prevThreshold
-		local progress = math.clamp((lifetime - prevThreshold) / range, 0, 1)
-		local pctDisplay = math.floor(progress * 100)
-
-		refs.ProgressLabel.Text = string.format(
-			'<font color="#AAAAAA">Progress: </font><font color="#FFFF55">%d</font><font color="#FFAA00">%%</font>',
-			pctDisplay
-		)
-		refs.ProgressLabel.Visible = true
-		refs.ProgressBL.Text = string.format(
-			'<font color="#FFFF55">%s</font><font color="#FFAA00">/</font><font color="#FFFF55">%s</font>',
-			formatNumber(lifetime),
-			formatNumber(nextTier.threshold)
-		)
-		refs.ProgressBL.Visible = true
-		refs.ProgressOuter.Visible = true
-		TooltipModule.tweenProgressFill(progress)
-		refs.Divider3.Visible = true
+		local progress = math.clamp((lifetime - prevThreshold) / (nextTier.threshold - prevThreshold), 0, 1)
+		tooltip.progress = {
+			pct = progress,
+			color = "#FFFF55",
+			label = string.format(
+				'<font color="#FFFF55">%s</font><font color="#FFAA00">/</font><font color="#FFFF55">%s</font> <font color="#AAAAAA">(%d%%)</font>',
+				formatNumber(lifetime),
+				formatNumber(nextTier.threshold),
+				math.floor(progress * 100)
+			),
+		}
 	else
-		refs.ProgressLabel.Text = '<font color="#55FF55">All collection tiers completed!</font>'
-		refs.ProgressLabel.Visible = true
-		refs.ProgressBL.Text = ""
-		refs.ProgressBL.Visible = false
-		refs.ProgressOuter.Visible = true
-		TooltipModule.tweenProgressFill(1)
-		refs.Divider3.Visible = true
+		tooltip.progress = {
+			pct = 1,
+			color = "#55FF55",
+			label = '<font color="#55FF55">All tiers completed!</font>',
+		}
 	end
+
+	TooltipModule.show(tooltip, nil, anchor)
 end
 
 -- ===================== TOOLTIP: Menu3 tier slot =====================
-local function showMenu3TierTooltip(skillName, statKey, tierIndex)
+local function showMenu3TierTooltip(skillName, statKey, tierIndex, anchor)
 	local tier = COLLECTION_TIERS[tierIndex]
 	if not tier then
 		return
@@ -362,83 +353,63 @@ local function showMenu3TierTooltip(skillName, statKey, tierIndex)
 	local statName = config and config.name or statKey
 	local statColor = config and config.color or "#FFFFFF"
 
-	local title = string.format('<font color="%s"><b>Collection %s</b></font>', statusColor, toRoman(tier.level))
-
-	local lines = {}
-
-	table.insert(
-		lines,
-		string.format('<font color="#AAAAAA">Status: </font><font color="%s"><b>%s</b></font>', statusColor, statusText)
-	)
-	table.insert(lines, "")
-	table.insert(
-		lines,
+	local lines = {
+		string.format('<font color="#AAAAAA">Status: </font><font color="%s"><b>%s</b></font>', statusColor, statusText),
+		"",
 		string.format(
 			'<font color="#AAAAAA">Requirement: </font><font color="#%s"><b>%s</b> %s</font>',
 			statColor,
 			formatNumber(tier.threshold),
 			statName
-		)
-	)
-	local desc = table.concat(lines, "\n")
+		),
+	}
 
-	-- Build rewards text for RewardsLabel
+	-- Rewards block body (empty tiers show a placeholder)
 	local rewardLines = {}
 	local rewards = COLLECTION_REWARDS[tier.level]
 	if rewards and #rewards > 0 then
-		table.insert(rewardLines, '<font color="#AAAAAA">Rewards:</font>')
 		for _, reward in ipairs(rewards) do
 			if reward.type == "stat" then
 				local rConfig = statConfigLookup[reward.skill] and statConfigLookup[reward.skill][reward.target]
-				local rName = rConfig and rConfig.name or reward.target
-				local rColor = rConfig and rConfig.color or "#FFFFFF"
 				table.insert(
 					rewardLines,
 					string.format(
-						'  <font color="#55FF55">+%d%%</font> <font color="%s">%s</font>',
+						'<font color="#55FF55">+%d%%</font> <font color="%s">%s</font>',
 						reward.pct,
-						rColor,
-						rName
+						rConfig and rConfig.color or "#FFFFFF",
+						rConfig and rConfig.name or reward.target
 					)
 				)
 			elseif reward.type == "gameStat" then
 				table.insert(
 					rewardLines,
-					string.format('  <font color="#FF55FF">+%s %s</font>', tostring(reward.flat), reward.target)
+					string.format('<font color="#FF55FF">+%s %s</font>', tostring(reward.flat), reward.target)
 				)
 			end
 		end
 	else
-		table.insert(rewardLines, '<font color="#555555">Rewards: Coming Soon</font>')
+		table.insert(rewardLines, '<font color="#AAAAAA">Coming Soon</font>')
 	end
 
-	-- Show tooltip (no click label for tier slots)
-	TooltipModule.show({ title = title, desc = desc, click = "" })
-
-	-- Set RewardsLabel + Divider2
-	local refs = TooltipModule.refs
-	refs.Rewards.Text = table.concat(rewardLines, "\n")
-	refs.Rewards.Visible = true
-	refs.Divider2.Visible = true
-
-	-- Progress bar for THIS specific tier
 	local progress = math.clamp(lifetime / tier.threshold, 0, 1)
-	local pctDisplay = math.floor(progress * 100)
 
-	refs.ProgressLabel.Text = string.format(
-		'<font color="#AAAAAA">Progress: </font><font color="#FFFF55">%d</font><font color="#FFAA00">%%</font>',
-		pctDisplay
-	)
-	refs.ProgressLabel.Visible = true
-	refs.ProgressBL.Text = string.format(
-		'<font color="#FFFF55">%s</font><font color="#FFAA00">/</font><font color="#FFFF55">%s</font>',
-		formatNumber(lifetime),
-		formatNumber(tier.threshold)
-	)
-	refs.ProgressBL.Visible = true
-	refs.ProgressOuter.Visible = true
-	TooltipModule.tweenProgressFill(progress)
-	refs.Divider3.Visible = false
+	TooltipModule.show({
+		title = string.format('<font color="%s"><b>Collection %s</b></font>', statusColor, toRoman(tier.level)),
+		description = table.concat(lines, "\n"),
+		progress = {
+			pct = progress,
+			color = statusColor,
+			label = string.format(
+				'<font color="#FFFF55">%s</font><font color="#FFAA00">/</font><font color="#FFFF55">%s</font> <font color="#AAAAAA">(%d%%)</font>',
+				formatNumber(lifetime),
+				formatNumber(tier.threshold),
+				math.floor(progress * 100)
+			),
+		},
+		blocks = {
+			{ title = "Rewards", text = table.concat(rewardLines, "\n") },
+		},
+	}, nil, anchor)
 end
 
 -- ===================== TOOLTIP: SelectedStatistic (Menu3 header) =====================
@@ -521,7 +492,7 @@ local function refreshMenu2Counts()
 
 	-- Live-refresh tooltip if hovering
 	if hoveredStatKey and menu2SlotRefs[hoveredStatKey] then
-		showMenu2Tooltip(currentSkill, hoveredStatKey)
+		showMenu2Tooltip(currentSkill, hoveredStatKey, menu2SlotRefs[hoveredStatKey].frame)
 	end
 end
 
@@ -547,7 +518,7 @@ local function refreshMenu3Tiers()
 
 	-- Live-refresh tooltip if hovering
 	if hoveredTierLevel and menu3SlotRefs[hoveredTierLevel] then
-		showMenu3TierTooltip(currentSkill, currentStatKey, hoveredTierLevel)
+		showMenu3TierTooltip(currentSkill, currentStatKey, hoveredTierLevel, menu3SlotRefs[hoveredTierLevel].frame)
 	end
 end
 
@@ -634,7 +605,7 @@ function M.openSkill(skillName, activeFrame)
 				slot.MouseEnter:Connect(function()
 					hoveredStatKey = capturedKey
 					UIClick3:Play()
-					showMenu2Tooltip(skillName, capturedKey)
+					showMenu2Tooltip(skillName, capturedKey, slot)
 				end)
 				slot.MouseLeave:Connect(function()
 					if hoveredStatKey == capturedKey then
@@ -804,7 +775,7 @@ function M.openStat(skillName, statKey)
 				slot.MouseEnter:Connect(function()
 					hoveredTierLevel = capturedTier
 					UIClick3:Play()
-					showMenu3TierTooltip(skillName, statKey, capturedTier)
+					showMenu3TierTooltip(skillName, statKey, capturedTier, slot)
 				end)
 				slot.MouseLeave:Connect(function()
 					if hoveredTierLevel == capturedTier then
