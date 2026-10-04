@@ -288,6 +288,17 @@ local function pruneStaleSlots(player)
 end
 
 -- ===================== SEND UPDATE TO CLIENT =====================
+--- The Tool the player is holding that belongs to `base` (Tool.Name), if any.
+local function heldToolOf(player, base: string)
+	local character = player.Character
+	for _, child in ipairs(character and character:GetChildren() or {}) do
+		if child:IsA("Tool") and child.Name == base then
+			return child
+		end
+	end
+	return nil
+end
+
 --- Fires UpdateInventory with hotbar + grid slots + overflow data.
 function InventoryDataManager.SendUpdate(player)
 	local state = playerState[player.UserId]
@@ -298,6 +309,11 @@ function InventoryDataManager.SendUpdate(player)
 	-- Prune stale references, then auto-fill grid from overflow
 	pruneStaleSlots(player)
 	autoFillGrid(player)
+
+	-- Forget the held slot when nothing of that item is in hand any more (put away, dropped, died...)
+	if state.heldKey and os.clock() - (state.heldAt or 0) > 0.3 and not heldToolOf(player, baseOf(state.heldKey)) then
+		state.heldKey = nil
+	end
 
 	local toolInfo = countEntries(player)
 	local invData = SkillsDataManager.GetInventoryData(player)
@@ -378,6 +394,7 @@ function InventoryDataManager.SendUpdate(player)
 			count = trashed.count,
 			rarity = trashed.rarity,
 		}) or false,
+		held = state.heldKey or false, -- slot key of the item in hand
 		hotbar = hotbarTools,
 		gridSlots = gridTools,
 		overflow = overflowTools,
@@ -660,76 +677,81 @@ local function restoreTrash(player): boolean
 end
 
 -- ===================== EQUIP / UNEQUIP =====================
-local function equipBySlot(player, slotNumber: number): boolean
-	local state = playerState[player.UserId]
-	if not state or not state.hotbarSlots[slotNumber] then
-		return false
-	end
+local EQUIP_SWITCH_DELAY = 0.18 -- gap between putting the old item away and drawing the new one
 
-	local toolName = baseOf(state.hotbarSlots[slotNumber])
+--- Hold / put away the item in slot `key`. Every slot is its own item (copies of one unstackable item share a
+--- Tool name but are different items), so WHICH slot is held is tracked in state.heldKey. Tapping the held slot
+--- puts it away; tapping any other slot puts the held item away first, then draws the new one.
+local function toggleHold(player, key: string): boolean
+	local state = playerState[player.UserId]
 	local character = player.Character
 	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-	if not humanoid then
+	if not state or not humanoid or humanoid.Health <= 0 then
 		return false
 	end
+	local base = baseOf(key)
+	if not countEntries(player)[key] then
+		return false -- no such slot
+	end
 
-	-- Check if already equipped → toggle off
-	for _, child in ipairs(character:GetChildren()) do
-		if child:IsA("Tool") and child.Name == toolName then
-			humanoid:UnequipTools()
-			PlayEquipSound:FireClient(player, "unequip")
+	local heldAny = character:FindFirstChildOfClass("Tool") ~= nil
+	if heldAny and state.heldKey == key then
+		humanoid:UnequipTools()
+		state.heldKey = nil
+		PlayEquipSound:FireClient(player, "unequip")
+		InventoryDataManager.SendUpdate(player)
+		return true
+	end
+
+	-- A newer click wins: each call takes a ticket and gives up if it is no longer the latest
+	state.holdTicket = (state.holdTicket or 0) + 1
+	local ticket = state.holdTicket
+
+	if heldAny then
+		state.heldKey = nil
+		humanoid:UnequipTools()
+		PlayEquipSound:FireClient(player, "unequip")
+		InventoryDataManager.SendUpdate(player)
+		task.wait(EQUIP_SWITCH_DELAY)
+		if state.holdTicket ~= ticket or playerState[player.UserId] ~= state or humanoid.Health <= 0 then
+			return false
+		end
+	end
+
+	local backpack = player:FindFirstChild("Backpack")
+	for _, child in ipairs(backpack and backpack:GetChildren() or {}) do
+		if child:IsA("Tool") and child.Name == base then
+			humanoid:EquipTool(child)
+			state.heldKey = key
+			state.heldAt = os.clock()
+			PlayEquipSound:FireClient(player, "equip")
 			InventoryDataManager.SendUpdate(player)
 			return true
 		end
 	end
-
-	-- Find in backpack and equip
-	local backpack = player:FindFirstChild("Backpack")
-	if backpack then
-		for _, child in ipairs(backpack:GetChildren()) do
-			if child:IsA("Tool") and child.Name == toolName then
-				humanoid:EquipTool(child)
-				PlayEquipSound:FireClient(player, "equip")
-				InventoryDataManager.SendUpdate(player)
-				return true
-			end
-		end
-	end
-
 	return false
 end
 
-local function equipByName(player, key: string): boolean
-	local toolName = baseOf(key)
-	local character = player.Character
-	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-	if not humanoid then
+local function equipBySlot(player, slotNumber: number): boolean
+	local state = playerState[player.UserId]
+	local key = state and state.hotbarSlots[slotNumber]
+	if not key then
 		return false
 	end
+	return toggleHold(player, key)
+end
 
-	-- Toggle off if already equipped
-	for _, child in ipairs(character:GetChildren()) do
-		if child:IsA("Tool") and child.Name == toolName then
-			humanoid:UnequipTools()
-			PlayEquipSound:FireClient(player, "unequip")
-			InventoryDataManager.SendUpdate(player)
-			return true
+--- By slot key. Only items on the hotbar can be held: tools in the inventory grid must be moved to the hotbar.
+local function equipByName(player, key: string): boolean
+	local state = playerState[player.UserId]
+	if not state then
+		return false
+	end
+	for i = 1, MAX_HOTBAR_SLOTS do
+		if state.hotbarSlots[i] == key then
+			return toggleHold(player, key)
 		end
 	end
-
-	-- Equip from backpack
-	local backpack = player:FindFirstChild("Backpack")
-	if backpack then
-		for _, child in ipairs(backpack:GetChildren()) do
-			if child:IsA("Tool") and child.Name == toolName then
-				humanoid:EquipTool(child)
-				PlayEquipSound:FireClient(player, "equip")
-				InventoryDataManager.SendUpdate(player)
-				return true
-			end
-		end
-	end
-
 	return false
 end
 

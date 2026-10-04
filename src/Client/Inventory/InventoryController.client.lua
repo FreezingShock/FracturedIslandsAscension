@@ -247,6 +247,7 @@ local currentGridData = {} -- { [1..27] = toolInfo or nil } (sparse)
 local currentOverflowData = {} -- { toolInfo, ... } (dense)
 local currentTotalItems = 0
 local currentMaxCapacity = 1000
+local currentHeldKey = nil -- slot key of the item in hand (server-tracked: copies share a Tool name)
 local currentTrash = nil -- toolInfo of the last trashed stack (server keeps it until the next trash / rejoin)
 
 -- Pages: the 27 grid slots followed by the overflow items, cut into pages of whole rows (9 per row).
@@ -326,6 +327,11 @@ local function setSlotIcon(slotFrame, toolInfo)
 	end
 	img.Visible = hasIcon
 	slotFrame.ToolName.Visible = not hasIcon
+end
+
+--- Only the slot the server says is in hand counts as equipped (copies of one item share a Tool name).
+local function isHeldSlot(toolInfo)
+	return toolInfo ~= nil and currentHeldKey ~= nil and toolInfo.name == currentHeldKey
 end
 
 --- "12x" for stackables; nothing for unstackable gear (a "1x" on every sword is noise).
@@ -465,10 +471,7 @@ local function createHotbarSlots()
 			-- ── Normal item slot ──
 			newSlot.MouseEnter:Connect(function()
 				slotData.hovered = true
-				local isEq = currentEquippedTool
-					and slotData.toolInfo
-					and currentEquippedTool.Name == (slotData.toolInfo.toolName or slotData.toolInfo.name)
-				updateSlotVisual(newSlot, slotData.toolInfo, isEq, true)
+				updateSlotVisual(newSlot, slotData.toolInfo, isHeldSlot(slotData.toolInfo), true)
 				if slotData.toolInfo then
 					showItemTooltip(slotData.toolInfo)
 				end
@@ -476,10 +479,7 @@ local function createHotbarSlots()
 
 			newSlot.MouseLeave:Connect(function()
 				slotData.hovered = false
-				local isEq = currentEquippedTool
-					and slotData.toolInfo
-					and currentEquippedTool.Name == (slotData.toolInfo.toolName or slotData.toolInfo.name)
-				updateSlotVisual(newSlot, slotData.toolInfo, isEq, false)
+				updateSlotVisual(newSlot, slotData.toolInfo, isHeldSlot(slotData.toolInfo), false)
 				hideItemTooltip()
 			end)
 		end
@@ -832,7 +832,7 @@ local function refreshHotbar()
 
 		slotData.toolInfo = hasItem and toolInfo or nil
 
-		local isEq = currentEquippedTool and hasItem and currentEquippedTool.Name == (toolInfo.toolName or toolInfo.name)
+		local isEq = hasItem and isHeldSlot(toolInfo)
 		updateSlotVisual(slotData.frame, slotData.toolInfo, isEq, slotData.hovered)
 
 		slotData.frame.Visible = hasItem
@@ -1070,8 +1070,8 @@ local function _startDragOnSlot(toolInfo, slotFrame, location, slotIndex, mouseP
 		return
 	end
 
-	-- Block drag when inventory panel is closed (right click equips; see rightClickEquip)
-	if not inventoryVisible then
+	-- With the inventory closed only the hotbar reacts (a tap holds the item); nothing can be dragged
+	if not inventoryVisible and location ~= "hotbar" then
 		return
 	end
 
@@ -1094,7 +1094,9 @@ local function _startDragOnSlot(toolInfo, slotFrame, location, slotIndex, mouseP
 		isDragging = false,
 	}
 
-	_showAllHotbarSlots()
+	if inventoryVisible then
+		_showAllHotbarSlots()
+	end
 end
 
 local function onDragMove(mousePos)
@@ -1104,7 +1106,7 @@ local function onDragMove(mousePos)
 
 	if not dragState.isDragging then
 		local dist = (mousePos - dragState.startPos).Magnitude
-		if dist < DRAG_THRESHOLD then
+		if dist < DRAG_THRESHOLD or not inventoryVisible then
 			return
 		end
 		dragState.isDragging = true
@@ -1182,6 +1184,7 @@ local function onDragEnd(mousePos)
 	local itemId = dragState.itemId
 	local equipSlot = dragState.equipSlot
 	local sourceLocation = dragState.sourceLocation
+	local sourceIndex = dragState.slotIndex
 
 	-- Hit test BEFORE cleanup (cleanup hides empty hotbar slots)
 	local targetSlot, targetLocation, targetSlotIndex, targetIsBlank
@@ -1203,8 +1206,14 @@ local function onDragEnd(mousePos)
 	setTrashHot(false)
 	suppressTooltip = false
 
-	-- ── Left click (no drag) does nothing: right click equips ──
+	-- ── Left click (no drag): a hotbar slot holds / puts away its item; inventory slots do nothing ──
 	if not wasDragging then
+		if sourceLocation == "hotbar" and sourceIndex and not isMobile then
+			task.spawn(function()
+				EquipToolFunc:InvokeServer(sourceIndex)
+			end)
+			UIClick:Play()
+		end
 		return
 	end
 
@@ -1378,7 +1387,7 @@ local function rightClickEquip(toolInfo, location, slotIndex)
 	elseif location == "hotbar" and slotIndex then
 		EquipToolFunc:InvokeServer(slotIndex)
 	else
-		EquipToolByNameFunc:InvokeServer(toolInfo.name)
+		return -- tools in the inventory cannot be held: move them to the hotbar first
 	end
 	UIClick:Play()
 end
@@ -1567,6 +1576,7 @@ UpdateInventoryEvent.OnClientEvent:Connect(function(data)
 	currentGridData = data.gridSlots or {}
 	currentOverflowData = data.overflow or {}
 	currentTrash = data.trash or nil -- false when the trash slot is empty
+	currentHeldKey = data.held or nil
 	currentTotalItems = data.total_items or 0
 	currentMaxCapacity = data.max_capacity or 1000
 
