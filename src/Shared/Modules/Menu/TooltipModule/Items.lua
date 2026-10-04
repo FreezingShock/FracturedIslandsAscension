@@ -71,7 +71,7 @@ end
 
 function Items.fromTool(toolInfo: any)
 	local reg = registry()
-	local def = reg and reg.getByToolName(toolInfo.name) or nil
+	local def = reg and reg.getByToolName(toolInfo.toolName or toolInfo.name) or nil
 
 	local rarity = toolInfo.rarity or (def and def.rarity) or 0
 	local rarityConf = reg and reg.getRarity(rarity) or nil
@@ -143,8 +143,12 @@ function Items.fromTool(toolInfo: any)
 	if def and def.clickHint then
 		config.click = def.clickHint
 	else
-		-- Every inventory item is a Tool, so the default action is equip.
-		config.click = { text = "TO EQUIP", color = "#FF5555", icon = "lmb" }
+		-- Right click equips / holds what can be worn or held; every item is moved by dragging (left click).
+		config.click = {}
+		if not def or def.equippable ~= false then
+			table.insert(config.click, Style.CLICK_HINTS.equip)
+		end
+		table.insert(config.click, Style.CLICK_HINTS.drag)
 	end
 
 	return config

@@ -155,7 +155,7 @@ function EquipmentService.Unequip(player, slotId: string): (boolean, string?)
 	return true
 end
 
-function EquipmentService.Equip(player, itemId: string, slotId: string?): (boolean, string?)
+function EquipmentService.Equip(player, itemId: string, slotId: string?, slotKey: string?): (boolean, string?)
 	local equipped = getSlots(player)
 	if not equipped then
 		return false, "Data not loaded"
@@ -181,7 +181,8 @@ function EquipmentService.Equip(player, itemId: string, slotId: string?): (boole
 	if humanoid then
 		humanoid:UnequipTools() -- if it was in hand, move it to the backpack
 	end
-	if InventoryDataManager.RemoveItem(player, def.toolName, 1) < 1 then
+	-- slotKey = the inventory slot the player clicked (identical copies each have their own slot)
+	if InventoryDataManager.RemoveItem(player, slotKey or def.toolName, 1) < 1 then
 		return false, "Could not remove item"
 	end
 
@@ -212,11 +213,16 @@ function EquipmentService.ClearAll(player)
 end
 
 -- ===================== REMOTES =====================
-EquipItemFunc.OnServerInvoke = function(player, slotId, itemId)
+EquipItemFunc.OnServerInvoke = function(player, slotId, itemId, slotKey)
 	if type(itemId) ~= "string" or (slotId ~= nil and type(slotId) ~= "string") then
 		return false
 	end
-	return (EquipmentService.Equip(player, itemId, slotId))
+	local def = Items.get(itemId)
+	-- a slot key is "ToolName" or "ToolName#2"; anything else is ignored
+	if type(slotKey) ~= "string" or not def or (slotKey ~= def.toolName and not slotKey:match("^" .. def.toolName:gsub("%p", "%%%0") .. "#%d+$")) then
+		slotKey = nil
+	end
+	return (EquipmentService.Equip(player, itemId, slotId, slotKey))
 end
 
 UnequipItemFunc.OnServerInvoke = function(player, slotId)
@@ -234,11 +240,6 @@ GetEquippedFunc.OnServerInvoke = function(player)
 	end
 	return snapshot(EquipmentService.GetEquipped(player))
 end
-
--- Clicking an armor / accessory in the inventory routes here.
-InventoryDataManager.SetEquipHandler(function(player, def)
-	return (EquipmentService.Equip(player, def.id, def.slot))
-end)
 
 -- ===================== PLAYER LIFECYCLE =====================
 local function onPlayer(player)

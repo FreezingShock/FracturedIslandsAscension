@@ -8,10 +8,10 @@
 --
 --    - Slots show the equipped item's name letters in its rarity color
 --    - Hover = tooltip (empty slot hint, or the item's full tooltip)
---    - Click a filled slot = unequip
+--    - Right click a filled slot = unequip
 --    - Drag an armor / accessory from the inventory onto its slot = equip
 --      (InventoryController asks us for the slot under the cursor through
---       MenuBridge.updateEquipDrag; clicking the item also equips it)
+--       MenuBridge.updateEquipDrag; right clicking the item also equips it)
 --    - The clip tweens open with the inventory (via MenuBridge.onStateChanged)
 --    - The Profile page's equipment buttons (Nexus menu hides the clip) use the
 --      same logic through M.bindExternal(buttons)
@@ -191,14 +191,14 @@ local function showSlotTooltip(slotId: string, button: GuiButton)
 			displayName = def.displayName,
 			rarity = def.rarity,
 		})
-		config.click = { text = "TO UNEQUIP", color = "#FF5555", icon = "lmb" }
+		config.click = { TooltipModule.Style.CLICK_HINTS.unequip }
 	else
 		config = {
 			title = slot.displayName,
 			titleColor = slot.color,
 			icon = { color = slot.color },
 			tags = { { text = slot.type == "armor" and "Armor" or "Accessory", color = "#FFFFFF" } },
-			description = "Empty. Click an item in your inventory, or drag it here, to equip it.",
+			description = "Empty. Right click an item in your inventory, or drag it here, to equip it.",
 		}
 	end
 	TooltipModule.show(config, TOOLTIP_SOURCE .. slotId, button)
@@ -285,7 +285,7 @@ addView = function(slotId: string, button: GuiButton)
 		button.MouseLeave:Connect(function()
 			TooltipModule.hide(TOOLTIP_SOURCE .. slotId)
 		end),
-		button.MouseButton1Click:Connect(function()
+		button.MouseButton2Click:Connect(function()
 			onSlotClick(slotId)
 		end),
 	}

@@ -17,15 +17,15 @@
 --    - Drop to world (entire stack, Tool clones at character pos)
 --    - Saving on PlayerRemoving (Tool instances → profile data)
 --    - Firing UpdateInventory RemoteEvent on every mutation
---    (Armor / accessory equipping lives in EquipmentService; clicking such an
---     item routes there through SetEquipHandler.)
+--    (Armor / accessory equipping lives in EquipmentService: the client right
+--     clicks the item -> EquipItem remote. Number keys just hold it as a Tool.)
+--    - Per-item stack cap from the registry (gear maxStack = 1)
 --
 --  API (for other server scripts):
 --    InventoryDataManager.AddItem(player, toolName, count?)
 --    InventoryDataManager.RemoveItem(player, toolName, count?)
 --    InventoryDataManager.GetTotalItems(player) → number
 --    InventoryDataManager.SendUpdate(player)
---    InventoryDataManager.SetEquipHandler(fn(player, itemDef) -> bool)
 --
 --  RemoteFunction/Event handlers are wired internally.
 -- ============================================================
@@ -76,24 +76,6 @@ local MoveToEndFunc = ensureRemote("RemoteFunction", "MoveToEnd")
 -- Mirrors _Inventory profile data at runtime for fast access.
 local playerState = {} -- [userId] = { toolOrder, nextOrderIndex, hotbarSlots, gridSlots }
 
--- Set by EquipmentService: armor / accessory items equip into their slot
--- instead of being held as a Tool.
-local equipHandler = nil
-function InventoryDataManager.SetEquipHandler(fn)
-	equipHandler = fn
-end
-
---- If this tool is an armor / accessory piece, equip it into its slot.
---- Returns true when handled (so the caller skips the normal hold-the-tool path).
-local function tryEquipEquipment(player, toolName: string): boolean
-	local def = ItemRegistry.getByToolName(toolName)
-	if def and def.slot and equipHandler then
-		equipHandler(player, def)
-		return true
-	end
-	return false
-end
-
 -- ===================== HELPERS =====================
 
 --- Get all Tool-holding containers for a player.
@@ -142,8 +124,43 @@ function InventoryDataManager.GetTotalItems(player): number
 	return total
 end
 
---- Build rich toolInfo from a toolName and count info.
-local function buildToolInfo(toolName, info)
+--- Most copies of one item the inventory may hold (gear is 1, resources 999).
+local function stackLimit(toolName: string): number
+	local def = ItemRegistry.getByToolName(toolName)
+	return math.min(MAX_STACK, def and def.maxStack or MAX_STACK)
+end
+
+-- Slot keys. The first stack of an item is keyed by its Tool name; further stacks (every extra copy
+-- of an unstackable item) get "Name#2", "Name#3"... so identical items can sit in different slots.
+local function baseOf(key: string): string
+	return key:match("^(.-)#%d+$") or key
+end
+local function keyIndex(key: string): number
+	return tonumber(key:match("#(%d+)$")) or 1
+end
+local function keyFor(base: string, idx: number): string
+	return idx == 1 and base or (base .. "#" .. idx)
+end
+
+--- Inventory entries, one per slot-able stack: [key] = { count, rarity, base }
+local function countEntries(player)
+	local result = {}
+	for name, info in pairs(countTools(player)) do
+		local limit = stackLimit(name)
+		local left, idx = info.count, 1
+		while left > 0 do
+			local n = math.min(limit, left)
+			result[keyFor(name, idx)] = { count = n, rarity = info.rarity, base = name }
+			left -= n
+			idx += 1
+		end
+	end
+	return result
+end
+
+--- Build rich toolInfo for a slot key (see baseOf) and its entry.
+local function buildToolInfo(key, info)
+	local toolName = info.base or baseOf(key)
 	local regItem = ItemRegistry.getByToolName(toolName)
 	local itemId = regItem and regItem.id or toolName
 	local displayName = regItem and regItem.displayName or toolName
@@ -151,10 +168,12 @@ local function buildToolInfo(toolName, info)
 	local description = regItem and regItem.description or ""
 
 	return {
-		name = toolName, -- Tool.Name (used for equip/swap/drop)
+		name = key, -- slot key (used for equip/swap/drop; == toolName for the first stack)
+		toolName = toolName, -- Tool.Name
 		itemId = itemId, -- registry key
 		displayName = displayName,
-		count = math.min(info.count, MAX_STACK),
+		count = info.count,
+		equippable = regItem == nil or regItem.equippable ~= false,
 		rarity = rarity,
 		description = description,
 		category = regItem and regItem.category or nil,
@@ -201,7 +220,7 @@ local function autoFillGrid(player)
 		return
 	end
 
-	local toolInfo = countTools(player)
+	local toolInfo = countEntries(player)
 
 	-- Build set of tool names already placed (hotbar or grid)
 	local placed = {}
@@ -244,7 +263,7 @@ local function pruneStaleSlots(player)
 		return
 	end
 
-	local toolInfo = countTools(player)
+	local toolInfo = countEntries(player)
 
 	for i = 1, GRID_SLOTS do
 		if state.gridSlots[i] and not toolInfo[state.gridSlots[i]] then
@@ -271,7 +290,7 @@ function InventoryDataManager.SendUpdate(player)
 	pruneStaleSlots(player)
 	autoFillGrid(player)
 
-	local toolInfo = countTools(player)
+	local toolInfo = countEntries(player)
 	local invData = SkillsDataManager.GetInventoryData(player)
 	local maxCapacity = invData and invData.maxCapacity or 1000
 
@@ -379,10 +398,10 @@ function InventoryDataManager.AddItem(player, toolName: string, count: number): 
 	local maxCap = invData.maxCapacity
 	local canAdd = math.min(count, maxCap - currentTotal)
 
-	-- Check per-tool stack limit
+	-- Per-item cap (total capacity is checked above); extra copies of unstackable items get their own slots
 	local existing = countTools(player)
-	local currentCount = existing[toolName] and existing[toolName].count or 0
-	canAdd = math.min(canAdd, MAX_STACK - currentCount)
+	local before = existing[toolName] and existing[toolName].count or 0
+	canAdd = math.min(canAdd, MAX_STACK - before)
 
 	if canAdd <= 0 then
 		return 0
@@ -393,23 +412,27 @@ function InventoryDataManager.AddItem(player, toolName: string, count: number): 
 		clone.Parent = backpack
 	end
 
-	-- New tool type: first empty hotbar item slot (1..8, 9 is the menu), then the first empty grid slot
+	-- New stacks: first empty hotbar item slot (1..8, 9 is the menu), then the first empty grid slot
 	local state = playerState[player.UserId]
-	if state and not existing[toolName] then
-		if not findGridSlotForTool(state, toolName) and not findHotbarSlotForTool(state, toolName) then
-			local hotbarSlot
-			for i = 1, MAX_HOTBAR_SLOTS - 1 do
-				if not state.hotbarSlots[i] then
-					hotbarSlot = i
-					break
+	if state then
+		local limit = stackLimit(toolName)
+		for idx = math.ceil(before / limit) + 1, math.ceil((before + canAdd) / limit) do
+			local key = keyFor(toolName, idx)
+			if not findGridSlotForTool(state, key) and not findHotbarSlotForTool(state, key) then
+				local hotbarSlot
+				for i = 1, MAX_HOTBAR_SLOTS - 1 do
+					if not state.hotbarSlots[i] then
+						hotbarSlot = i
+						break
+					end
 				end
-			end
-			if hotbarSlot then
-				state.hotbarSlots[hotbarSlot] = toolName
-			else
-				local emptySlot = findFirstEmptyGridSlot(state)
-				if emptySlot then
-					state.gridSlots[emptySlot] = toolName
+				if hotbarSlot then
+					state.hotbarSlots[hotbarSlot] = key
+				else
+					local emptySlot = findFirstEmptyGridSlot(state)
+					if emptySlot then
+						state.gridSlots[emptySlot] = key
+					end
 				end
 			end
 		end
@@ -422,9 +445,46 @@ end
 
 -- ===================== REMOVE ITEM =====================
 --- Remove Tool instances from player's Backpack (not Character).
+--- `key` is a Tool name or a slot key ("Name#2"); with a slot key of an unstackable item the
+--- copy in THAT slot is the one that goes away (the others close up behind it).
 --- Returns number actually removed.
-function InventoryDataManager.RemoveItem(player, toolName: string, count: number?): number
+local function compactKeys(state, base: string, clearKey: string?, entryCount: number)
+	if clearKey then
+		for i = 1, GRID_SLOTS do
+			if state.gridSlots[i] == clearKey then
+				state.gridSlots[i] = nil
+			end
+		end
+		for i = 1, MAX_HOTBAR_SLOTS do
+			if state.hotbarSlots[i] == clearKey then
+				state.hotbarSlots[i] = nil
+			end
+		end
+	end
+	local refs = {}
+	for i = 1, MAX_HOTBAR_SLOTS do
+		local k = state.hotbarSlots[i]
+		if k and baseOf(k) == base then
+			table.insert(refs, { map = state.hotbarSlots, i = i, idx = keyIndex(k) })
+		end
+	end
+	for i = 1, GRID_SLOTS do
+		local k = state.gridSlots[i]
+		if k and baseOf(k) == base then
+			table.insert(refs, { map = state.gridSlots, i = i, idx = keyIndex(k) })
+		end
+	end
+	table.sort(refs, function(a, b)
+		return a.idx < b.idx
+	end)
+	for n, ref in ipairs(refs) do
+		ref.map[ref.i] = n <= entryCount and keyFor(base, n) or nil
+	end
+end
+
+function InventoryDataManager.RemoveItem(player, key: string, count: number?): number
 	count = count or 1
+	local base = baseOf(key)
 	local backpack = player:FindFirstChild("Backpack")
 	if not backpack then
 		return 0
@@ -435,28 +495,20 @@ function InventoryDataManager.RemoveItem(player, toolName: string, count: number
 		if removed >= count then
 			break
 		end
-		if child:IsA("Tool") and child.Name == toolName then
+		if child:IsA("Tool") and child.Name == base then
 			child:Destroy()
 			removed = removed + 1
 		end
 	end
 
-	-- If tool type is fully gone, clear grid slot
-	-- (pruneStaleSlots in SendUpdate handles this, but do it eagerly)
+	-- Close up the slot keys (pruneStaleSlots in SendUpdate would also cope, but this keeps the
+	-- slot you removed from, not just the last one)
 	if removed > 0 then
-		local remaining = countTools(player)
-		if not remaining[toolName] then
-			local state = playerState[player.UserId]
-			if state then
-				local gridIdx = findGridSlotForTool(state, toolName)
-				if gridIdx then
-					state.gridSlots[gridIdx] = nil
-				end
-				local hotbarIdx = findHotbarSlotForTool(state, toolName)
-				if hotbarIdx then
-					state.hotbarSlots[hotbarIdx] = nil
-				end
-			end
+		local state = playerState[player.UserId]
+		if state then
+			local left = countTools(player)[base]
+			local limit = stackLimit(base)
+			compactKeys(state, base, limit == 1 and key or nil, left and math.ceil(left.count / limit) or 0)
 		end
 	end
 
@@ -471,7 +523,12 @@ end
 --- The Tools are destroyed (and slots cleared by RemoveItem) BEFORE the drop is created.
 local lastDropAt = {} -- [userId] = os.clock()
 
-local function dropItem(player, toolName: string, all: boolean?): boolean
+local function dropItem(player, key: string, all: boolean?): boolean
+	local entry = countEntries(player)[key]
+	if not entry then
+		return false
+	end
+	local toolName = entry.base
 	local character = player.Character
 	local rootPart = character and character:FindFirstChild("HumanoidRootPart")
 	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
@@ -500,7 +557,7 @@ local function dropItem(player, toolName: string, all: boolean?): boolean
 		return false
 	end
 
-	local amount = all and owned or 1
+	local amount = all and entry.count or 1
 	local custom
 	local sample = backpack and backpack:FindFirstChild(toolName) or character:FindFirstChild(toolName)
 	if sample and sample:IsA("Tool") then
@@ -511,7 +568,7 @@ local function dropItem(player, toolName: string, all: boolean?): boolean
 	if heldCount > 0 and (all or backpackCount == 0) then
 		humanoid:UnequipTools()
 	end
-	local removed = InventoryDataManager.RemoveItem(player, toolName, amount)
+	local removed = InventoryDataManager.RemoveItem(player, key, amount)
 	if removed <= 0 then
 		return false
 	end
@@ -541,10 +598,7 @@ local function equipBySlot(player, slotNumber: number): boolean
 		return false
 	end
 
-	local toolName = state.hotbarSlots[slotNumber]
-	if tryEquipEquipment(player, toolName) then
-		return true
-	end
+	local toolName = baseOf(state.hotbarSlots[slotNumber])
 	local character = player.Character
 	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
 	if not humanoid then
@@ -577,10 +631,8 @@ local function equipBySlot(player, slotNumber: number): boolean
 	return false
 end
 
-local function equipByName(player, toolName: string): boolean
-	if tryEquipEquipment(player, toolName) then
-		return true
-	end
+local function equipByName(player, key: string): boolean
+	local toolName = baseOf(key)
 	local character = player.Character
 	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
 	if not humanoid then
@@ -621,7 +673,7 @@ local function swapItems(player, sourceName: string, targetName: string): boolea
 	end
 
 	-- Validate both tools exist
-	local tools = countTools(player)
+	local tools = countEntries(player)
 	if not tools[sourceName] or not tools[targetName] then
 		return false
 	end
@@ -707,7 +759,7 @@ local function assignHotbar(player, slotIndex: number, toolName: string): boolea
 	end
 
 	-- Validate tool exists in inventory
-	local tools = countTools(player)
+	local tools = countEntries(player)
 	if not tools[toolName] then
 		return false
 	end
@@ -746,7 +798,7 @@ local function assignGridSlot(player, gridIndex: number, toolName: string): bool
 	end
 
 	-- Validate tool exists
-	local tools = countTools(player)
+	local tools = countEntries(player)
 	if not tools[toolName] then
 		return false
 	end

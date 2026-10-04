@@ -35,7 +35,6 @@ return {
 			},
 		},
 		footer = "All projectiles and stats scale with your power-ups and modifications.",
-		clickHint = { text = "TO EQUIP", color = "#FF5555", icon = "lmb" },
 	},
 
 	sword_basic = {

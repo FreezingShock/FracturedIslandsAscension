@@ -30,6 +30,7 @@
 	  model        optional: ItemModels key (default = item id); see ItemModels.lua
 	  custom       reserved for per-item customization (string); carried on the Tool and drops
 	  maxStack, toolName
+	  equippable   true = right click holds / wears it (default: weapon, armor, accessory, consumable)
 --]]
 
 local Slots = require(script.Parent:WaitForChild("Slots"))
@@ -38,12 +39,12 @@ local Stats = require(script.Parent:WaitForChild("Stats"))
 local Define = {}
 
 local CATEGORY_DEFAULTS = {
-	weapon = { typeTag = "Weapon", maxStack = 1 },
-	armor = { typeTag = "Armor", maxStack = 1 },
-	accessory = { typeTag = "Accessory", maxStack = 1 },
-	material = { typeTag = "Resource", maxStack = 999 },
-	consumable = { typeTag = "Consumable", maxStack = 999 },
-	misc = { maxStack = 999 },
+	weapon = { typeTag = "Weapon", maxStack = 1, equippable = true },
+	armor = { typeTag = "Armor", maxStack = 1, equippable = true },
+	accessory = { typeTag = "Accessory", maxStack = 1, equippable = true },
+	material = { typeTag = "Resource", maxStack = 999, equippable = false },
+	consumable = { typeTag = "Consumable", maxStack = 999, equippable = true },
+	misc = { maxStack = 999, equippable = false },
 }
 
 local WEAPON_DEFAULTS = { weaponType = "sword", attackSpeed = 1, knockback = 10, range = 20 }
@@ -124,6 +125,7 @@ function Define.item(id: string, spec: any, category: string?): any
 		model = spec.model, -- key into ItemModels.MODELS (defaults to the item id)
 		custom = spec.custom, -- reserved per-item customization data (string); unused for now
 		maxStack = spec.maxStack or defaults.maxStack,
+		equippable = if spec.equippable ~= nil then spec.equippable else defaults.equippable,
 		toolName = spec.toolName or name,
 		stats = stats,
 		weapon = weapon,

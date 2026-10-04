@@ -82,6 +82,14 @@ Style.CLICK_ICONS = {
 	rmb = { offset = Vector2.new(32, 0), size = Vector2.new(32, 32) },
 }
 
+-- Shared click-hint pills (the icon is the mouse button, the text finishes the sentence).
+-- Right click = green (equip), left click = aqua (drag).
+Style.CLICK_HINTS = {
+	equip = { text = "TO EQUIP", color = "#55FF55", icon = "rmb" },
+	unequip = { text = "TO UNEQUIP", color = "#55FF55", icon = "rmb" },
+	drag = { text = "TO DRAG", color = "#55FFFF", icon = "lmb" },
+}
+
 -- ===================== COLOR HELPERS =====================
 
 --- Normalize a Color3 or "#RRGGBB"/"RRGGBB" string to upper-case "#RRGGBB".

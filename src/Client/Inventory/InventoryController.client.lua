@@ -435,7 +435,7 @@ local function createHotbarSlots()
 				slotData.hovered = true
 				local isEq = currentEquippedTool
 					and slotData.toolInfo
-					and currentEquippedTool.Name == slotData.toolInfo.name
+					and currentEquippedTool.Name == (slotData.toolInfo.toolName or slotData.toolInfo.name)
 				updateSlotVisual(newSlot, slotData.toolInfo, isEq, true)
 				if slotData.toolInfo then
 					showItemTooltip(slotData.toolInfo)
@@ -446,7 +446,7 @@ local function createHotbarSlots()
 				slotData.hovered = false
 				local isEq = currentEquippedTool
 					and slotData.toolInfo
-					and currentEquippedTool.Name == slotData.toolInfo.name
+					and currentEquippedTool.Name == (slotData.toolInfo.toolName or slotData.toolInfo.name)
 				updateSlotVisual(newSlot, slotData.toolInfo, isEq, false)
 				hideItemTooltip()
 			end)
@@ -630,7 +630,7 @@ local function refreshHotbar()
 
 		slotData.toolInfo = hasItem and toolInfo or nil
 
-		local isEq = currentEquippedTool and hasItem and currentEquippedTool.Name == toolInfo.name
+		local isEq = currentEquippedTool and hasItem and currentEquippedTool.Name == (toolInfo.toolName or toolInfo.name)
 		updateSlotVisual(slotData.frame, slotData.toolInfo, isEq, slotData.hovered)
 
 		slotData.frame.Visible = hasItem
@@ -850,14 +850,8 @@ local function _startDragOnSlot(toolInfo, slotFrame, location, slotIndex, mouseP
 		return
 	end
 
-	-- Block drag when inventory panel is closed — click-to-equip only
+	-- Block drag when inventory panel is closed (right click equips; see rightClickEquip)
 	if not inventoryVisible then
-		if location == "hotbar" and slotIndex then
-			EquipToolFunc:InvokeServer(slotIndex)
-		else
-			EquipToolByNameFunc:InvokeServer(toolInfo.name)
-		end
-		UIClick:Play()
 		return
 	end
 
@@ -936,7 +930,6 @@ local function onDragEnd(mousePos)
 	local itemId = dragState.itemId
 	local equipSlot = dragState.equipSlot
 	local sourceLocation = dragState.sourceLocation
-	local sourceSlotIndex = dragState.slotIndex
 
 	-- Hit test BEFORE cleanup (cleanup hides empty hotbar slots)
 	local targetSlot, targetLocation, targetSlotIndex, targetIsBlank
@@ -955,14 +948,8 @@ local function onDragEnd(mousePos)
 	_hideTransferFrame()
 	suppressTooltip = false
 
-	-- ── Click (no drag) → equip/toggle ──
+	-- ── Left click (no drag) does nothing: right click equips ──
 	if not wasDragging then
-		if sourceLocation == "hotbar" and sourceSlotIndex then
-			EquipToolFunc:InvokeServer(sourceSlotIndex)
-		else
-			EquipToolByNameFunc:InvokeServer(toolName)
-		end
-		UIClick:Play()
 		return
 	end
 
@@ -973,7 +960,7 @@ local function onDragEnd(mousePos)
 		if equipSlot and overEquipSlot == equipSlot and itemId then
 			local equipItemFunc = ReplicatedStorage:FindFirstChild("EquipItem")
 			if equipItemFunc then
-				equipItemFunc:InvokeServer(equipSlot, itemId)
+				equipItemFunc:InvokeServer(equipSlot, itemId, toolName)
 				if selectSound2 then
 					selectSound2:Play()
 				end
@@ -1098,6 +1085,28 @@ local function handleMobileTap(toolInfo, slotFrame, location, slotIndex, isBlank
 	end
 end
 
+-- ===================== RIGHT CLICK EQUIP =====================
+--- Armor / accessories go to their equipment slot; everything else is held (hotbar slot or by name).
+local function rightClickEquip(toolInfo, location, slotIndex)
+	if not toolInfo or dragState or toolInfo.equippable == false then
+		return
+	end
+	if toolInfo.slot and toolInfo.itemId then
+		local equipItemFunc = ReplicatedStorage:FindFirstChild("EquipItem")
+		if equipItemFunc then
+			task.spawn(function()
+				equipItemFunc:InvokeServer(toolInfo.slot, toolInfo.itemId, toolInfo.name)
+			end)
+		end
+	elseif location == "hotbar" and slotIndex then
+		EquipToolFunc:InvokeServer(slotIndex)
+	else
+		EquipToolByNameFunc:InvokeServer(toolInfo.name)
+	end
+	TooltipModule.forceHide()
+	UIClick:Play()
+end
+
 -- ===================== SLOT INPUT WIRING =====================
 local function wireHotbarSlotInput(slotIndex)
 	local slotData = hotbarSlots[slotIndex]
@@ -1111,6 +1120,10 @@ local function wireHotbarSlotInput(slotIndex)
 		end)
 		return
 	end
+
+	selectBtn.MouseButton2Down:Connect(function()
+		rightClickEquip(slotData.toolInfo, "hotbar", slotIndex)
+	end)
 
 	selectBtn.MouseButton1Down:Connect(function()
 		if not slotData.toolInfo then
@@ -1139,6 +1152,12 @@ end
 local function wireGridSlotInput(gridIndex)
 	local slotData = gridPool[gridIndex]
 	local selectBtn = slotData.frame:WaitForChild("Select")
+
+	selectBtn.MouseButton2Down:Connect(function()
+		if not slotData.isBlank then
+			rightClickEquip(slotData.toolInfo, "grid", gridIndex)
+		end
+	end)
 
 	selectBtn.MouseButton1Down:Connect(function()
 		-- Blank slots: not drag sources, but can receive mobile selection
@@ -1172,6 +1191,10 @@ end
 local function wireOverflowSlotInput(poolIndex)
 	local slotData = overflowPool[poolIndex]
 	local selectBtn = slotData.frame:WaitForChild("Select")
+
+	selectBtn.MouseButton2Down:Connect(function()
+		rightClickEquip(slotData.toolInfo, "overflow", poolIndex)
+	end)
 
 	selectBtn.MouseButton1Down:Connect(function()
 		if not slotData.toolInfo then

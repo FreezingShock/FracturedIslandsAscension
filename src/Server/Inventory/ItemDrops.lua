@@ -35,6 +35,12 @@ local FULL_RETRY = 1 -- seconds before retrying a pickup that did not fit
 local MERGE_RADIUS = 2.5 -- settled identical drops closer than this clump together
 local MERGE_INTERVAL = 0.5
 local MAX_DROP_STACK = 999
+
+--- Gear (maxStack 1) never clumps into one drop; resources clump up to MAX_DROP_STACK.
+local function dropStackLimit(toolName: string): number
+	local def = Items.getByToolName(toolName)
+	return math.min(MAX_DROP_STACK, def and def.maxStack or MAX_DROP_STACK)
+end
 local LAYER_STEPS = { 1, 4, 16, 48 } -- count <= step -> that many layers; above the last -> 5
 local LAYER_SPREAD = 0.55 -- studs the extra layers are scattered over
 local TICK = 0.2
@@ -253,7 +259,7 @@ function ItemDrops.spawn(opts: any): number?
 
 	-- thrown drops fly first and clump once they land (see mergeSettled); only still spawns merge instantly
 	for _, rec in pairs(typeof(opts.velocity) == "Vector3" and {} or drops) do
-		if rec.toolName == toolName and rec.custom == opts.custom and rec.count + count <= MAX_DROP_STACK then
+		if rec.toolName == toolName and rec.custom == opts.custom and rec.count + count <= dropStackLimit(toolName) then
 			local at = rec.base or rec.body.Position
 			if (at - position).Magnitude <= MERGE_RADIUS then
 				rec.count += count
@@ -372,7 +378,7 @@ local function mergeSettled()
 					drops[b.id]
 					and a.toolName == b.toolName
 					and a.custom == b.custom
-					and a.count + b.count <= MAX_DROP_STACK
+					and a.count + b.count <= dropStackLimit(a.toolName)
 					and (a.base - b.base).Magnitude <= MERGE_RADIUS
 				then
 					local keep, gone = a, b
