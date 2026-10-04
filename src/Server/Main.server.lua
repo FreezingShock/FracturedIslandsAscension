@@ -1,16 +1,9 @@
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
+-- Boots the data managers early so their PlayerAdded hooks are connected before players load.
+-- (The legacy AdminToolManager remotes were removed: the Nexus admin panel talks to the AdminAction
+--  RemoteFunction in InventoryTestCommands, which re-checks admin and validates every input.)
 local ServerScriptService = game:GetService("ServerScriptService")
-local SkillsDataManager = require(ServerScriptService:WaitForChild("SkillsDataManager")) :: any
--- ServerScriptService > StatisticsLoader (Script)
-local StatisticsDataManager =
-	require(game:GetService("ServerScriptService"):WaitForChild("StatisticsDataManager")) :: any
--- StatManager removed — not needed
--- ============================================================
---  AdminToolManager Initializer (LocalScript)
---  ServerScriptService
--- ============================================================
 
-local AdminToolManager = require(script.Parent:WaitForChild("AdminToolManager"))
-AdminToolManager.WireRemotes()
+require(ServerScriptService:WaitForChild("SkillsDataManager"))
+require(ServerScriptService:WaitForChild("StatisticsDataManager"))
 
-print("[Admin System] Initialized ✓")
+print("[Main] Server boot ✓")

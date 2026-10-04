@@ -19,7 +19,7 @@ local SPIN_SPEED = 1.6 -- rad/s
 local CULL_DISTANCE = 80
 local RISE_TIME = 0.4 -- seconds to ease up from the ground once settled
 
-local drops: { [Model]: { phase: number, settledAt: number? } } = {}
+local drops: { [Model]: { phase: number, settledAt: number?, base: Vector3? } } = {}
 
 local function register(model: Instance)
 	if not model:IsA("Model") then
@@ -49,8 +49,13 @@ RunService.PreRender:Connect(function()
 	local camPos = camera.CFrame.Position
 	local t = os.clock()
 	for model, info in pairs(drops) do
-		local base = model:GetAttribute("BasePos")
-		if base and model:GetAttribute("Settled") then
+		-- BasePos never changes once a drop has settled: read the attributes once, not 2x per drop per frame
+		local base = info.base
+		if not base and model:GetAttribute("Settled") then
+			base = model:GetAttribute("BasePos")
+			info.base = base
+		end
+		if base then
 			if not info.settledAt then
 				info.settledAt = t
 			end

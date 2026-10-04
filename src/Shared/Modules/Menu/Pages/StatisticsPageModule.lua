@@ -22,6 +22,14 @@
 	  titleFor(skill)          rich-text page title
 --]]
 
+-- Debug logging is off by default (these ran in hot paths: every navigation / purchase / notification).
+local DEBUG = false
+local function dprint(...)
+	if DEBUG then
+		print(...)
+	end
+end
+
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
 local ContentProvider = game:GetService("ContentProvider")
@@ -661,7 +669,7 @@ function M.init(sharedRefs)
 		end)
 	end
 
-	print("[StatisticsPageModule] Initialized ✓")
+	dprint("[StatisticsPageModule] Initialized ✓")
 end
 
 return M

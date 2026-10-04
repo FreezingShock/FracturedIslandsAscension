@@ -35,8 +35,10 @@ local Items = require(Modules:WaitForChild("Items")) :: any
 local SkillsDataManager = require(ServerScriptService:WaitForChild("SkillsDataManager")) :: any
 local AttributeStatManager = require(ServerScriptService:WaitForChild("AttributeStatManager")) :: any
 local InventoryDataManager = require(ServerScriptService:WaitForChild("InventoryDataManager")) :: any
+local RateLimiter = require(ServerScriptService:WaitForChild("RateLimiter")) :: any
 
 local EquipmentService = {}
+local allow = RateLimiter.new(12, 6)
 
 -- ===================== REMOTES =====================
 local function ensureRemote(className: string, name: string)
@@ -214,7 +216,7 @@ end
 
 -- ===================== REMOTES =====================
 EquipItemFunc.OnServerInvoke = function(player, slotId, itemId, slotKey)
-	if type(itemId) ~= "string" or (slotId ~= nil and type(slotId) ~= "string") then
+	if not allow(player) or type(itemId) ~= "string" or (slotId ~= nil and type(slotId) ~= "string") then
 		return false
 	end
 	local def = Items.get(itemId)
@@ -226,7 +228,7 @@ EquipItemFunc.OnServerInvoke = function(player, slotId, itemId, slotKey)
 end
 
 UnequipItemFunc.OnServerInvoke = function(player, slotId)
-	if type(slotId) ~= "string" or not Items.Slots.exists(slotId) then
+	if not allow(player) or type(slotId) ~= "string" or not Items.Slots.exists(slotId) then
 		return false
 	end
 	return (EquipmentService.Unequip(player, slotId))

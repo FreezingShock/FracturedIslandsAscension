@@ -50,13 +50,48 @@ local function safeFindFirstChild(parent, name)
 	return parent and parent:FindFirstChild(name) or nil
 end
 
--- Cancel any in-flight tween for a given element.
+-- Cancel any in-flight tween for a given element (and the label fades that run with it).
 local function cancelTween(entry, element)
 	local t = entry.tweens[element]
 	if t then
 		t:Cancel()
 		entry.tweens[element] = nil
 	end
+	local labelTweens = entry.labelTweens[element]
+	if labelTweens then
+		for _, lt in ipairs(labelTweens) do
+			lt:Cancel()
+		end
+		entry.labelTweens[element] = nil
+	end
+end
+
+-- Text labels under an element, cached (the tween paths used to GetDescendants every time).
+local function labelsOf(entry, element)
+	local cached = entry.labels[element]
+	if not cached then
+		cached = {}
+		for _, d in ipairs(element:GetDescendants()) do
+			if d:IsA("TextLabel") then
+				table.insert(cached, d)
+			end
+		end
+		entry.labels[element] = cached
+	end
+	return cached
+end
+
+local function fadeLabels(entry, element, info, transparency)
+	local list = {}
+	for _, label in ipairs(labelsOf(entry, element)) do
+		local tw = TweenService:Create(label, info, {
+			TextTransparency = transparency,
+			TextStrokeTransparency = transparency,
+		})
+		tw:Play()
+		table.insert(list, tw)
+	end
+	entry.labelTweens[element] = list
 end
 
 -- Populate BB labels from the registry config. Runs once per button.
@@ -128,26 +163,17 @@ local function tweenIn(entry)
 
 		-- Snap to offset position, then tween back to rest
 		element.Position = restPos + TWEEN_OFFSET
-		for _, label in ipairs(element:GetDescendants()) do
-			if label:IsA("TextLabel") then
-				label.TextTransparency = 1
-				label.TextStrokeTransparency = 1
-			end
+		for _, label in ipairs(labelsOf(entry, element)) do
+			label.TextTransparency = 1
+			label.TextStrokeTransparency = 1
 		end
 
 		local t = TweenService:Create(element, tweenInfoIn, { Position = restPos })
 		entry.tweens[element] = t
 		t:Play()
 
-		-- Fade in labels in parallel
-		for _, label in ipairs(element:GetDescendants()) do
-			if label:IsA("TextLabel") then
-				TweenService:Create(label, tweenInfoIn, {
-					TextTransparency = 0,
-					TextStrokeTransparency = 0,
-				}):Play()
-			end
-		end
+		-- Fade in labels in parallel (tracked, so a quick leave cancels them instead of fighting them)
+		fadeLabels(entry, element, tweenInfoIn, 0)
 	end
 end
 
@@ -167,14 +193,7 @@ local function tweenOut(entry)
 		t:Play()
 		longestTween = t
 
-		for _, label in ipairs(element:GetDescendants()) do
-			if label:IsA("TextLabel") then
-				TweenService:Create(label, tweenInfoOut, {
-					TextTransparency = 1,
-					TextStrokeTransparency = 1,
-				}):Play()
-			end
-		end
+		fadeLabels(entry, element, tweenInfoOut, 1)
 	end
 
 	if longestTween then
@@ -226,6 +245,8 @@ local function registerButton(part)
 		tagsFrame = bb:FindFirstChild("Tags"),
 		inRange = false,
 		tweens = {},
+		labelTweens = {}, -- [element] = { Tween } (the label fades that accompany each slide)
+		labels = {}, -- [element] = { TextLabel } cache
 		originalPositions = {},
 	}
 
@@ -243,8 +264,8 @@ local function unregisterButton(part)
 	if not entry then
 		return
 	end
-	for _, t in pairs(entry.tweens) do
-		t:Cancel()
+	for element in pairs(entry.originalPositions) do
+		cancelTween(entry, element)
 	end
 	tracked[part] = nil
 end
@@ -298,4 +319,3 @@ end
 CollectionService:GetInstanceAddedSignal(TAG):Connect(registerButton)
 CollectionService:GetInstanceRemovedSignal(TAG):Connect(unregisterButton)
 
-print("ButtonVisibilityController: Loaded ✓")

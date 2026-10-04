@@ -87,6 +87,20 @@ local registeredButtons = {}
 -- Remote for stat updates (multiplier changes)
 local StatisticsUpdated = ReplicatedStorage:WaitForChild("StatisticsUpdated")
 
+-- ===================== GAIN LABEL TEXT (single source: populate + refresh) =====================
+--- "+12 Seeds" with the green amount and the stat's own colour. Both the first paint and every refresh
+--- use this, so the label no longer changes style after the first StatisticsUpdated.
+local function gainedText(buttonDef, tierConfig, multiplier: number): string
+	local statName, statColor = getStatDisplay(buttonDef.skill, buttonDef.statKey)
+	local displayGain = math.max(1, math.floor(tierConfig.baseGain * multiplier))
+	return string.format(
+		'<font color="#55FF55">+%s</font> <font weight="bold" color="%s">%s</font>',
+		formatNumber(displayGain),
+		statColor,
+		statName
+	)
+end
+
 -- ===================== BILLBOARD POPULATION =====================
 --- Populates the BillboardGui labels on a button model.
 --- Reads current multiplier from latestPayload if available.
@@ -135,16 +149,8 @@ local function populateBillboard(buttonModel: Model, buttonDef, tierConfig)
 	if gainedFrame then
 		gainedLabel = gainedFrame:FindFirstChild("GainedAmountLabel")
 		if gainedLabel and gainedLabel:IsA("TextLabel") then
-			local statName, statColor = getStatDisplay(buttonDef.skill, buttonDef.statKey)
-			local displayGain = math.max(1, math.floor(tierConfig.baseGain * multiplier))
-			local amount = formatNumber(displayGain)
 			gainedLabel.RichText = true
-			gainedLabel.Text = string.format(
-				'<font color="#55FF55">+%s</font> <font weight="bold"color="%s">%s</font>',
-				amount,
-				statColor,
-				statName
-			)
+			gainedLabel.Text = gainedText(buttonDef, tierConfig, multiplier)
 		end
 	end
 
@@ -264,9 +270,11 @@ local function refreshAllBillboards()
 				multiplier = skillData[def.statKey].multiplier or 1
 			end
 
-			local displayGain = math.max(1, math.floor(tier.baseGain * multiplier))
-			local statName = getStatDisplay(def.skill, def.statKey)
-			label.Text = string.format('<font color="#55FF55">+%s</font> %s', formatNumber(displayGain), statName)
+			-- StatisticsUpdated arrives ~10x/s: only touch the label when its text actually changes
+			local text = gainedText(def, tier, multiplier)
+			if label.Text ~= text then
+				label.Text = text
+			end
 		end
 
 		-- ── Update afford color ──

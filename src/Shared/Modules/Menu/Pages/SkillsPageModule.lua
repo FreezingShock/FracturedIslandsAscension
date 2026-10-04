@@ -12,6 +12,14 @@
 --    toggleRomanNumerals() — returns new useRomanNumerals state
 -- ============================================================
 
+-- Debug logging is off by default (these ran in hot paths: every navigation / purchase / notification).
+local DEBUG = false
+local function dprint(...)
+	if DEBUG then
+		print(...)
+	end
+end
+
 local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
 local Players = game:GetService("Players")
@@ -961,7 +969,7 @@ function M.init(sharedRefs, frame)
 		end)
 	end
 
-	print("SkillsPageModule: Initialized ✓")
+	dprint("SkillsPageModule: Initialized ✓")
 end
 
 --- Called when user clicks a skill on the SkillsGrid.

@@ -198,6 +198,8 @@ local function stripAdminFrom(list)
 end
 
 -- ===================== LOAD / RELEASE =====================
+local sanitizeAttributeData -- defined below (was an accidental global)
+
 function AttributeStatManager.LoadData(player)
 	local profile = AttributeProfileStore:LoadProfileAsync("Attributes_" .. player.UserId, "ForceLoad")
 
@@ -243,7 +245,7 @@ end
 
 -- ===================== SANITIZE =====================
 --- Ensure all attribute keys exist with proper structure.
-function sanitizeAttributeData(data)
+sanitizeAttributeData = function(data)
 	for skill, attrs in pairs(ATTRIBUTE_CATEGORIES) do
 		for _, attr in ipairs(attrs) do
 			local attrKey = attr.key

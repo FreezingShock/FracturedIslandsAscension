@@ -499,7 +499,9 @@ local function createGridSlots()
 		}
 		gridPool[i] = slotData
 
+		-- GlassVisible = false: only the hover outline + stroke; the 3D glass parts are never built for these slots
 		LiquidGlassHandler.apply(newSlot, {
+			GlassVisible = false,
 			SeparatedBorderOutline = {
 				enabled = true,
 				offset = 4,
@@ -507,7 +509,6 @@ local function createGridSlots()
 				color = Color3.fromRGB(255, 255, 255),
 			},
 		})
-		LiquidGlassHandler.setGlassVisible(newSlot, false)
 
 		-- Start as blank
 		renderSlotBlank(newSlot)
@@ -557,6 +558,7 @@ local function getOrCreateOverflowSlot(index)
 	overflowPool[index] = slotData
 
 	LiquidGlassHandler.apply(newSlot, {
+		GlassVisible = false,
 		SeparatedBorderOutline = {
 			enabled = true,
 			offset = 4,
@@ -564,7 +566,6 @@ local function getOrCreateOverflowSlot(index)
 			color = Color3.fromRGB(255, 255, 255),
 		},
 	})
-	LiquidGlassHandler.setGlassVisible(newSlot, false)
 
 	newSlot.MouseEnter:Connect(function()
 		slotData.hovered = true

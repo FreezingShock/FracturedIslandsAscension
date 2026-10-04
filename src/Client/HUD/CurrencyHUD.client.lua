@@ -24,6 +24,7 @@ local playerGui = player:WaitForChild("PlayerGui")
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local StatisticsConfig = require(Modules:WaitForChild("StatisticsConfig")) :: any
 local MoneyLib = require(Modules:WaitForChild("MoneyLib")) :: any
+local MenuBridge = require(Modules:WaitForChild("MenuBridge")) :: any
 local StatisticsUpdated = ReplicatedStorage:WaitForChild("StatisticsUpdated")
 
 -- ===================== CONFIG =====================
@@ -72,6 +73,21 @@ list.HorizontalAlignment = Enum.HorizontalAlignment.Center
 list.Padding = UDim.new(0, 6)
 list.SortOrder = Enum.SortOrder.LayoutOrder
 list.Parent = container
+
+-- ===================== HIDE WHILE THE MENU IS OPEN =====================
+-- The bar sits over the menu's title bar, so it slides up out of the way while the menu/inventory is open.
+local POS_SHOWN = UDim2.new(0.5, 0, 0, 10)
+local POS_HIDDEN = UDim2.new(0.5, 0, 0, -140)
+local SLIDE_INFO = TweenInfo.new(0.35, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
+local slideTween: Tween? = nil
+
+MenuBridge.onStateChanged(function(mode)
+	if slideTween then
+		slideTween:Cancel()
+	end
+	slideTween = TweenService:Create(container, SLIDE_INFO, { Position = mode and POS_HIDDEN or POS_SHOWN })
+	slideTween:Play()
+end)
 
 -- ===================== CHIP FACTORY =====================
 local chips = {} -- [skill .. "." .. key] = { frame, amount, scale, last, rate? }
@@ -230,4 +246,3 @@ local function refresh(payload)
 end
 
 StatisticsUpdated.OnClientEvent:Connect(refresh)
-print("CurrencyHUD: Ready ✓")

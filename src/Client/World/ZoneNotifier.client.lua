@@ -2,6 +2,14 @@
 -- Receives zone entry events from server and animates notifications
 -- Single notification at a time: new zone requests overwrite queue (last-zone-wins)
 
+-- Debug logging is off by default (these ran in hot paths: every navigation / purchase / notification).
+local DEBUG = false
+local function dprint(...)
+	if DEBUG then
+		print(...)
+	end
+end
+
 local ZoneConfig = require(
 	game:GetService("ReplicatedStorage"):WaitForChild("Modules"):WaitForChild("Config"):WaitForChild("ZoneConfig")
 )
@@ -37,7 +45,7 @@ local function getZoneNotifyEvent()
 	local ReplicatedStorage = game:GetService("ReplicatedStorage")
 	local Events = ReplicatedStorage:WaitForChild("Events")
 	local event = Events:WaitForChild("ZoneEntered") -- BLOCK until event exists
-	print("[ZoneNotifier] Connected to ZoneEntered RemoteEvent ✓")
+	dprint("[ZoneNotifier] Connected to ZoneEntered RemoteEvent ✓")
 	return event
 end
 
@@ -57,15 +65,15 @@ local function getTemplate()
 	local template = GUI:FindFirstChild("LocationNotif")
 	if not template then
 		warn("[ZoneNotifier] GUI.LocationNotif template not found")
-		print("[ZoneNotifier] DEBUG: Contents of ReplicatedStorage.GUI:")
+		dprint("[ZoneNotifier] DEBUG: Contents of ReplicatedStorage.GUI:")
 		for _, child in ipairs(GUI:GetChildren()) do
-			print("  - " .. child.Name .. " (" .. child.ClassName .. ")")
+			dprint("  - " .. child.Name .. " (" .. child.ClassName .. ")")
 		end
 		return nil
 	end
 
 	templateCache = template
-	print("[ZoneNotifier] Template loaded: " .. template:GetFullName())
+	dprint("[ZoneNotifier] Template loaded: " .. template:GetFullName())
 	return templateCache
 end
 
@@ -195,10 +203,11 @@ local function animateNotificationIn(notifGui, notifRecord)
 	mainTween:Play()
 	notifRecord.mainTween = mainTween
 
-	print("[ZoneNotifier] Animating IN: " .. notifGui.Name)
+	dprint("[ZoneNotifier] Animating IN: " .. notifGui.Name)
 	-- Animate ZoneName sliding in from left (0,0,0,50) → (0,300,0,50)
 	local zoneFrame = boundingBox:FindFirstChild("ZoneFrame")
-	local Underline = zoneFrame:FindFirstChild("ZoneName"):FindFirstChild("Underline")
+	local zoneNameForUnderline = zoneFrame and zoneFrame:FindFirstChild("ZoneName")
+	local Underline = zoneNameForUnderline and zoneNameForUnderline:FindFirstChild("Underline")
 	if zoneFrame then
 		local zoneName = zoneFrame:FindFirstChild("ZoneName")
 		if zoneName then
@@ -207,7 +216,9 @@ local function animateNotificationIn(notifGui, notifRecord)
 				Size = UDim2.new(0, 300, 0, 50),
 			})
 			zoneNameTween:Play()
-			Underline.Visible = true
+			if Underline then
+				Underline.Visible = true
+			end
 			table.insert(notifRecord.tabTweens, zoneNameTween)
 
 			-- Typewriter effect on zone name text label (start after main slide begins)
@@ -218,10 +229,10 @@ local function animateNotificationIn(notifGui, notifRecord)
 						-- Get zone name from zoneFrame attribute (stored in populateNotificationGui)
 						local zoneNameData = zoneNameLabel:GetAttribute("ZoneName") or ""
 						if zoneNameData ~= "" then
-							print("[ZoneNotifier] Typewriting: " .. zoneNameData)
+							dprint("[ZoneNotifier] Typewriting: " .. zoneNameData)
 							typewriteText(zoneNameLabel, zoneNameData, 0.6)
 						else
-							print("[ZoneNotifier] WARNING: ZoneName attribute empty on zoneFrame")
+							dprint("[ZoneNotifier] WARNING: ZoneName attribute empty on zoneFrame")
 						end
 					end
 				end)
@@ -305,7 +316,8 @@ local function animateNotificationOut(notifGui, notifRecord)
 			end
 		end
 	end
-	local Underline = zoneFrame:FindFirstChild("ZoneName"):FindFirstChild("Underline")
+	local zoneNameForUnderline = zoneFrame and zoneFrame:FindFirstChild("ZoneName")
+	local Underline = zoneNameForUnderline and zoneNameForUnderline:FindFirstChild("Underline")
 	-- Animate ZoneName sliding out to left (0,300,0,50) → (0,0,0,50)
 	if zoneFrame then
 		local zoneName = zoneFrame:FindFirstChild("ZoneName")
@@ -314,7 +326,9 @@ local function animateNotificationOut(notifGui, notifRecord)
 				Size = UDim2.new(0, 0, 0, 50),
 			})
 			zoneNameTween:Play()
-			Underline.Visible = false
+			if Underline then
+				Underline.Visible = false
+			end
 			table.insert(notifRecord.tabTweens, zoneNameTween)
 		end
 	end
@@ -352,7 +366,7 @@ local function animateNotificationOut(notifGui, notifRecord)
 		outSound:Play()
 	end
 
-	print("[ZoneNotifier] Animating OUT: " .. notifGui.Name)
+	dprint("[ZoneNotifier] Animating OUT: " .. notifGui.Name)
 	-- Main box tween down (after 0.5s, so it slides out after tabs)
 	task.delay(0.5, function()
 		if not notifGui or not notifGui.Parent then
@@ -379,7 +393,7 @@ local function populateNotificationGui(notifGui, notifData)
 	local colorDark = ZoneConfig.hexToColor3(notifData.colorDark)
 	local colorLight = ZoneConfig.hexToColor3(notifData.colorLight)
 
-	print("[ZoneNotifier] Applying colors - Dark: " .. tostring(colorDark) .. ", Light: " .. tostring(colorLight))
+	dprint("[ZoneNotifier] Applying colors - Dark: " .. tostring(colorDark) .. ", Light: " .. tostring(colorLight))
 
 	-- Update Zone Name (zone colors: dark for background, light for text/accent)
 	local zoneFrame = boundingBox:FindFirstChild("ZoneFrame")
@@ -388,12 +402,12 @@ local function populateNotificationGui(notifGui, notifData)
 		if zoneName then
 			-- Apply zone colors to ZoneName frame and its children
 			zoneName.BackgroundColor3 = colorDark -- ZoneName frame background (dark)
-			print("[ZoneNotifier] ✓ Set ZoneName.BackgroundColor3 to dark zone color")
+			dprint("[ZoneNotifier] ✓ Set ZoneName.BackgroundColor3 to dark zone color")
 
 			local underline = zoneName:FindFirstChild("Underline")
 			if underline then
 				underline.BackgroundColor3 = colorLight -- Underline background (light)
-				print("[ZoneNotifier] ✓ Set Underline.BackgroundColor3 to light zone color")
+				dprint("[ZoneNotifier] ✓ Set Underline.BackgroundColor3 to light zone color")
 			else
 				warn("[ZoneNotifier] Underline not found under ZoneName")
 			end
@@ -406,13 +420,13 @@ local function populateNotificationGui(notifGui, notifData)
 				zoneNameLabel:SetAttribute("ZoneName", notifData.zoneName)
 				-- Apply colors to text (light color)
 				zoneNameLabel.TextColor3 = colorLight -- Text color (light)
-				print("[ZoneNotifier] ✓ Set ZoneNameLabel.TextColor3 to light zone color")
+				dprint("[ZoneNotifier] ✓ Set ZoneNameLabel.TextColor3 to light zone color")
 
 				-- Apply color to UIStroke (dark color)
 				local stroke = zoneNameLabel:FindFirstChild("UIStroke")
 				if stroke then
 					stroke.Color = colorDark -- Stroke color (dark)
-					print("[ZoneNotifier] ✓ Set UIStroke.Color to dark zone color")
+					dprint("[ZoneNotifier] ✓ Set UIStroke.Color to dark zone color")
 				end
 			end
 		end
@@ -422,7 +436,7 @@ local function populateNotificationGui(notifGui, notifData)
 	local icon = zoneFrame:FindFirstChild("Icon")
 	if icon then
 		icon.ImageColor3 = colorLight -- Icon tinted to light zone color
-		print("[ZoneNotifier] ✓ Set Icon.ImageColor3 to light zone color")
+		dprint("[ZoneNotifier] ✓ Set Icon.ImageColor3 to light zone color")
 	else
 		warn("[ZoneNotifier] Icon not found under ZoneFrame")
 	end
@@ -434,7 +448,7 @@ local function populateNotificationGui(notifGui, notifData)
 		if skillTabBB then
 			-- Set visibility based on showSkillTab
 			skillTabBB.Visible = notifData.showSkillTab
-			print("[ZoneNotifier] ✓ Set SkillTabBB.Visible to " .. tostring(notifData.showSkillTab))
+			dprint("[ZoneNotifier] ✓ Set SkillTabBB.Visible to " .. tostring(notifData.showSkillTab))
 
 			if notifData.showSkillTab then
 				local skillTab = skillTabBB:FindFirstChild("SkillTab")
@@ -443,7 +457,7 @@ local function populateNotificationGui(notifGui, notifData)
 					local skillTabStroke = skillTab:FindFirstChild("UIStroke")
 					if skillTabStroke then
 						skillTabStroke.Color = notifData.skillColor
-						print("[ZoneNotifier] ✓ Set SkillTab.UIStroke.Color to skillColor")
+						dprint("[ZoneNotifier] ✓ Set SkillTab.UIStroke.Color to skillColor")
 					end
 
 					-- SkillTabBB.SkillTab.SkillIcon = spritesheet with ImageRectOffset/Size
@@ -455,8 +469,8 @@ local function populateNotificationGui(notifGui, notifData)
 						skillIcon.ImageRectOffset = Vector2.new(imageRect.Min.X, imageRect.Min.Y)
 						skillIcon.ImageRectSize =
 							Vector2.new(imageRect.Max.X - imageRect.Min.X, imageRect.Max.Y - imageRect.Min.Y)
-						print("[ZoneNotifier] ✓ Set SkillIcon.Image to spritesheet")
-						print(
+						dprint("[ZoneNotifier] ✓ Set SkillIcon.Image to spritesheet")
+						dprint(
 							"[ZoneNotifier] ✓ Set SkillIcon.ImageRectOffset/Size to coords: "
 								.. tostring(notifData.spriteCoord.x)
 								.. ", "
@@ -471,14 +485,14 @@ local function populateNotificationGui(notifGui, notifData)
 					if skillLabel then
 						skillLabel.Text = notifData.skill
 						skillLabel.TextColor3 = notifData.skillColor
-						print("[ZoneNotifier] ✓ Set SkillLabel.Text to: " .. notifData.skill)
-						print("[ZoneNotifier] ✓ Set SkillLabel.TextColor3 to skillColor")
+						dprint("[ZoneNotifier] ✓ Set SkillLabel.Text to: " .. notifData.skill)
+						dprint("[ZoneNotifier] ✓ Set SkillLabel.TextColor3 to skillColor")
 
 						-- SkillTabBB.SkillTab.SkillLabel.UIStroke.Color = skillColor
 						local skillLabelStroke = skillLabel:FindFirstChild("UIStroke")
 						if skillLabelStroke then
 							skillLabelStroke.Color = notifData.skillColor
-							print("[ZoneNotifier] ✓ Set SkillLabel.UIStroke.Color to skillColor")
+							dprint("[ZoneNotifier] ✓ Set SkillLabel.UIStroke.Color to skillColor")
 						else
 							warn("[ZoneNotifier] UIStroke not found under SkillLabel")
 						end
@@ -501,13 +515,13 @@ local function populateNotificationGui(notifGui, notifData)
 				local levelLabel = levelTab:FindFirstChildOfClass("TextLabel")
 				if levelLabel then
 					levelLabel.Text = "Lv. " .. notifData.levelRange
-					print("[ZoneNotifier] ✓ Set LevelTab text to: " .. notifData.levelRange)
+					dprint("[ZoneNotifier] ✓ Set LevelTab text to: " .. notifData.levelRange)
 				end
 			end
 		end
 	end
 
-	print("[ZoneNotifier] Populated GUI for zone: " .. notifData.zoneName)
+	dprint("[ZoneNotifier] Populated GUI for zone: " .. notifData.zoneName)
 end
 
 -- Core: Create GUI, populate, animate in, and track
@@ -524,7 +538,7 @@ local function displayNotification(notifData)
 	notifGui.Parent = playerGui
 	notifGui.Name = "ZoneNotif_" .. notifData.zoneName
 
-	print("[ZoneNotifier] Cloned template to playerGui: " .. notifGui:GetFullName())
+	dprint("[ZoneNotifier] Cloned template to playerGui: " .. notifGui:GetFullName())
 
 	-- Create tracking data for this notification
 	local notifRecord = {
@@ -549,7 +563,7 @@ local function displayNotification(notifData)
 	local displayDuration = 4
 	notificationDismissTime = tick() + displayDuration
 
-	print(
+	dprint(
 		"[ZoneNotifier] Showed notification for zone: "
 			.. notifData.zoneName
 			.. " (auto-dismiss in "
@@ -564,7 +578,7 @@ local function destroyCurrentAndProcessQueue()
 		if currentNotification.gui.Parent then
 			currentNotification.gui:Destroy()
 		end
-		print("[ZoneNotifier] Destroyed notification: " .. currentNotification.zoneName)
+		dprint("[ZoneNotifier] Destroyed notification: " .. currentNotification.zoneName)
 	end
 
 	currentNotification = nil
@@ -572,13 +586,13 @@ local function destroyCurrentAndProcessQueue()
 
 	-- Process queue: if there's a queued notification, show it
 	if queuedNotification then
-		print("[ZoneNotifier] Processing queued notification: " .. queuedNotification.zoneName)
+		dprint("[ZoneNotifier] Processing queued notification: " .. queuedNotification.zoneName)
 		local nextNotifData = queuedNotification
 		queuedNotification = nil
 		queuedZoneName = nil
 		displayNotification(nextNotifData)
 	else
-		print("[ZoneNotifier] Queue empty. Ready for next zone.")
+		dprint("[ZoneNotifier] Queue empty. Ready for next zone.")
 	end
 end
 
@@ -591,18 +605,18 @@ local function requestZoneNotification(notifData)
 	-- SPAM PREVENTION: Check if we've shown a notification for this zone too recently
 	local lastShowTime = notificationCooldown[zoneName] or 0
 	if currentTime - lastShowTime < SPAM_COOLDOWN_DURATION then
-		print("[ZoneNotifier] Spam blocked for: " .. zoneName)
+		dprint("[ZoneNotifier] Spam blocked for: " .. zoneName)
 		return
 	end
 
 	-- Update cooldown timer
 	notificationCooldown[zoneName] = currentTime
 
-	print("[ZoneNotifier] Notification requested for: " .. zoneName)
+	dprint("[ZoneNotifier] Notification requested for: " .. zoneName)
 
 	-- If nothing is showing, display immediately
 	if not currentNotification then
-		print("[ZoneNotifier] No current notification. Displaying immediately.")
+		dprint("[ZoneNotifier] No current notification. Displaying immediately.")
 		displayNotification(notifData)
 		return
 	end
@@ -610,11 +624,11 @@ local function requestZoneNotification(notifData)
 	-- If something is showing, queue the new one (overwrite if one already queued)
 	if queuedZoneName == zoneName then
 		-- Same zone already queued, don't add duplicate
-		print("[ZoneNotifier] Zone " .. zoneName .. " already queued. Ignoring duplicate request.")
+		dprint("[ZoneNotifier] Zone " .. zoneName .. " already queued. Ignoring duplicate request.")
 		return
 	end
 
-	print("[ZoneNotifier] Notification already showing (" .. currentNotification.zoneName .. "). Queuing: " .. zoneName)
+	dprint("[ZoneNotifier] Notification already showing (" .. currentNotification.zoneName .. "). Queuing: " .. zoneName)
 	queuedNotification = notifData
 	queuedZoneName = zoneName
 
@@ -634,16 +648,16 @@ end
 
 -- Listen for zone entry events from server
 local function startListening()
-	print("[ZoneNotifier] Waiting for ZoneEntered event...")
+	dprint("[ZoneNotifier] Waiting for ZoneEntered event...")
 	local ZoneNotifyEvent = getZoneNotifyEvent()
 
-	print("[ZoneNotifier] Connecting to ZoneEntered.OnClientEvent...")
+	dprint("[ZoneNotifier] Connecting to ZoneEntered.OnClientEvent...")
 	ZoneNotifyEvent.OnClientEvent:Connect(function(notifData)
-		print("[ZoneNotifier] ✓ Received zone notification: " .. notifData.zoneName)
+		dprint("[ZoneNotifier] ✓ Received zone notification: " .. notifData.zoneName)
 		requestZoneNotification(notifData)
 	end)
 
-	print("[ZoneNotifier] Listener ready ✓")
+	dprint("[ZoneNotifier] Listener ready ✓")
 end
 
 -- Heartbeat loop to check auto-dismiss timers
@@ -652,7 +666,7 @@ local function startAutoDismissLoop()
 		if notificationDismissTime and currentNotification then
 			local currentTime = tick()
 			if currentTime >= notificationDismissTime then
-				print("[ZoneNotifier] Auto-dismissing current notification: " .. currentNotification.zoneName)
+				dprint("[ZoneNotifier] Auto-dismissing current notification: " .. currentNotification.zoneName)
 
 				currentNotification._animatingOut = true
 				local totalOutDuration = ZoneConfig.ANIMATION.EXIT_DURATION + 0.5 + 0.1
@@ -668,10 +682,10 @@ local function startAutoDismissLoop()
 		end
 	end)
 
-	print("[ZoneNotifier] Auto-dismiss loop started ✓")
+	dprint("[ZoneNotifier] Auto-dismiss loop started ✓")
 end
 
 -- Initialize
 startListening()
 startAutoDismissLoop()
-print("[ZoneNotifier] Script initialized ✓")
+dprint("[ZoneNotifier] Script initialized ✓")

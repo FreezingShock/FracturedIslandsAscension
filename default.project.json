@@ -4,9 +4,6 @@
     "$className": "DataModel",
     "ServerScriptService": {
       "$className": "ServerScriptService",
-      "AdminToolManager": {
-        "$path": "src/Server/Admin/AdminToolManager.lua"
-      },
       "AttributeStatManager": {
         "$path": "src/Server/Data/AttributeStatManager.lua"
       },
@@ -15,9 +12,6 @@
       },
       "ChatService": {
         "$path": "src/Server/Chat/ChatService.lua"
-      },
-      "CloudManager": {
-        "$path": "src/Server/World/CloudManager.server.lua"
       },
       "EquipmentInit": {
         "$path": "src/Server/Inventory/EquipmentInit.server.lua"
@@ -42,6 +36,9 @@
       },
       "ProfileService": {
         "$path": "src/Server/Data/ProfileService.luau"
+      },
+      "RateLimiter": {
+        "$path": "src/Server/Data/RateLimiter.lua"
       },
       "SkillsDataManager": {
         "$path": "src/Server/Data/SkillsDataManager.lua"
@@ -68,9 +65,6 @@
         },
         "AdminPageModule": {
           "$path": "src/Shared/Modules/Menu/Pages/AdminPageModule.lua"
-        },
-        "AdminPanelModule": {
-          "$path": "src/Shared/Modules/Admin/AdminPanelModule.lua"
         },
         "ArmorAccessoriesController": {
           "$path": "src/Shared/Modules/Inventory/ArmorAccessoriesController.lua"
@@ -192,6 +186,9 @@
         "ChatController": {
           "$path": "src/Client/Chat/ChatController.client.lua"
         },
+        "CloudManager": {
+          "$path": "src/Client/World/CloudManager.client.lua"
+        },
         "CurrencyHUD": {
           "$path": "src/Client/HUD/CurrencyHUD.client.lua"
         },
@@ -203,6 +200,9 @@
         },
         "LiquidGlassBootstrap": {
           "$path": "src/Client/Menu/LiquidGlassBootstrap.client.lua"
+        },
+        "TreeSway": {
+          "$path": "src/Client/World/TreeSway.client.lua"
         },
         "UIPlaceholderCleanup": {
           "$path": "src/Client/HUD/UIPlaceholderCleanup.client.lua"

@@ -361,9 +361,23 @@ function SkillsDataManager.LoadData(player)
 	return profile.Data
 end
 
+-- Other managers that keep a live copy of their data (InventoryDataManager) register here so they can
+-- write it into the profile BEFORE it is released (PlayerRemoving order between scripts is not guaranteed).
+local beforeReleaseHooks: { (Player) -> () } = {}
+
+function SkillsDataManager.OnBeforeRelease(fn: (Player) -> ())
+	table.insert(beforeReleaseHooks, fn)
+end
+
 function SkillsDataManager.ReleaseData(player)
 	local profile = skillProfiles[player.UserId]
 	if profile then
+		for _, hook in ipairs(beforeReleaseHooks) do
+			local ok, err = pcall(hook, player)
+			if not ok then
+				warn("[SkillsDataManager] before-release hook failed: " .. tostring(err))
+			end
+		end
 		profile:Release()
 	end
 	skillProfiles[player.UserId] = nil
@@ -409,8 +423,8 @@ function SkillsDataManager.AddXP(player, skillName, amount)
 	end
 
 	local skill = data[skillName]
-	if not skill then
-		warn("[SkillsDataManager] Unknown skill: " .. skillName)
+	if type(skill) ~= "table" or type(amount) ~= "number" or amount ~= amount or amount < 0 then
+		warn("[SkillsDataManager] Bad AddXP call: " .. tostring(skillName) .. " " .. tostring(amount))
 		return false
 	end
 
@@ -453,8 +467,8 @@ function SkillsDataManager.SetLevel(player, skillName, level)
 	end
 
 	local skill = data[skillName]
-	if not skill then
-		warn("[SkillsDataManager] Unknown skill: " .. skillName)
+	if type(skill) ~= "table" then
+		warn("[SkillsDataManager] Unknown skill: " .. tostring(skillName))
 		return
 	end
 
@@ -478,10 +492,14 @@ local ChangeSkill = Instance.new("RemoteEvent")
 ChangeSkill.Name = "ChangeSkill"
 ChangeSkill.Parent = ReplicatedStorage
 
+local AdminConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("AdminConfig"))
+
 ChangeSkill.OnServerEvent:Connect(function(player, targetName, skillName, level)
-	-- Only allow admins
-	local AdminConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("AdminConfig"))
+	-- Only allow admins, and never trust the argument types
 	if not AdminConfig.isAdmin(player) then
+		return
+	end
+	if type(targetName) ~= "string" or type(skillName) ~= "string" or type(level) ~= "number" then
 		return
 	end
 

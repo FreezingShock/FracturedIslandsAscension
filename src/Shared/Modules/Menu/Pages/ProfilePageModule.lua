@@ -27,6 +27,14 @@
 --    setAttributeClickHandler(fn)           (CMC navigates to layer 3)
 -- ============================================================
 
+-- Debug logging is off by default (these ran in hot paths: every navigation / purchase / notification).
+local DEBUG = false
+local function dprint(...)
+	if DEBUG then
+		print(...)
+	end
+end
+
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
 
@@ -119,8 +127,13 @@ local TOOLTIP_SOURCE = "profile"
 local STAT_TOOLTIP_SOURCE = "profile_stat"
 
 -- ===================== REMOTES =====================
-local StatUpdated = ReplicatedStorage:FindFirstChild("StatUpdated")
-local RequestStats = ReplicatedStorage:FindFirstChild("RequestStats")
+-- The server (re)creates these at startup (the place may hold stale instances of the wrong class), so wait
+-- for the real ones instead of grabbing whatever exists at require time.
+local StatUpdated = ReplicatedStorage:WaitForChild("StatUpdated", 10)
+local RequestStats = ReplicatedStorage:WaitForChild("RequestStats", 10)
+if RequestStats and not RequestStats:IsA("RemoteFunction") then
+	RequestStats = nil -- stale RemoteEvent from the place: the server is about to replace it
+end
 
 -- ===================== HELPERS =====================
 
@@ -355,7 +368,7 @@ function M.init(sharedRefs, menu2Frame)
 	TooltipModule = sharedRefs.TooltipModule
 
 	if TooltipModule then
-		print("[ProfilePageModule] TooltipModule from sharedRefs: ✓")
+		dprint("[ProfilePageModule] TooltipModule from sharedRefs: ✓")
 	else
 		warn("[ProfilePageModule] sharedRefs.TooltipModule is NIL — will use direct require fallback")
 		TooltipModule = TooltipModuleDirect
@@ -368,7 +381,7 @@ function M.init(sharedRefs, menu2Frame)
 	if menu2Frame then
 		profileMenu2Frame = menu2Frame
 	end
-	print("[ProfilePageModule] profileMenu2Frame will be set via setMenu2Frame() on navigate")
+	dprint("[ProfilePageModule] profileMenu2Frame will be set via setMenu2Frame() on navigate")
 
 	-- ── Resolve templates from PlayerGui (same pattern as StatisticsPageModule) ──
 	local CentralizedMenu = player.PlayerGui:WaitForChild("CentralizedAscensionMenu")
@@ -378,21 +391,21 @@ function M.init(sharedRefs, menu2Frame)
 	if not statSlotTemplate then
 		warn("[ProfilePageModule] StatSlot template NOT FOUND in TemporaryMenus")
 	else
-		print("[ProfilePageModule] StatSlot template: ✓")
+		dprint("[ProfilePageModule] StatSlot template: ✓")
 	end
 
 	blankSlotTemplate = TemporaryMenus:FindFirstChild("BlankSlot") or TemporaryMenus:WaitForChild("BlankSlot", 5)
 	if not blankSlotTemplate then
 		warn("[ProfilePageModule] BlankSlot template NOT FOUND in TemporaryMenus")
 	else
-		print("[ProfilePageModule] BlankSlot template: ✓")
+		dprint("[ProfilePageModule] BlankSlot template: ✓")
 	end
 
 	-- ── Validate config ──
 	if #CONTENT_SLOTS == 0 then
 		warn("[ProfilePageModule] CONTENT_SLOTS is empty — did you add PROFILE_MENU2_CONTENT_SLOTS to ProfileConfig?")
 	else
-		print("[ProfilePageModule] CONTENT_SLOTS: ✓ (" .. #CONTENT_SLOTS .. " positions)")
+		dprint("[ProfilePageModule] CONTENT_SLOTS: ✓ (" .. #CONTENT_SLOTS .. " positions)")
 	end
 
 	-- ── Listen for StatUpdated ──
@@ -400,25 +413,35 @@ function M.init(sharedRefs, menu2Frame)
 		StatUpdated.OnClientEvent:Connect(function(data)
 			sanitizeStatData(data)
 			cachedAttributeData = data
-			print("[ProfilePageModule] StatUpdated received, cached " .. tostring(#data) .. " attributes")
+			dprint("[ProfilePageModule] StatUpdated received")
 		end)
 	else
 		warn("[ProfilePageModule] StatUpdated RemoteEvent not found — attribute values will show 0")
 	end
 
-	-- ── Request initial data ──
-	if RequestStats then
-		task.delay(1, function()
-			local data = RequestStats:InvokeServer()
-			if data then
-				sanitizeStatData(data)
-				cachedAttributeData = data
-				print("[ProfilePageModule] RequestStats returned, cached " .. tostring(#data) .. " attributes")
+	-- ── Request initial data ── (StatUpdated may have fired before this script connected)
+	task.spawn(function()
+		local remote
+		for _ = 1, 40 do -- the server replaces the place's stale RemoteEvent with the RemoteFunction at startup
+			remote = ReplicatedStorage:FindFirstChild("RequestStats")
+			if remote and remote:IsA("RemoteFunction") then
+				break
 			end
-		end)
-	end
+			remote = nil
+			task.wait(0.25)
+		end
+		if not remote then
+			return
+		end
+		local data = remote:InvokeServer()
+		if data then
+			sanitizeStatData(data)
+			cachedAttributeData = data
+			dprint("[ProfilePageModule] RequestStats returned")
+		end
+	end)
 
-	print("ProfilePageModule: Initialized ✓")
+	dprint("ProfilePageModule: Initialized ✓")
 end
 
 -- ===================== PROFILE GRID (Menu1) TOOLTIPS =====================
@@ -568,7 +591,7 @@ function M.openAttributeGrid(skillName, activeFrame)
 		return
 	end
 
-	print("[ProfilePageModule] openAttributeGrid: " .. skillName .. " (" .. #attrs .. " attrs)")
+	dprint("[ProfilePageModule] openAttributeGrid: " .. skillName .. " (" .. #attrs .. " attrs)")
 
 	-- ── Update Category button ──
 	local categoryBtn = profileMenu2Frame:FindFirstChild("Category")
@@ -632,7 +655,7 @@ function M.openAttributeGrid(skillName, activeFrame)
 		)
 	end
 
-	print("[ProfilePageModule] Cloned " .. numAttrs .. " StatSlots")
+	dprint("[ProfilePageModule] Cloned " .. numAttrs .. " StatSlots")
 
 	-- ── Fill remaining content positions with BlankSlots ──
 	if blankSlotTemplate then
@@ -646,7 +669,7 @@ function M.openAttributeGrid(skillName, activeFrame)
 			table.insert(dynamicSlots, blank)
 			blanksCloned = blanksCloned + 1
 		end
-		print("[ProfilePageModule] Cloned " .. blanksCloned .. " fill blanks")
+		dprint("[ProfilePageModule] Cloned " .. blanksCloned .. " fill blanks")
 	end
 end
 
@@ -657,7 +680,7 @@ function M.closeAttributeGrid()
 		TooltipModule.forceHide()
 	end
 	cleanupDynamicSlots()
-	print("[ProfilePageModule] closeAttributeGrid: cleaned up")
+	dprint("[ProfilePageModule] closeAttributeGrid: cleaned up")
 end
 
 -- ===================== PROFILE MENU 3 — ATTRIBUTE SOURCES =====================

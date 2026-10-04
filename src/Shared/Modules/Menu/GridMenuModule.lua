@@ -39,6 +39,14 @@
 --    hasGrid(gridKey)
 -- ============================================================
 
+-- Debug logging is off by default (these ran in hot paths: every navigation / purchase / notification).
+local DEBUG = false
+local function dprint(...)
+	if DEBUG then
+		print(...)
+	end
+end
+
 local TweenService = game:GetService("TweenService")
 
 -- ===================== MODULE TABLE (forward-declared) =====================
@@ -171,10 +179,13 @@ local function depopulateBuffer(label)
 		return
 	end
 
-	-- Hook: onDepopulate
+	-- Hook: onDepopulate (protected: cleanup below must always run)
 	local pooled = pooledGrids[bd.gridKey]
 	if pooled and pooled.hooks and pooled.hooks.onDepopulate then
-		pooled.hooks.onDepopulate()
+		local ok, err = pcall(pooled.hooks.onDepopulate)
+		if not ok then
+			warn("[GridPool] onDepopulate failed for " .. tostring(bd.gridKey) .. ": " .. tostring(err))
+		end
 	end
 
 	-- Disconnect all tracked connections
@@ -192,7 +203,7 @@ local function depopulateBuffer(label)
 	-- Anything still scheduled against this buffer's previous contents is stale.
 	bd.gen = (bd.gen or 0) + 1
 
-	print(
+	dprint(
 		"[GridPool] Depopulated "
 			.. oldKey
 			.. " from buffer "
@@ -224,6 +235,9 @@ local function populateBuffer(label, gridKey)
 	end
 	bd.frame.Visible = false
 	bd.frame.GroupTransparency = 0
+
+	bd.gridKey = gridKey -- claimed up front: depopulateBuffer then cleans this buffer even if a hook below errors
+	bd.gen = (bd.gen or 0) + 1
 
 	-- 1. Clone icons from template folder → parent to buffer
 	local clonedButtons = {} -- btnName → GuiButton instance
@@ -313,8 +327,10 @@ local function populateBuffer(label, gridKey)
 
 	-- 5. Hook: dynamic tooltip wiring (returns extra connections)
 	if pooled.hooks and pooled.hooks.onWireTooltips then
-		local extraConns = pooled.hooks.onWireTooltips(clonedButtons)
-		if extraConns then
+		local ok, extraConns = pcall(pooled.hooks.onWireTooltips, clonedButtons)
+		if not ok then
+			warn("[GridPool] onWireTooltips failed for " .. gridKey .. ": " .. tostring(extraConns))
+		elseif extraConns then
 			for _, conn in ipairs(extraConns) do
 				table.insert(bd.connections, conn)
 			end
@@ -323,13 +339,13 @@ local function populateBuffer(label, gridKey)
 
 	-- 6. Hook: post-populate (for page modules that add dynamic content)
 	if pooled.hooks and pooled.hooks.onPopulate then
-		pooled.hooks.onPopulate(bd.frame)
+		local ok, err = pcall(pooled.hooks.onPopulate, bd.frame)
+		if not ok then
+			warn("[GridPool] onPopulate failed for " .. gridKey .. ": " .. tostring(err))
+		end
 	end
 
-	bd.gridKey = gridKey
-	bd.gen = (bd.gen or 0) + 1
-
-	print("[GridPool] Populated " .. gridKey .. " → buffer " .. label .. ": " .. #bd.connections .. " connections")
+	dprint("[GridPool] Populated " .. gridKey .. " → buffer " .. label .. ": " .. #bd.connections .. " connections")
 end
 
 -- ===================== TRANSITION ENGINE =====================
@@ -502,7 +518,7 @@ function M.initBuffers(bA, bB, blankSlot)
 	buffersReady = true
 	bA.Visible = false
 	bB.Visible = false
-	print("[GridPool] Buffers initialized ✓")
+	dprint("[GridPool] Buffers initialized ✓")
 end
 
 -- ===================== MODULE: REGISTER GRID (LEGACY) =====================
@@ -600,7 +616,7 @@ function M.registerPooledGrid(gridKey, templateFolder, buttonConfigs, options)
 			onWireTooltips = options.onWireTooltips,
 		},
 	}
-	print("[GridPool] Registered pooled grid: " .. gridKey .. " ✓")
+	dprint("[GridPool] Registered pooled grid: " .. gridKey .. " ✓")
 end
 
 -- ===================== MODULE: SHOW ROOT =====================
@@ -659,7 +675,17 @@ end
 
 --- Push the current grid onto the stack and transition to a new grid.
 --- Handles all four hybrid cases automatically.
+local NAV_COOLDOWN = 0.2
+local lastNavAt = 0
+
 function M.navigateToGrid(gridKey)
+	-- A double-click lands on the old buffer's button while it fades out: ignore the second navigation
+	local nowClock = os.clock()
+	if nowClock - lastNavAt < NAV_COOLDOWN then
+		return
+	end
+	lastNavAt = nowClock
+
 	-- Validate target
 	local tgtPooled = isPooled(gridKey)
 	local tgtLegacy = grids[gridKey] ~= nil
@@ -694,6 +720,11 @@ function M.navigateBack()
 	if #gridStack == 0 then
 		return false
 	end
+	local nowClock = os.clock()
+	if nowClock - lastNavAt < NAV_COOLDOWN then
+		return true -- handled (swallowed): a navigation just started
+	end
+	lastNavAt = nowClock
 
 	TooltipModule.forceHide()
 
@@ -860,5 +891,5 @@ function M.setGridTitle(gridKey, title)
 	end
 end
 
-print("GridMenuModule: Loaded ✓")
+dprint("GridMenuModule: Loaded ✓")
 return M

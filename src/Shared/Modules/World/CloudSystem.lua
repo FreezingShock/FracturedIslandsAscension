@@ -16,6 +16,7 @@ local _attachmentPool = {}
 local _allEmitters = {}
 local _lastLODCheck = tick()
 local _activeClouds = 0
+local _cloudCount = 0
 local _heartbeatConn = nil
 local _animationTime = tick()
 
@@ -219,6 +220,7 @@ function CloudSystem.createCloudFromPart(part)
 		end
 	end
 
+	_cloudCount += 1
 	_cloudParts[part] = {
 		emitters = emitters,
 		attachments = attachments,
@@ -233,8 +235,15 @@ function CloudSystem.createCloudFromPart(part)
 end
 
 -- ===== ANIMATE =====
+-- The jitter is a function of floor(time * speed), so it only changes a couple of times a second:
+-- recompute (and Emit) only when that step ticks over instead of running noise3 for every emitter every frame.
+local CORE_STEP_SPEED, CORE_JITTER = 0.8, 2.0
+local OUTER_STEP_SPEED, OUTER_JITTER = 1.2, 3.0
+
 local function animateCloudAttachments()
 	local now = _animationTime
+	local coreStep = math.floor(now * CORE_STEP_SPEED)
+	local outerStep = math.floor(now * OUTER_STEP_SPEED)
 
 	for part, cloudData in pairs(_cloudParts) do
 		if not part.Parent or not cloudData.active then
@@ -242,50 +251,26 @@ local function animateCloudAttachments()
 		end
 
 		for _, data in ipairs(cloudData.emitterData) do
-			if data.isCore then
-				-- SHARP position change: faster floor'd time for more frequent emissions
-				-- Bias toward center: use cubic falloff on noise (0.3^3 = 0.027, very biased)
-				local randX = noise3(data.noiseOffset, math.floor(now * 0.8), 0) * 2 - 1
-				local randY = noise3(data.noiseOffset + 1, math.floor(now * 0.8), 1) * 2 - 1
-				local randZ = noise3(data.noiseOffset + 2, math.floor(now * 0.8), 2) * 2 - 1
+			local step = data.isCore and coreStep or outerStep
+			if data.lastStep == step then
+				continue
+			end
+			data.lastStep = step
 
-				-- Cubic bias toward center
-				local biasedX = randX ^ 3
-				local biasedY = randY ^ 3
-				local biasedZ = randZ ^ 3
+			local jitter = data.isCore and CORE_JITTER or OUTER_JITTER
+			local randX = noise3(data.noiseOffset, step, 0) * 2 - 1
+			local randY = noise3(data.noiseOffset + 1, step, 1) * 2 - 1
+			local randZ = noise3(data.noiseOffset + 2, step, 2) * 2 - 1
 
-				local newPos = data.basePos + Vector3.new(biasedX * 2.0, biasedY * 2.0, biasedZ * 2.0)
+			-- cubic bias toward the cloud centre
+			local newPos = data.basePos + Vector3.new(randX ^ 3 * jitter, randY ^ 3 * jitter, randZ ^ 3 * jitter)
 
-				-- Emit if position changed
-				if newPos ~= data.lastEmitPos then
-					data.attachment.Position = newPos
-					if data.emitter and data.emitter.Enabled then
-						data.emitter:Emit(1)
-					end
-					data.lastEmitPos = newPos
+			if newPos ~= data.lastEmitPos then
+				data.attachment.Position = newPos
+				if data.emitter and data.emitter.Enabled then
+					data.emitter:Emit(1)
 				end
-			else
-				-- SHARP position change: faster floor'd time for more frequent emissions
-				-- Bias toward center: stronger cubic falloff for outer emitters
-				local randX = noise3(data.noiseOffset, math.floor(now * 1.2), 0) * 2 - 1
-				local randY = noise3(data.noiseOffset + 1, math.floor(now * 1.2), 1) * 2 - 1
-				local randZ = noise3(data.noiseOffset + 2, math.floor(now * 1.2), 2) * 2 - 1
-
-				-- Stronger cubic bias for outer emitters (more center-clustered)
-				local biasedX = randX ^ 3
-				local biasedY = randY ^ 3
-				local biasedZ = randZ ^ 3
-
-				local newPos = data.basePos + Vector3.new(biasedX * 3.0, biasedY * 3.0, biasedZ * 3.0)
-
-				-- Emit if position changed
-				if newPos ~= data.lastEmitPos then
-					data.attachment.Position = newPos
-					if data.emitter and data.emitter.Enabled then
-						data.emitter:Emit(1)
-					end
-					data.lastEmitPos = newPos
-				end
+				data.lastEmitPos = newPos
 			end
 		end
 	end
@@ -349,6 +334,7 @@ function CloudSystem.updateLOD(cameraPosition)
 				releaseAttachmentToPool(attachment)
 			end
 			_cloudParts[part] = nil
+			_cloudCount -= 1
 			if cloudData.active then
 				_activeClouds = _activeClouds - #cloudData.emitters
 			end
@@ -380,7 +366,6 @@ function CloudSystem.initialize()
 	end
 
 	setupHeartbeat()
-	print("[CloudSystem] v20: v17 foundation + sharp position randomization + emission per move")
 end
 
 function CloudSystem.destroy()
@@ -405,6 +390,7 @@ function CloudSystem.destroy()
 	end
 
 	_cloudParts = {}
+	_cloudCount = 0
 	_emitterPool = {}
 	_attachmentPool = {}
 	_allEmitters = {}
@@ -416,7 +402,7 @@ function CloudSystem.getActiveCloudCount()
 end
 
 function CloudSystem.getTotalCloudCount()
-	return table.getn(_cloudParts)
+	return _cloudCount
 end
 
 return CloudSystem

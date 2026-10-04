@@ -33,7 +33,6 @@ local function getZoneNotifyEvent()
 		Events = Instance.new("Folder")
 		Events.Name = "Events"
 		Events.Parent = ReplicatedStorage
-		print("[ZoneManager] Created Events folder in ReplicatedStorage")
 	end
 
 	local event = Events:FindFirstChild("ZoneEntered")
@@ -41,27 +40,34 @@ local function getZoneNotifyEvent()
 		event = Instance.new("RemoteEvent")
 		event.Name = "ZoneEntered"
 		event.Parent = Events
-		print("[ZoneManager] Created ZoneEntered RemoteEvent ✓")
 	end
 
 	ZoneNotifyEvent = event
 	return ZoneNotifyEvent
 end
 
--- Find zone marker part in workspace.Zones with diagnostic logging
+-- Zone markers are looked up once and cached; a missing one warns once (not every check).
+local markerCache = {} -- [zoneName] = Instance
+local warnedMissing = {} -- [zoneName] = true
+
 local function getZoneMarker(zoneName)
+	local cached = markerCache[zoneName]
+	if cached and cached.Parent then
+		return cached
+	end
+
 	local zonesFolder = workspace:FindFirstChild("Zones")
-	if not zonesFolder then
-		warn("[ZoneManager] workspace.Zones folder not found. Cannot detect zone: " .. zoneName)
-		return nil
-	end
-
-	local marker = zonesFolder:FindFirstChild(zoneName)
+	local marker = zonesFolder and zonesFolder:FindFirstChild(zoneName)
 	if not marker then
-		warn("[ZoneManager] Zone marker not found for: " .. zoneName .. " in workspace.Zones")
+		if not warnedMissing[zoneName] then
+			warnedMissing[zoneName] = true
+			warn("[ZoneManager] Zone marker not found in workspace.Zones: " .. zoneName)
+		end
 		return nil
 	end
 
+	warnedMissing[zoneName] = nil
+	markerCache[zoneName] = marker
 	return marker
 end
 
@@ -163,8 +169,6 @@ local function onZoneEntry(player, zoneName)
 	-- Get zone colors (with skill fallback)
 	local zoneColors = ZoneConfig.getZoneColors(zoneName)
 
-	print("[ZoneManager] DEBUG: SPRITESHEET.assetId = " .. tostring(ZoneConfig.SPRITESHEET.assetId))
-
 	-- Fire notification to client
 	local notifData = {
 		zoneName = zoneConfig.displayName,
@@ -178,12 +182,9 @@ local function onZoneEntry(player, zoneName)
 		colorLight = zoneColors.colorLight,
 	}
 
-	print("[ZoneManager] DEBUG: notifData.spriteSheetAssetId = " .. tostring(notifData.spriteSheetAssetId))
-
 	local event = getZoneNotifyEvent()
 	event:FireClient(player, notifData)
 
-	print("[ZoneManager] Fired zone notification for " .. player.Name .. " entering " .. zoneName)
 end
 
 -- Handle zone exit (reset notification flag so it can fire again on re-entry)
@@ -196,58 +197,47 @@ local function onZoneExit(player, zoneName)
 	local zoneState = playerZoneStates[playerId][zoneName]
 	zoneState.isCurrentlyInside = false
 	zoneState.hasShownNotification = false -- Reset so it fires again on re-entry
-	zoneState.lastNotificationTime = tick()
+	zoneState.lastNotificationTime = os.clock()
 
-	print("[ZoneManager] Player " .. player.Name .. " left " .. zoneName)
 end
 
--- Main detection loop (runs every frame)
+-- Main detection loop. Zones are big areas, so 4 checks a second is plenty (was every frame).
+local DETECT_INTERVAL = 0.25
+
 local function startDetectionLoop()
-	local debugTickCounter = 0
-	RunService.Heartbeat:Connect(function()
-		for _, player in pairs(Players:GetPlayers()) do
-			initializePlayerState(player.UserId)
+	local elapsed = 0
+	RunService.Heartbeat:Connect(function(dt)
+		elapsed += dt
+		if elapsed < DETECT_INTERVAL then
+			return
+		end
+		elapsed = 0
+
+		for _, player in ipairs(Players:GetPlayers()) do
+			local playerId = player.UserId
+			initializePlayerState(playerId)
 
 			for zoneName, zoneConfig in pairs(ZoneConfig.ZONES) do
 				if not zoneConfig.enabled then
 					continue
 				end
 
-				local playerId = player.UserId
 				local zoneState = playerZoneStates[playerId][zoneName]
 				local isCurrentlyInZone = isPlayerInZone(player, zoneConfig, zoneName)
 
-				-- Debug output every 60 frames (~1 second)
-				debugTickCounter = debugTickCounter + 1
-				if debugTickCounter >= 60 then
-					local character = player.Character
-					local playerPos = character
-							and character:FindFirstChild("HumanoidRootPart")
-							and character.HumanoidRootPart.Position
-						or "NO CHARACTER"
-				end
-
-				-- Detect entry
 				if isCurrentlyInZone and not zoneState.isCurrentlyInside then
 					onZoneEntry(player, zoneName)
-				-- Detect exit
 				elseif not isCurrentlyInZone and zoneState.isCurrentlyInside then
 					onZoneExit(player, zoneName)
 				end
 			end
 		end
-		if debugTickCounter >= 60 then
-			debugTickCounter = 0
-		end
 	end)
-
-	print("[ZoneManager] Detection loop started ✓")
 end
 
 -- Clean up state when player leaves
 Players.PlayerRemoving:Connect(function(player)
 	playerZoneStates[player.UserId] = nil
-	print("[ZoneManager] Cleaned up state for " .. player.Name)
 end)
 
 -- Public API

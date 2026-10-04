@@ -38,6 +38,14 @@
 	  .clear()                         -- force-remove all visible entries (both channels)
 --]]
 
+-- Debug logging is off by default (these ran in hot paths: every navigation / purchase / notification).
+local DEBUG = false
+local function dprint(...)
+	if DEBUG then
+		print(...)
+	end
+end
+
 local TweenService = game:GetService("TweenService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local MoneyLib = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("MoneyLib"))
@@ -379,7 +387,7 @@ end
 
 -- ===================== LOG (raw message — positive channel only) =====================
 function M.log(message, duration)
-	print("[StatisticLogModule] LOG CALLED:", message)
+	dprint("[StatisticLogModule] LOG CALLED:", message)
 
 	if not logTemplate then
 		warn("[StatisticLogModule] logTemplate is nil!")
@@ -432,7 +440,7 @@ function M.log(message, duration)
 
 	frame.Parent = layoutBox
 
-	print(
+	dprint(
 		"[StatisticLogModule] Cloned → Parent:",
 		frame.Parent and frame.Parent:GetFullName(),
 		"| Visible:",
@@ -452,7 +460,7 @@ end
 
 -- ===================== LOG STAT (stackable — POSITIVE) =====================
 function M.logStat(statName, amount, statColor, owned, duration)
-	print("[StatisticLogModule] logStat:", statName, amount, statColor, owned)
+	dprint("[StatisticLogModule] logStat:", statName, amount, statColor, owned)
 
 	duration = duration or DEFAULT_DURATION
 
@@ -543,7 +551,7 @@ end
 
 -- ===================== LOG STAT NEGATIVE (stackable — slides LEFT) =====================
 function M.logStatNegative(statName, amount, statColor, owned, duration)
-	print("[StatisticLogModule] logStatNegative:", statName, amount, statColor, owned)
+	dprint("[StatisticLogModule] logStatNegative:", statName, amount, statColor, owned)
 
 	duration = duration or DEFAULT_DURATION
 
@@ -660,7 +668,7 @@ end
 
 -- ===================== INIT =====================
 function M.init(statisticLogFrame)
-	print("[StatisticLogModule] init() called with:", statisticLogFrame and statisticLogFrame:GetFullName())
+	dprint("[StatisticLogModule] init() called with:", statisticLogFrame and statisticLogFrame:GetFullName())
 
 	local template = statisticLogFrame:FindFirstChild("Template")
 	if not template then
@@ -707,10 +715,10 @@ function M.init(statisticLogFrame)
 		soundOut = uiSounds:FindFirstChild("Out")
 	end
 
-	print("[StatisticLogModule] logTemplate:", logTemplate:GetFullName())
-	print("[StatisticLogModule] layoutBox (positive):", layoutBox:GetFullName())
-	print("[StatisticLogModule] layoutBoxNeg (negative):", layoutBoxNeg:GetFullName())
-	print("[StatisticLogModule] Initialized ✓")
+	dprint("[StatisticLogModule] logTemplate:", logTemplate:GetFullName())
+	dprint("[StatisticLogModule] layoutBox (positive):", layoutBox:GetFullName())
+	dprint("[StatisticLogModule] layoutBoxNeg (negative):", layoutBoxNeg:GetFullName())
+	dprint("[StatisticLogModule] Initialized ✓")
 end
 
 return M

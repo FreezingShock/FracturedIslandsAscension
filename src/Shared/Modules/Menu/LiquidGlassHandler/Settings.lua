@@ -41,13 +41,16 @@ return {
 
 	-- ── Mosaic glass mode ─────────────────────────────────────────────────
 	-- Distortion-only approach: no model Highlight. CenterMosaic template
-	-- properties (Glass, Transparency 0.8, Reflectance 1) are baked in the
+	-- properties (Glass; Transparency/Reflectance are now set from `strength`/`reflectance` below) are baked in the
 	-- .rbxm and left untouched after cloning.
 	-- `strength` is the Part.Transparency override — set to 0.8 to match
 	-- the template default. Increase for heavier distortion if desired.
 	Mosaic = {
 		Distortion = {
-			strength = 0.8,
+			strength = 0.9, -- part Transparency: higher = lighter frost, less shard noise
+			-- The baked template has Reflectance 1, which turns the refracted world into sparkly white noise
+			-- (a "shattered glass" look). 0 gives a smooth frosted refraction; raise it for a glossier sheen.
+			reflectance = 0,
 			gridCols = 3,
 			gridRows = 2,
 		},

@@ -21,6 +21,14 @@
 	  getActiveStat()
 --]]
 
+-- Debug logging is off by default (these ran in hot paths: every navigation / purchase / notification).
+local DEBUG = false
+local function dprint(...)
+	if DEBUG then
+		print(...)
+	end
+end
+
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
 local ContentProvider = game:GetService("ContentProvider")
@@ -924,11 +932,11 @@ function M.init(sharedRefs, m2Frame, m3Frame)
 			for _, img in ipairs(preloadList) do
 				img:Destroy()
 			end
-			print("[CollectionsPageModule] Preloaded " .. #preloadList .. " stat icons ✓")
+			dprint("[CollectionsPageModule] Preloaded " .. #preloadList .. " stat icons ✓")
 		end)
 	end
 
-	print("[CollectionsPageModule] Initialized ✓")
+	dprint("[CollectionsPageModule] Initialized ✓")
 end
 
 return M

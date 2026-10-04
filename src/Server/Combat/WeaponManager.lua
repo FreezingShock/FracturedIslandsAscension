@@ -89,13 +89,13 @@ local function removeWeaponStats(player)
 	-- TODO: Call AttributeStatManager API to remove bonuses
 end
 
---- Check if an ability is off cooldown.
-local function isAbilityReady(player, abilityName)
+--- Check if an ability is off cooldown (`cooldown` = that ability's cooldown in seconds).
+local function isAbilityReady(player, abilityName, cooldown)
 	if not abilityDodges[player.UserId] then
 		abilityDodges[player.UserId] = {}
 	end
 	local lastCast = abilityDodges[player.UserId][abilityName]
-	return lastCast == nil or (tick() - lastCast) >= 1000 -- safety cap
+	return lastCast == nil or (os.clock() - lastCast) >= (cooldown or 0)
 end
 
 --- Mark ability as just-cast.
@@ -103,7 +103,7 @@ local function markAbilityCast(player, abilityName, cooldown)
 	if not abilityDodges[player.UserId] then
 		abilityDodges[player.UserId] = {}
 	end
-	abilityDodges[player.UserId][abilityName] = tick()
+	abilityDodges[player.UserId][abilityName] = os.clock()
 end
 
 --- Get cooldown remaining for an ability.
@@ -115,7 +115,7 @@ local function getAbilityCooldown(player, abilityName, cooldown)
 	if not lastCast then
 		return 0
 	end
-	local elapsed = tick() - lastCast
+	local elapsed = os.clock() - lastCast
 	return math.max(0, cooldown - elapsed)
 end
 
@@ -134,15 +134,15 @@ function WeaponManager.EquipWeapon(player, weaponId: string): boolean
 		return false
 	end
 
-	-- Find the tool in backpack
+	-- Find the tool: WeaponInit calls this when the Tool is already held (in the Character)
 	local backpack = player:FindFirstChild("Backpack")
-	local toolInstance = nil
-	if backpack then
+	local toolInstance = character:FindFirstChild(weaponConfig.toolName)
+	if not toolInstance and backpack then
 		toolInstance = backpack:FindFirstChild(weaponConfig.toolName)
 	end
 
 	if not toolInstance or not toolInstance:IsA("Tool") then
-		warn("[WeaponManager] Tool not found in backpack: " .. weaponConfig.toolName)
+		warn("[WeaponManager] Tool not found for " .. player.Name .. ": " .. weaponConfig.toolName)
 		return false
 	end
 
@@ -151,9 +151,9 @@ function WeaponManager.EquipWeapon(player, weaponId: string): boolean
 		WeaponManager.UnequipWeapon(player)
 	end
 
-	-- Equip via Humanoid
+	-- Equip via Humanoid (nothing to do when the Tool is already in hand)
 	local humanoid = character:FindFirstChildOfClass("Humanoid")
-	if humanoid then
+	if humanoid and toolInstance.Parent ~= character then
 		humanoid:EquipTool(toolInstance)
 	end
 
@@ -251,7 +251,7 @@ function WeaponManager.TryAbility(player, abilityName: string): (boolean, number
 
 	-- Check cooldown
 	local cooldown = ability.cooldown or 5
-	if not isAbilityReady(player, abilityName) then
+	if not isAbilityReady(player, abilityName, cooldown) then
 		local remaining = getAbilityCooldown(player, abilityName, cooldown)
 		return false, remaining
 	end

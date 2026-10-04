@@ -21,19 +21,6 @@ end)
 
 -- ── Internal helpers ──────────────────────────────────────────────────────────
 
-local function areAncestorsVisible(guiObject): boolean
-	local current = guiObject
-	while current do
-		if current:IsA("GuiObject") and not current.Visible then
-			return false
-		elseif current:IsA("ScreenGui") and not current.Enabled then
-			return false
-		end
-		current = current.Parent
-	end
-	return true
-end
-
 local function computeAbsoluteTransparency(guiObject): number
 	local current = guiObject
 	local combinedOpacity = 1
@@ -50,6 +37,9 @@ end
 -- suppressOnCapture: when true, returns false during active screenshot capture.
 -- Liquid glass passes true; mosaic glass passes false (or nil).
 --
+-- ONE walk up the ancestors computes both visibility and the accumulated CanvasGroup fade
+-- (it used to be two separate walks, run twice a frame per glass instance).
+--
 -- Returns (isVisible: boolean, absTransparency: number).
 function VisibilityChecker.check(guiObject: GuiObject, suppressOnCapture: boolean?): (boolean, number)
 	if not guiObject or not guiObject.Parent then
@@ -58,10 +48,24 @@ function VisibilityChecker.check(guiObject: GuiObject, suppressOnCapture: boolea
 	if suppressOnCapture and capturing then
 		return false, 1
 	end
-	if not areAncestorsVisible(guiObject) then
-		return false, 1
+
+	local opacity = 1
+	local current: Instance? = guiObject
+	while current do
+		if current:IsA("GuiObject") then
+			if not current.Visible then
+				return false, 1
+			end
+			if current:IsA("CanvasGroup") then
+				opacity *= 1 - current.GroupTransparency
+			end
+		elseif current:IsA("LayerCollector") and not (current :: any).Enabled then
+			return false, 1
+		end
+		current = current.Parent
 	end
-	local absT = computeAbsoluteTransparency(guiObject)
+
+	local absT = math.round((1 - opacity) * 1000) / 1000
 	if absT >= 0.999 then
 		return false, 1
 	end

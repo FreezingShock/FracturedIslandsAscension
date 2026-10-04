@@ -38,6 +38,17 @@ local statConfigLookup = Config.statConfigLookup
 local UPDATE_INTERVAL = 0.1
 local PASSIVE_INTERVAL = 1
 
+-- The economy is exponential; a double overflows to inf at ~1.8e308 and inf/NaN cannot be stored in a
+-- DataStore (the profile would fail to save). Every stat is clamped below that.
+local STAT_CAP = 1e300
+
+local function finite(n: any): number
+	if type(n) ~= "number" or n ~= n then
+		return 0
+	end
+	return math.clamp(n, -STAT_CAP, STAT_CAP)
+end
+
 -- ===================== PROFILE STORE =====================
 local TEMPLATE = {}
 for _, skill in ipairs(SKILL_NAMES) do
@@ -91,9 +102,10 @@ end
 
 --- Adds `amount` to a stat's count + lifetime + this session's tally.
 local function addStat(userId, data, skill, statKey, amount)
+	amount = finite(amount)
 	local entry = ensureStatEntry(data, skill, statKey)
-	entry.count += amount
-	entry.lifetime += amount
+	entry.count = finite(entry.count + amount)
+	entry.lifetime = finite(entry.lifetime + amount)
 
 	local session = sessionData[userId]
 	if not session then
@@ -105,7 +117,7 @@ local function addStat(userId, data, skill, statKey, amount)
 		skillSession = {}
 		session[skill] = skillSession
 	end
-	skillSession[statKey] = (skillSession[statKey] or 0) + amount
+	skillSession[statKey] = finite((skillSession[statKey] or 0) + amount)
 end
 
 -- ===================== MULTIPLIERS =====================
@@ -120,7 +132,7 @@ function StatisticsDataManager.GetMultiplier(data, skill, statKey)
 	for _, boost in ipairs(boosts) do
 		total += getStatCount(data, boost.sourceSkill, boost.sourceKey) * boost.pct / 100
 	end
-	return 1 + total
+	return 1 + finite(total)
 end
 
 -- ===================== CLIENT SYNC =====================
@@ -218,7 +230,7 @@ function StatisticsDataManager.ProcessButtonPurchase(player, skill, statKey, bas
 	local costDetails = {}
 	for _, costEntry in ipairs(costEntries) do
 		local entry = ensureStatEntry(data, costEntry.skill, costEntry.id)
-		entry.count -= costEntry.amount
+		entry.count = finite(entry.count - costEntry.amount)
 		table.insert(costDetails, {
 			skill = costEntry.skill,
 			id = costEntry.id,
@@ -228,7 +240,7 @@ function StatisticsDataManager.ProcessButtonPurchase(player, skill, statKey, bas
 	end
 
 	local multiplier = StatisticsDataManager.GetMultiplier(data, skill, statKey)
-	local gain = math.max(1, math.floor(baseGain * multiplier))
+	local gain = math.max(1, math.floor(finite(baseGain * multiplier)))
 	addStat(player.UserId, data, skill, statKey, gain)
 
 	markDirty(player)
@@ -257,10 +269,13 @@ function StatisticsDataManager.LoadData(player)
 	profiles[player.UserId] = profile
 	sessionData[player.UserId] = {}
 
-	-- Make sure every configured stat has an entry (new stats appear on old saves).
+	-- Make sure every configured stat has an entry (new stats appear on old saves) and repair any
+	-- non-finite value a previous version may have saved.
 	for _, skill in ipairs(SKILL_NAMES) do
 		for _, item in ipairs(STAT_CHAINS[skill]) do
-			ensureStatEntry(profile.Data, skill, item.key)
+			local entry = ensureStatEntry(profile.Data, skill, item.key)
+			entry.count = finite(entry.count)
+			entry.lifetime = finite(entry.lifetime)
 		end
 	end
 
@@ -319,8 +334,8 @@ function StatisticsDataManager.AdminSetCount(player, skill, statKey, count)
 	end
 	snapshotOnce(player, data)
 	local entry = ensureStatEntry(data, skill, statKey)
-	entry.count = count
-	entry.lifetime = math.max(entry.lifetime, count)
+	entry.count = finite(count)
+	entry.lifetime = math.max(entry.lifetime, entry.count)
 	markDirty(player)
 	return true
 end
@@ -387,7 +402,7 @@ task.spawn(function()
 			end
 			for _, grant in ipairs(PASSIVE_GRANTS) do
 				local multiplier = StatisticsDataManager.GetMultiplier(data, grant.skill, grant.statKey)
-				addStat(player.UserId, data, grant.skill, grant.statKey, math.floor(grant.amount * multiplier))
+				addStat(player.UserId, data, grant.skill, grant.statKey, math.floor(finite(grant.amount * multiplier)))
 			end
 			markDirty(player)
 		end

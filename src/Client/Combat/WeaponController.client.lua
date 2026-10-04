@@ -11,6 +11,14 @@
 --
 -- ============================================================
 
+-- Debug logging is off by default (these ran in hot paths: every navigation / purchase / notification).
+local DEBUG = false
+local function dprint(...)
+	if DEBUG then
+		print(...)
+	end
+end
+
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
@@ -56,7 +64,7 @@ local function onWeaponEquipped()
 			local weaponConfig = WeaponRegistry.getByToolName(child.Name)
 			if weaponConfig then
 				currentWeapon = weaponConfig
-				print("[WeaponController] Equipped: " .. weaponConfig.displayName)
+				dprint("[WeaponController] Equipped: " .. weaponConfig.displayName)
 
 				-- Create weapon trail
 				if child:FindFirstChild("Handle") then
@@ -69,7 +77,7 @@ end
 
 local function onWeaponUnequipped()
 	if currentWeapon then
-		print("[WeaponController] Unequipped: " .. currentWeapon.displayName)
+		dprint("[WeaponController] Unequipped: " .. currentWeapon.displayName)
 	end
 	currentWeapon = nil
 	if weaponTrail then
@@ -84,7 +92,7 @@ EquipWeaponEvent.OnClientEvent:Connect(function(data)
 	currentWeapon = WeaponRegistry.get(data.weaponId)
 	currentStats = data.stats or {}
 	onWeaponEquipped()
-	print("[WeaponController] Server equipped: " .. (currentWeapon and currentWeapon.displayName or "Unknown"))
+	dprint("[WeaponController] Server equipped: " .. (currentWeapon and currentWeapon.displayName or "Unknown"))
 end)
 
 UnequipWeaponEvent.OnClientEvent:Connect(function()
@@ -101,7 +109,7 @@ end)
 WeaponAbilityEvent.OnClientEvent:Connect(function(data)
 	local abilityName = data.abilityName
 	local cooldown = data.cooldown or 5
-	print("[WeaponController] Ability triggered: " .. abilityName .. " (CD: " .. cooldown .. "s)")
+	dprint("[WeaponController] Ability triggered: " .. abilityName .. " (CD: " .. cooldown .. "s)")
 	-- TODO: Play VFX/SFX for ability
 	-- TODO: Update cooldown UI
 end)
@@ -159,7 +167,7 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
 
 		-- TODO: Raycasts or region-based hit detection
 		-- For now, just log swing
-		print("[WeaponController] Swing with " .. currentWeapon.displayName)
+		dprint("[WeaponController] Swing with " .. currentWeapon.displayName)
 
 		-- TODO: Send hit data to server if targets found
 		-- Server validates damage, applies to targets
@@ -187,7 +195,7 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
 		if ability.key == keyName and ability.type == "active" then
 			-- Try to cast on server
 			-- TODO: Create remote to TryAbility(abilityName) on server
-			print("[WeaponController] Attempting ability: " .. ability.name)
+			dprint("[WeaponController] Attempting ability: " .. ability.name)
 			break
 		end
 	end
@@ -225,4 +233,4 @@ UpdateInventoryEvent.OnClientEvent:Connect(function(data)
 	end
 end)
 
-print("[WeaponController] Ready ✓")
+dprint("[WeaponController] Ready ✓")

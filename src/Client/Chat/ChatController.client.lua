@@ -382,6 +382,7 @@ local function updateFocusState()
 	setPanelTransparency(active)
 	if active then
 		for _, record in ipairs(messages) do
+			record.fadeAlpha = nil
 			for _, lbl in ipairs(record.labels) do
 				lbl.TextTransparency = 0
 			end
@@ -569,7 +570,17 @@ end
 ChatBridge.registerRenderer(renderPayload)
 
 -- ===================== FADE SYSTEM =====================
-RunService.Heartbeat:Connect(function()
+-- Messages fade with age while the chat isn't focused/hovered. This used to rewrite every label's
+-- TextTransparency every frame; now it runs 5x a second and only writes labels whose value changes
+-- (fully faded old messages cost nothing).
+local FADE_INTERVAL = 0.2
+local fadeAccum = 0
+RunService.Heartbeat:Connect(function(dt)
+	fadeAccum += dt
+	if fadeAccum < FADE_INTERVAL then
+		return
+	end
+	fadeAccum = 0
 	if isFocused or isHovered then
 		return
 	end
@@ -584,8 +595,11 @@ RunService.Heartbeat:Connect(function()
 		else
 			alpha = (age - V.FadeStartAge) / (V.FadeEndAge - V.FadeStartAge)
 		end
-		for _, lbl in ipairs(record.labels) do
-			lbl.TextTransparency = alpha
+		if record.fadeAlpha ~= alpha then
+			record.fadeAlpha = alpha
+			for _, lbl in ipairs(record.labels) do
+				lbl.TextTransparency = alpha
+			end
 		end
 	end
 end)

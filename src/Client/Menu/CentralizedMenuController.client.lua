@@ -143,6 +143,7 @@ local armorClipActiveTween = nil
 
 -- ===================== STATE =====================
 local menuOpen = false
+local lastActivity = 0 -- os.clock() of the last thing that can move the blank-slot gradients
 local openMode: "full" | "inventory" | nil = nil
 local navStack = {}
 local sidebarVisible = true
@@ -1303,6 +1304,7 @@ local function openMenu(mode)
 	openMode = mode
 	CentralizedMenu.Enabled = true
 	hideSidebar()
+	lastActivity = os.clock() -- wakes the blank-slot gradient loop (bottom of this file)
 
 	if mode == "full" then
 		inventoryPanel.Visible = true
@@ -1819,13 +1821,16 @@ end)
 -- ===================== E KEY TOGGLE =====================
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
 	if input.KeyCode == Enum.KeyCode.E then
+		if gameProcessed then
+			return -- typing in a TextBox (chat, admin panel...): E is a letter, not a hotkey
+		end
 		if menuOpen then
 			if openMode == "full" then
 				closeNexusPanel()
 			else
 				closeMenu()
 			end
-		elseif not gameProcessed then
+		else
 			openMenu("inventory")
 		end
 	end
@@ -1847,25 +1852,63 @@ LiquidGlassHandler.apply(outerFrame, {
 })
 
 -- ===================== BLANKSLOT GRADIENT ROTATION =====================
--- Lerps BG.UIGradient.Rotation toward the cursor-facing angle each Heartbeat.
--- Takes the shortest arc across the 0/360 boundary (no long-way-around spins).
+-- Each BlankSlot's BG gradient turns toward the cursor. This used to walk both grid buffers every
+-- Heartbeat (allocating a table, ~100x FindFirstChild x2, atan2 each, plus a never-cleaned angle table).
+-- Now: the blank list is cached (rebuilt only when a buffer's children change), the work only runs while
+-- something can actually change (cursor moved / menu just opened or slid / page changed), and angles
+-- live on the cached entries so nothing leaks.
 
 local GRADIENT_LERP_SPEED = 12 -- higher = snappier; tune freely
+local ACTIVE_WINDOW = 1.0 -- seconds of updates after any activity (covers the slide/fade tweens)
 
--- Per-slot current angle state: [GuiObject] = currentAngleDegrees
-local slotCurrentAngles = {}
+local blankEntries = {} -- { { buffer, bg, gradient, angle } }
+local blanksDirty = true
 
--- Latest cursor position, updated on InputChanged
+local function wake()
+	lastActivity = os.clock()
+end
+
 local latestCursorPos = Vector2.new(0, 0)
 
 UserInputService.InputChanged:Connect(function(input)
 	if input.UserInputType == Enum.UserInputType.MouseMovement then
 		latestCursorPos = Vector2.new(input.Position.X, input.Position.Y)
+		wake()
 	end
 end)
 
+for _, buffer in ipairs({ gridBufferA, gridBufferB }) do
+	local function dirty()
+		blanksDirty = true
+		wake()
+	end
+	buffer.ChildAdded:Connect(dirty)
+	buffer.ChildRemoved:Connect(dirty)
+	buffer:GetPropertyChangedSignal("Visible"):Connect(wake)
+end
+
+local function rebuildBlankEntries()
+	blanksDirty = false
+	local angles = {}
+	for _, entry in ipairs(blankEntries) do
+		angles[entry.bg] = entry.angle
+	end
+	table.clear(blankEntries)
+	for _, buffer in ipairs({ gridBufferA, gridBufferB }) do
+		for _, child in ipairs(buffer:GetChildren()) do
+			if child.Name == "BlankSlot" then
+				local bg = child:FindFirstChild("BG")
+				local gradient = bg and bg:FindFirstChildOfClass("UIGradient")
+				if gradient then
+					table.insert(blankEntries, { buffer = buffer, bg = bg, gradient = gradient, angle = angles[bg] })
+				end
+			end
+		end
+	end
+end
+
 local function shortestArcDelta(from, to)
-	-- Returns the signed delta in [-180, 180] to go from `from` to `to`
+	-- signed delta in [-180, 180] to go from `from` to `to`
 	local delta = (to - from) % 360
 	if delta > 180 then
 		delta = delta - 360
@@ -1874,43 +1917,28 @@ local function shortestArcDelta(from, to)
 end
 
 RunService.Heartbeat:Connect(function(dt)
-	if not menuOpen then
+	if not menuOpen or os.clock() - lastActivity > ACTIVE_WINDOW then
 		return
 	end
+	if blanksDirty then
+		rebuildBlankEntries()
+	end
 
-	for _, buffer in ipairs({ gridBufferA, gridBufferB }) do
-		if not buffer.Visible then
+	local alpha = math.min(dt * GRADIENT_LERP_SPEED, 1)
+	for _, entry in ipairs(blankEntries) do
+		if not entry.buffer.Visible or not entry.gradient.Parent then
 			continue
 		end
-		for _, child in ipairs(buffer:GetChildren()) do
-			if child.Name ~= "BlankSlot" then
-				continue
-			end
-			local bg = child:FindFirstChild("BG")
-			if not bg then
-				continue
-			end
-			local gradient = bg:FindFirstChildOfClass("UIGradient")
-			if not gradient then
-				continue
-			end
+		local bg = entry.bg
+		local slotPos = bg.AbsolutePosition
+		local slotSize = bg.AbsoluteSize
+		local cx = slotPos.X + slotSize.X * 0.5
+		local cy = slotPos.Y + slotSize.Y * 0.5
+		local target = (math.deg(math.atan2(cx - latestCursorPos.X, latestCursorPos.Y - cy)) - 90) % 360
 
-			-- Compute target angle from cursor to this slot's center
-			local slotPos = bg.AbsolutePosition
-			local slotSize = bg.AbsoluteSize
-			local cx = slotPos.X + slotSize.X * 0.5
-			local cy = slotPos.Y + slotSize.Y * 0.5
-			local target = (math.deg(math.atan2(cx - latestCursorPos.X, latestCursorPos.Y - cy)) - 90) % 360
-
-			-- Initialise current angle on first encounter
-			local current = slotCurrentAngles[bg] or target
-			local delta = shortestArcDelta(current, target)
-			local next = current + delta * math.min(dt * GRADIENT_LERP_SPEED, 1)
-			next = next % 360
-
-			slotCurrentAngles[bg] = next
-			gradient.Rotation = next
-		end
+		local current = entry.angle or target
+		local nextAngle = (current + shortestArcDelta(current, target) * alpha) % 360
+		entry.angle = nextAngle
+		entry.gradient.Rotation = nextAngle
 	end
 end)
-

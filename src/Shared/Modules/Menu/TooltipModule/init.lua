@@ -951,7 +951,18 @@ local lastConfig: any = nil
 local activeSource: string? = nil
 local activeAnchor: GuiObject? = nil
 
+-- A freshly shown tooltip has not been laid out yet (its AutomaticSize frame still reports the PREVIOUS
+-- tooltip's size), so positioning it right away makes it pop in the wrong place for a frame. It is parked
+-- off-screen for LAYOUT_FRAMES frames first, then follows the cursor.
+local LAYOUT_FRAMES = 2
+local layoutWait = 0
+local OFFSCREEN = UDim2.fromOffset(-10000, -10000)
+
 local function positionToMouse()
+	if layoutWait > 0 then
+		frame.Position = OFFSCREEN
+		return
+	end
 	local mouse = UserInputService:GetMouseLocation()
 	local cam = workspace.CurrentCamera
 	local viewport = cam and cam.ViewportSize or Vector2.new(1920, 1080)
@@ -972,6 +983,9 @@ RunService.RenderStepped:Connect(function()
 		if activeAnchor and not API.isShown(activeAnchor) then
 			API.hide(nil)
 			return
+		end
+		if layoutWait > 0 then
+			layoutWait -= 1
 		end
 		positionToMouse()
 	end
@@ -1018,6 +1032,9 @@ function API.show(config: any, source: string?, anchor: GuiObject?)
 	lastConfig = config
 	render(normalize(config))
 	following = true
+	if not frame.Visible then
+		layoutWait = LAYOUT_FRAMES -- fresh show: wait for the layout pass before placing it
+	end
 	positionToMouse()
 	frame.Visible = true
 	if glass then

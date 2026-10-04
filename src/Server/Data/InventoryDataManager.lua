@@ -38,6 +38,7 @@ local ServerScriptService = game:GetService("ServerScriptService")
 local SkillsDataManager = require(ServerScriptService:WaitForChild("SkillsDataManager")) :: any
 local ItemTools = require(ServerScriptService:WaitForChild("ItemTools")) :: any
 local ItemDrops = require(ServerScriptService:WaitForChild("ItemDrops")) :: any
+local RateLimiter = require(ServerScriptService:WaitForChild("RateLimiter")) :: any
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local ItemRegistry = require(Modules:WaitForChild("Items")) :: any
 
@@ -1009,49 +1010,70 @@ local function onPlayerReady(player)
 end
 
 local function onPlayerLeaving(player)
-	saveInventoryToProfile(player)
+	saveInventoryToProfile(player) -- no-op if SkillsDataManager already released the profile (its hook saved first)
 	playerState[player.UserId] = nil
 	lastDropAt[player.UserId] = nil
 end
 
+-- The inventory slice of the profile is only a snapshot of the Tools. Write it before the profile is
+-- released (leave) and every AUTOSAVE_SECONDS, so a server crash loses seconds, not the whole session.
+local AUTOSAVE_SECONDS = 25
+SkillsDataManager.OnBeforeRelease(saveInventoryToProfile)
+task.spawn(function()
+	while true do
+		task.wait(AUTOSAVE_SECONDS)
+		for _, player in ipairs(Players:GetPlayers()) do
+			if playerState[player.UserId] then
+				local ok, err = pcall(saveInventoryToProfile, player)
+				if not ok then
+					warn("[InventoryDataManager] autosave failed for " .. player.Name .. ": " .. tostring(err))
+				end
+			end
+		end
+	end
+end)
+
 -- ===================== WIRE REMOTES =====================
+-- Every remote is rate limited (token bucket): a client can burst a few calls, not flood the server.
+local allow = RateLimiter.new(24, 12)
+
 EquipToolFunc.OnServerInvoke = function(player, slotNumber)
-	if type(slotNumber) ~= "number" then
+	if not allow(player) or type(slotNumber) ~= "number" or slotNumber ~= slotNumber then
 		return false
 	end
 	return equipBySlot(player, slotNumber)
 end
 
 EquipToolByNameFunc.OnServerInvoke = function(player, toolName)
-	if type(toolName) ~= "string" then
+	if not allow(player) or type(toolName) ~= "string" or #toolName > 100 then
 		return false
 	end
 	return equipByName(player, toolName)
 end
 
 SwapItemsFunc.OnServerInvoke = function(player, sourceName, targetName)
-	if type(sourceName) ~= "string" or type(targetName) ~= "string" then
+	if not allow(player) or type(sourceName) ~= "string" or type(targetName) ~= "string" then
 		return false
 	end
 	return swapItems(player, sourceName, targetName)
 end
 
 AssignHotbarFunc.OnServerInvoke = function(player, slotIndex, toolName)
-	if type(slotIndex) ~= "number" or type(toolName) ~= "string" then
+	if not allow(player) or type(slotIndex) ~= "number" or type(toolName) ~= "string" then
 		return false
 	end
 	return assignHotbar(player, slotIndex, toolName)
 end
 
 AssignGridSlotFunc.OnServerInvoke = function(player, gridIndex, toolName)
-	if type(gridIndex) ~= "number" or type(toolName) ~= "string" then
+	if not allow(player) or type(gridIndex) ~= "number" or type(toolName) ~= "string" then
 		return false
 	end
 	return assignGridSlot(player, gridIndex, toolName)
 end
 
 DropItemFunc.OnServerInvoke = function(player, toolName, all)
-	if type(toolName) ~= "string" or (all ~= nil and type(all) ~= "boolean") then
+	if not allow(player) or type(toolName) ~= "string" or (all ~= nil and type(all) ~= "boolean") then
 		return false
 	end
 	return dropItem(player, toolName, all)
@@ -1063,7 +1085,7 @@ ItemDrops.setGrantHandler(function(player, toolName, count)
 end)
 
 MoveToEndFunc.OnServerInvoke = function(player, toolName)
-	if type(toolName) ~= "string" then
+	if not allow(player) or type(toolName) ~= "string" then
 		return false
 	end
 	return moveToEnd(player, toolName)
