@@ -42,10 +42,9 @@ local UpdateWeaponStatsEvent = ReplicatedStorage:WaitForChild("UpdateWeaponStats
 local currentWeapon = nil
 local currentStats = {}
 local currentAbilities = {}
+-- R and T belong to the camera (R = perspective, T = cursor lock; see CameraController), so abilities use Q for now
 local abilityKeybinds = {
 	[Enum.KeyCode.Q] = "Q",
-	[Enum.KeyCode.R] = "R",
-	[Enum.KeyCode.T] = "T",
 }
 local weaponTrail = nil
 local lastSwingTime = 0

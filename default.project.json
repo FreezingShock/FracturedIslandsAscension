@@ -180,6 +180,9 @@
         "ButtonClientManager": {
           "$path": "src/Client/Buttons/ButtonClientManager.client.lua"
         },
+        "CameraController": {
+          "$path": "src/Client/World/CameraController.client.lua"
+        },
         "CentralizedMenuController": {
           "$path": "src/Client/Menu/CentralizedMenuController.client.lua"
         },

@@ -288,6 +288,8 @@ local function pruneStaleSlots(player)
 end
 
 -- ===================== SEND UPDATE TO CLIENT =====================
+local ensureSelectedHeld -- defined with the equip functions below (SendUpdate calls it)
+
 --- The Tool the player is holding that belongs to `base` (Tool.Name), if any.
 local function heldToolOf(player, base: string)
 	local character = player.Character
@@ -394,6 +396,7 @@ function InventoryDataManager.SendUpdate(player)
 			count = trashed.count,
 			rarity = trashed.rarity,
 		}) or false,
+		selected = state.selected or 1, -- selected hotbar slot (an empty slot = empty hand)
 		held = state.heldKey or false, -- slot key of the item in hand
 		hotbar = hotbarTools,
 		gridSlots = gridTools,
@@ -401,6 +404,7 @@ function InventoryDataManager.SendUpdate(player)
 		max_capacity = maxCapacity,
 		total_items = totalItems,
 	})
+	task.defer(ensureSelectedHeld, player)
 end
 
 -- ===================== ADD ITEM =====================
@@ -452,10 +456,15 @@ function InventoryDataManager.AddItem(player, toolName: string, count: number): 
 			local key = keyFor(toolName, idx)
 			if not findGridSlotForTool(state, key) and not findHotbarSlotForTool(state, key) then
 				local hotbarSlot
-				for i = 1, MAX_HOTBAR_SLOTS - 1 do
-					if not state.hotbarSlots[i] then
-						hotbarSlot = i
-						break
+				local selected = state.selected
+				if selected and not state.hotbarSlots[selected] then
+					hotbarSlot = selected -- lands in the (empty) selected slot and is drawn at once
+				else
+					for i = 1, MAX_HOTBAR_SLOTS - 1 do
+						if not state.hotbarSlots[i] then
+							hotbarSlot = i
+							break
+						end
 					end
 				end
 				if hotbarSlot then
@@ -679,33 +688,29 @@ end
 -- ===================== EQUIP / UNEQUIP =====================
 local EQUIP_SWITCH_DELAY = 0.18 -- gap between putting the old item away and drawing the new one
 
---- Hold / put away the item in slot `key`. Every slot is its own item (copies of one unstackable item share a
---- Tool name but are different items), so WHICH slot is held is tracked in state.heldKey. Tapping the held slot
---- puts it away; tapping any other slot puts the held item away first, then draws the new one.
-local function toggleHold(player, key: string): boolean
+--- Draw the item in slot `key`, putting away whatever is in hand first (every switch, even between identical
+--- copies, is put away -> short wait -> draw). The newest call wins. Which slot is held is tracked in
+--- state.heldKey because copies of an unstackable item share a Tool name.
+local function drawKey(player, key: string): boolean
 	local state = playerState[player.UserId]
 	local character = player.Character
 	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
 	if not state or not humanoid or humanoid.Health <= 0 then
 		return false
 	end
-	local base = baseOf(key)
 	if not countEntries(player)[key] then
 		return false -- no such slot
 	end
+	local base = baseOf(key)
 
 	local heldAny = character:FindFirstChildOfClass("Tool") ~= nil
 	if heldAny and state.heldKey == key then
-		humanoid:UnequipTools()
-		state.heldKey = nil
-		PlayEquipSound:FireClient(player, "unequip")
-		InventoryDataManager.SendUpdate(player)
-		return true
+		return true -- already in hand
 	end
 
-	-- A newer click wins: each call takes a ticket and gives up if it is no longer the latest
 	state.holdTicket = (state.holdTicket or 0) + 1
 	local ticket = state.holdTicket
+	state.drawing = true
 
 	if heldAny then
 		state.heldKey = nil
@@ -713,7 +718,11 @@ local function toggleHold(player, key: string): boolean
 		PlayEquipSound:FireClient(player, "unequip")
 		InventoryDataManager.SendUpdate(player)
 		task.wait(EQUIP_SWITCH_DELAY)
-		if state.holdTicket ~= ticket or playerState[player.UserId] ~= state or humanoid.Health <= 0 then
+		if state.holdTicket ~= ticket then
+			return false -- a newer selection took over (it owns the drawing flag now)
+		end
+		if playerState[player.UserId] ~= state or humanoid.Health <= 0 then
+			state.drawing = false
 			return false
 		end
 	end
@@ -724,21 +733,68 @@ local function toggleHold(player, key: string): boolean
 			humanoid:EquipTool(child)
 			state.heldKey = key
 			state.heldAt = os.clock()
+			state.drawing = false
 			PlayEquipSound:FireClient(player, "equip")
 			InventoryDataManager.SendUpdate(player)
 			return true
 		end
 	end
+	state.drawing = false
 	return false
 end
 
-local function equipBySlot(player, slotNumber: number): boolean
+--- Select hotbar slot 1..8. Like Minecraft one slot is always selected: an empty slot means an empty hand.
+local function selectSlot(player, slot): boolean
 	local state = playerState[player.UserId]
-	local key = state and state.hotbarSlots[slotNumber]
-	if not key then
+	if not state or type(slot) ~= "number" or slot ~= slot or slot % 1 ~= 0 or slot < 1 or slot > MAX_HOTBAR_SLOTS - 1 then
 		return false
 	end
-	return toggleHold(player, key)
+	state.selected = slot
+	local key = state.hotbarSlots[slot]
+	if key then
+		local ok = drawKey(player, key)
+		InventoryDataManager.SendUpdate(player) -- also reports the new selection when the item was already in hand
+		return ok
+	end
+
+	-- empty slot: cancel any pending draw and put the held item away
+	state.holdTicket = (state.holdTicket or 0) + 1
+	state.drawing = false
+	local character = player.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	if humanoid and character:FindFirstChildOfClass("Tool") then
+		state.heldKey = nil
+		humanoid:UnequipTools()
+		PlayEquipSound:FireClient(player, "unequip")
+	end
+	InventoryDataManager.SendUpdate(player)
+	return true
+end
+
+--- Keep the selected slot's item in hand (spawn, respawn, a new item landing in the selected slot, the held item
+--- being removed and another taking its place...). Called after every SendUpdate.
+ensureSelectedHeld = function(player)
+	local state = playerState[player.UserId]
+	if not state or state.drawing or os.clock() - (state.heldAt or 0) < 0.4 then
+		return
+	end
+	local character = player.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	if not humanoid or humanoid.Health <= 0 then
+		return
+	end
+	local key = state.hotbarSlots[state.selected or 1]
+	if not key then
+		return -- empty hand selected
+	end
+	if character:FindFirstChildOfClass("Tool") and state.heldKey == key then
+		return
+	end
+	task.spawn(drawKey, player, key)
+end
+
+local function equipBySlot(player, slotNumber: number): boolean
+	return selectSlot(player, slotNumber)
 end
 
 --- By slot key. Only items on the hotbar can be held: tools in the inventory grid must be moved to the hotbar.
@@ -747,9 +803,9 @@ local function equipByName(player, key: string): boolean
 	if not state then
 		return false
 	end
-	for i = 1, MAX_HOTBAR_SLOTS do
+	for i = 1, MAX_HOTBAR_SLOTS - 1 do
 		if state.hotbarSlots[i] == key then
-			return toggleHold(player, key)
+			return selectSlot(player, i)
 		end
 	end
 	return false
@@ -1076,6 +1132,18 @@ local function onPlayerReady(player)
 
 	-- Also listen on character for equip/unequip
 	local function wireCharacter(char)
+		-- a new character holds nothing: draw the selected slot's item again once it has spawned
+		local fresh = playerState[player.UserId]
+		if fresh then
+			fresh.heldKey = nil
+			fresh.drawing = false
+			fresh.heldAt = nil
+		end
+		task.delay(0.6, function()
+			if playerState[player.UserId] then
+				InventoryDataManager.SendUpdate(player)
+			end
+		end)
 		char.ChildAdded:Connect(function(child)
 			if child:IsA("Tool") then
 				InventoryDataManager.SendUpdate(player)
@@ -1093,8 +1161,25 @@ local function onPlayerReady(player)
 	end
 	player.CharacterAdded:Connect(wireCharacter)
 
+	-- Start with the first filled hotbar slot selected (slot 1 when the hotbar is empty)
+	local st = playerState[player.UserId]
+	if st and not st.selected then
+		st.selected = 1
+		for i = 1, MAX_HOTBAR_SLOTS - 1 do
+			if st.hotbarSlots[i] then
+				st.selected = i
+				break
+			end
+		end
+	end
+
 	-- Send initial updates
 	InventoryDataManager.SendUpdate(player)
+	task.delay(1, function()
+		if playerState[player.UserId] then
+			InventoryDataManager.SendUpdate(player) -- the character may not have been ready for the first draw
+		end
+	end)
 	print("[InventoryDataManager] Loaded inventory for " .. player.Name)
 end
 

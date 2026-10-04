@@ -247,7 +247,7 @@ local currentGridData = {} -- { [1..27] = toolInfo or nil } (sparse)
 local currentOverflowData = {} -- { toolInfo, ... } (dense)
 local currentTotalItems = 0
 local currentMaxCapacity = 1000
-local currentHeldKey = nil -- slot key of the item in hand (server-tracked: copies share a Tool name)
+local currentSelected = 1 -- selected hotbar slot (server-tracked; an empty slot means an empty hand)
 local currentTrash = nil -- toolInfo of the last trashed stack (server keeps it until the next trash / rejoin)
 
 -- Pages: the 27 grid slots followed by the overflow items, cut into pages of whole rows (9 per row).
@@ -329,9 +329,9 @@ local function setSlotIcon(slotFrame, toolInfo)
 	slotFrame.ToolName.Visible = not hasIcon
 end
 
---- Only the slot the server says is in hand counts as equipped (copies of one item share a Tool name).
-local function isHeldSlot(toolInfo)
-	return toolInfo ~= nil and currentHeldKey ~= nil and toolInfo.name == currentHeldKey
+--- The selected hotbar slot is the darkened one (copies of one item share a Tool name, so match by slot).
+local function isSelectedSlot(slotIndex)
+	return slotIndex == currentSelected
 end
 
 --- "12x" for stackables; nothing for unstackable gear (a "1x" on every sword is noise).
@@ -348,6 +348,9 @@ local function updateSlotVisual(slotFrame, toolInfo, isEquipped, isHovered)
 		slotFrame.RarityLabel.Text = ""
 		slotFrame.UIStroke.Color = ItemRegistry.getRarity(0).color
 		slotFrame.BackgroundColor3 = ItemRegistry.getRarity(0).bgColor
+		if isEquipped then
+			slotFrame.BackgroundColor3 = slotFrame.BackgroundColor3:Lerp(BLACK, DARKEN_FACTOR)
+		end
 		return
 	end
 
@@ -471,7 +474,7 @@ local function createHotbarSlots()
 			-- ── Normal item slot ──
 			newSlot.MouseEnter:Connect(function()
 				slotData.hovered = true
-				updateSlotVisual(newSlot, slotData.toolInfo, isHeldSlot(slotData.toolInfo), true)
+				updateSlotVisual(newSlot, slotData.toolInfo, isSelectedSlot(i), true)
 				if slotData.toolInfo then
 					showItemTooltip(slotData.toolInfo)
 				end
@@ -479,7 +482,7 @@ local function createHotbarSlots()
 
 			newSlot.MouseLeave:Connect(function()
 				slotData.hovered = false
-				updateSlotVisual(newSlot, slotData.toolInfo, isHeldSlot(slotData.toolInfo), false)
+				updateSlotVisual(newSlot, slotData.toolInfo, isSelectedSlot(i), false)
 				hideItemTooltip()
 			end)
 		end
@@ -641,7 +644,7 @@ local function applyHotbarVisibility(dragOverride)
 			slotData.frame.Visible = true
 		else
 			-- Only show if filled
-			slotData.frame.Visible = (slotData.toolInfo ~= nil)
+			slotData.frame.Visible = (slotData.toolInfo ~= nil) or i == currentSelected
 		end
 	end
 end
@@ -832,10 +835,10 @@ local function refreshHotbar()
 
 		slotData.toolInfo = hasItem and toolInfo or nil
 
-		local isEq = hasItem and isHeldSlot(toolInfo)
+		local isEq = isSelectedSlot(i)
 		updateSlotVisual(slotData.frame, slotData.toolInfo, isEq, slotData.hovered)
 
-		slotData.frame.Visible = hasItem
+		slotData.frame.Visible = hasItem or isEq -- the selected slot stays visible even when empty (empty hand)
 	end
 	applyHotbarVisibility(false) -- apply visibility based on current preference (no drag override)
 end
@@ -1576,7 +1579,7 @@ UpdateInventoryEvent.OnClientEvent:Connect(function(data)
 	currentGridData = data.gridSlots or {}
 	currentOverflowData = data.overflow or {}
 	currentTrash = data.trash or nil -- false when the trash slot is empty
-	currentHeldKey = data.held or nil
+	currentSelected = data.selected or 1
 	currentTotalItems = data.total_items or 0
 	currentMaxCapacity = data.max_capacity or 1000
 
@@ -1585,6 +1588,30 @@ end)
 
 -- Ask for the current state now that the listener exists (the join-time push may have been missed)
 RequestInventoryEvent:FireServer()
+
+-- ===================== MOUSE WHEEL HOTBAR SELECT =====================
+-- Like Minecraft: the wheel cycles the selected slot (1..8) while the cursor is locked to the game view.
+local lastWheelAt = 0
+UserInputService.InputChanged:Connect(function(input, gameProcessed)
+	if input.UserInputType ~= Enum.UserInputType.MouseWheel or gameProcessed then
+		return
+	end
+	if MenuBridge.isOpen() or UserInputService.MouseBehavior ~= Enum.MouseBehavior.LockCenter then
+		return
+	end
+	local now = os.clock()
+	if now - lastWheelAt < 0.05 then
+		return
+	end
+	lastWheelAt = now
+	local step = input.Position.Z > 0 and -1 or 1 -- wheel up = previous slot
+	local slot = ((currentSelected - 1 + step) % (MAX_HOTBAR - 1)) + 1
+	currentSelected = slot -- optimistic: the server confirms with the next update
+	refreshHotbar()
+	task.spawn(function()
+		EquipToolFunc:InvokeServer(slot)
+	end)
+end)
 
 -- ===================== KEY BINDINGS =====================
 local keyToSlot = {
