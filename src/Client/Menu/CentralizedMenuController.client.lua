@@ -1859,14 +1859,77 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
 	end
 end)
 
--- ===================== NEXUS SIDEBAR BUTTON =====================
+-- ===================== SIDEBAR INVENTORY BUTTON =====================
+-- The hand-made Sidebar.SidebarBB.Nexus button (BG / UIStroke / Icon). Only existing instances are animated;
+-- restyle them in Studio and the hover/press feedback follows. Click = the E key (open / close the inventory).
+local SIDEBAR_TIP_SOURCE = "sidebar"
+local SIDEBAR_GREEN = Color3.fromHex("#55FF55")
+local sidebarBG = NexusBtn:WaitForChild("BG")
+local sidebarStroke = sidebarBG:FindFirstChildOfClass("UIStroke")
+local sidebarIcon = NexusBtn:WaitForChild("Icon")
+local SIDEBAR_STROKE_BASE = sidebarStroke and sidebarStroke.Thickness or 2
+local SIDEBAR_STROKE_COLOR = sidebarStroke and sidebarStroke.Color or Color3.new(1, 1, 1)
+local SIDEBAR_ICON_SIZE = sidebarIcon.Size
+local SIDEBAR_ICON_HOVER = UDim2.new(SIDEBAR_ICON_SIZE.X.Scale, SIDEBAR_ICON_SIZE.X.Offset + 6, SIDEBAR_ICON_SIZE.Y.Scale, SIDEBAR_ICON_SIZE.Y.Offset + 6)
+local SIDEBAR_ICON_PRESS = UDim2.new(SIDEBAR_ICON_SIZE.X.Scale, SIDEBAR_ICON_SIZE.X.Offset - 6, SIDEBAR_ICON_SIZE.Y.Scale, SIDEBAR_ICON_SIZE.Y.Offset - 6)
+local sidebarHoverInfo = TweenInfo.new(0.18, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
+local sidebarHovered = false
+
+local function tweenSidebarLook(iconSize, strokeThickness, strokeColor)
+	TweenService:Create(sidebarIcon, sidebarHoverInfo, { Size = iconSize }):Play()
+	if sidebarStroke then
+		TweenService:Create(sidebarStroke, sidebarHoverInfo, { Thickness = strokeThickness, Color = strokeColor }):Play()
+	end
+end
+
+--- Explains what the button opens (the sidebar slides away while a menu is open, so it only ever says OPEN).
+local function sidebarTooltip()
+	return {
+		title = '<font color="#55FF55"><b>Inventory</b></font>',
+		description = '<font color="#AAAAAA">Opens your inventory: the hotbar, your backpack pages, and the armor and accessory slots. Drag items to move them, right click gear to equip it, and use the trash slot to delete what you no longer need.</font>\n\n'
+			.. '<font color="#00AA00">Key:</font> <font color="#55FF55"><b>E</b></font>',
+		click = { { text = "TO OPEN INVENTORY", color = "#55FF55", icon = "lmb" } },
+	}
+end
+
+local function showSidebarTooltip()
+	TooltipModule.show(sidebarTooltip(), SIDEBAR_TIP_SOURCE)
+end
+
+NexusBtn.MouseEnter:Connect(function()
+	sidebarHovered = true
+	UIClick3:Play()
+	tweenSidebarLook(SIDEBAR_ICON_HOVER, SIDEBAR_STROKE_BASE + 1, SIDEBAR_GREEN)
+	showSidebarTooltip()
+end)
+
+NexusBtn.MouseLeave:Connect(function()
+	sidebarHovered = false
+	tweenSidebarLook(SIDEBAR_ICON_SIZE, SIDEBAR_STROKE_BASE, SIDEBAR_STROKE_COLOR)
+	TooltipModule.hide(SIDEBAR_TIP_SOURCE)
+end)
+
+NexusBtn.MouseButton1Down:Connect(function()
+	tweenSidebarLook(SIDEBAR_ICON_PRESS, SIDEBAR_STROKE_BASE + 1, SIDEBAR_GREEN)
+end)
+
+NexusBtn.MouseButton1Up:Connect(function()
+	tweenSidebarLook(sidebarHovered and SIDEBAR_ICON_HOVER or SIDEBAR_ICON_SIZE, SIDEBAR_STROKE_BASE + (sidebarHovered and 1 or 0), sidebarHovered and SIDEBAR_GREEN or SIDEBAR_STROKE_COLOR)
+end)
+
 NexusBtn.MouseButton1Click:Connect(function()
+	UIClick:Play()
 	if menuOpen then
 		closeMenu()
 	else
-		openMenu("full")
+		openMenu("inventory")
 	end
+	-- the sidebar slides away: drop the tooltip and the hover look now (MouseLeave only fires when the mouse moves)
+	sidebarHovered = false
+	TooltipModule.hide(SIDEBAR_TIP_SOURCE)
+	tweenSidebarLook(SIDEBAR_ICON_SIZE, SIDEBAR_STROKE_BASE, SIDEBAR_STROKE_COLOR)
 end)
+TooltipModule.registerHover(NexusBtn, showSidebarTooltip)
 
 -- (Armor clip tweening subscribes through MenuBridge.onStateChanged inside
 --  ArmorAccessoriesController; nothing to wrap here.)
