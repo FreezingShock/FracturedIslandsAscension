@@ -65,6 +65,12 @@ local function addSpriteHandle(tool: Tool, def: any)
 		img.BackgroundTransparency = 1
 		img.Size = UDim2.fromScale(1, 1)
 		img.ScaleType = Enum.ScaleType.Fit
+		if face == Enum.NormalId.Back then
+			-- a SurfaceGui reads un-mirrored from behind, so a spinning sprite would "flip" at 180 degrees;
+			-- mirror the back image so it matches what the other side of a flat sprite really looks like
+			img.Size = UDim2.fromScale(-1, 1)
+			img.Position = UDim2.fromScale(1, 0)
+		end
 		ItemIcons.apply(img, def)
 		img.Parent = gui
 	end
