@@ -93,6 +93,9 @@ local AssignHotbarFunc = ReplicatedStorage:WaitForChild("AssignHotbar")
 local AssignGridSlotFunc = ReplicatedStorage:WaitForChild("AssignGridSlot")
 local DropItemFunc = ReplicatedStorage:WaitForChild("DropItem")
 local MoveToEndFunc = ReplicatedStorage:WaitForChild("MoveToEnd")
+local RequestInventoryEvent = ReplicatedStorage:WaitForChild("RequestInventory")
+local TrashItemFunc = ReplicatedStorage:WaitForChild("TrashItem")
+local RestoreTrashFunc = ReplicatedStorage:WaitForChild("RestoreTrash")
 
 -- ===================== GUI REFERENCES — HOTBAR (CustomInventory) =====================
 local hotbarGui = playerGui:WaitForChild("CustomInventory")
@@ -244,6 +247,17 @@ local currentGridData = {} -- { [1..27] = toolInfo or nil } (sparse)
 local currentOverflowData = {} -- { toolInfo, ... } (dense)
 local currentTotalItems = 0
 local currentMaxCapacity = 1000
+local currentTrash = nil -- toolInfo of the last trashed stack (server keeps it until the next trash / rejoin)
+
+-- Pages: the 27 grid slots followed by the overflow items, cut into pages of whole rows (9 per row).
+-- With the Nexus menu open the frame is 2 rows tall (18 per page), otherwise 3 rows (27), so the page
+-- size follows the mode and the layout never shows a half-cut row.
+local COLUMNS = 9
+local function pageSize()
+	return MenuBridge.getMode() == "full" and COLUMNS * 2 or COLUMNS * 3
+end
+local currentPage = 1
+local pageCount = 1
 
 -- Drag state (PC)
 local dragState = nil
@@ -258,6 +272,8 @@ local mobileSelectedSlot = nil
 local hotbarSlots = {} -- [1..9] = { frame, toolInfo, hovered }
 local gridPool = {} -- [1..27] = { frame, toolInfo, hovered, isBlank }
 local overflowPool = {} -- array of { frame, toolInfo, hovered, inUse }
+local trashSlot = nil -- { frame, hovered } (bound by bindTrashSlot)
+local pageBar = nil -- { frame, prev, next, label } (bound by bindPageBar)
 
 -- Active highlight during drag
 local highlightedSlot = nil
@@ -312,6 +328,11 @@ local function setSlotIcon(slotFrame, toolInfo)
 	slotFrame.ToolName.Visible = not hasIcon
 end
 
+--- "12x" for stackables; nothing for unstackable gear (a "1x" on every sword is noise).
+local function stackText(toolInfo)
+	return toolInfo.unstackable and "" or (tostring(toolInfo.count) .. "x")
+end
+
 local function updateSlotVisual(slotFrame, toolInfo, isEquipped, isHovered)
 	slotFrame.BackgroundTransparency = 0.3
 	setSlotIcon(slotFrame, toolInfo)
@@ -326,7 +347,7 @@ local function updateSlotVisual(slotFrame, toolInfo, isEquipped, isHovered)
 
 	local rarityConf = ItemRegistry.getRarity(toolInfo.rarity or 0)
 	slotFrame.ToolName.Text = toolInfo.displayName or toolInfo.name
-	slotFrame.StackNum.Text = tostring(toolInfo.count) .. "x"
+	slotFrame.StackNum.Text = stackText(toolInfo)
 	slotFrame.RarityLabel.Text = rarityConf.display
 	slotFrame.RarityLabel.TextColor3 = rarityConf.color
 	slotFrame.UIStroke.Color = rarityConf.color
@@ -359,7 +380,7 @@ local function renderSlotFilled(slotFrame, toolInfo, isHovered)
 	setSlotIcon(slotFrame, toolInfo)
 	local rarityConf = ItemRegistry.getRarity(toolInfo.rarity or 0)
 	slotFrame.ToolName.Text = toolInfo.displayName or toolInfo.name
-	slotFrame.StackNum.Text = tostring(toolInfo.count) .. "x"
+	slotFrame.StackNum.Text = stackText(toolInfo)
 	slotFrame.RarityLabel.Text = rarityConf.display
 	slotFrame.RarityLabel.TextColor3 = rarityConf.color
 	slotFrame.UIStroke.Color = rarityConf.color
@@ -632,9 +653,144 @@ end
 
 -- ===================== SCROLLING LOGIC =====================
 local function updateScrolling()
-	local mode = MenuBridge.getMode()
-	local hasOverflow = #currentOverflowData > 0
-	inventoryFrame.ScrollingEnabled = (mode == "full") or hasOverflow
+	inventoryFrame.ScrollingEnabled = false -- paged: the page bar replaces the scroll wheel
+end
+
+-- ===================== PAGE BAR =====================
+local PAGE_HOLD_TIME = 0.45 -- seconds a dragged item must hover an arrow to flip the page
+
+local refreshInventory -- defined with the refresh functions below
+
+local function setPage(page)
+	page = math.clamp(page, 1, pageCount)
+	if page == currentPage then
+		return false
+	end
+	currentPage = page
+	refreshInventory()
+	TooltipModule.recheckPointer(true)
+	return true
+end
+
+--- Hook up the hand-made PageBar (Inventory.PageBar.Pager.Prev / Next / PageLabel). The look is yours to edit in
+--- Studio; this only wires clicks, the "n / N" text and keeps the bar under the grid.
+local function bindPageBar()
+	local frame = inventoryPanel:WaitForChild("PageBar")
+	local pager = frame:WaitForChild("Pager")
+	local prev = pager:WaitForChild("Prev")
+	local nxt = pager:WaitForChild("Next")
+	local label = pager:WaitForChild("PageLabel")
+
+	prev.MouseButton1Click:Connect(function()
+		if setPage(currentPage - 1) then
+			UIClick:Play()
+		end
+	end)
+	nxt.MouseButton1Click:Connect(function()
+		if setPage(currentPage + 1) then
+			UIClick:Play()
+		end
+	end)
+
+	pageBar = { frame = frame, prev = prev, next = nxt, label = label }
+
+	-- The grid frame shrinks/grows with the Nexus menu: keep the bar glued under it
+	local function follow()
+		frame.Position = UDim2.new(0, 0, 0, inventoryFrame.AbsoluteSize.Y + 6)
+	end
+	inventoryFrame:GetPropertyChangedSignal("AbsoluteSize"):Connect(follow)
+	follow()
+end
+
+-- ===================== TRASH SLOT =====================
+--- Trash slot parts (hand-made: PageBar.TrashSlot with ToolName, ItemImage, UIStroke). Empty keeps your styling;
+--- a trashed item shows its icon (or name) and rarity colour until it is taken back.
+local function renderTrash()
+	if not trashSlot then
+		return
+	end
+	local info = trashSlot
+	if currentTrash then
+		local id = currentTrash.itemId or currentTrash.name
+		local hasIcon = info.image
+			and ItemIcons.apply(info.image, ItemRegistry.exists(id) and ItemRegistry.get(id) or { id = id })
+		if info.image then
+			info.image.Visible = hasIcon and true or false
+		end
+		info.nameLabel.Visible = not hasIcon
+		info.nameLabel.Text = currentTrash.displayName or currentTrash.name
+		if info.stroke then
+			info.stroke.Color = ItemRegistry.getRarity(currentTrash.rarity or 0).color
+		end
+	else
+		if info.image then
+			info.image.Visible = false
+		end
+		info.nameLabel.Visible = true
+		info.nameLabel.Text = info.emptyText
+		if info.stroke then
+			info.stroke.Color = info.emptyStroke
+		end
+	end
+end
+
+--- Thicker outline while a dragged item hovers the trash slot.
+local function setTrashHot(hot)
+	if trashSlot and trashSlot.hot ~= hot then
+		trashSlot.hot = hot
+		if trashSlot.stroke then
+			trashSlot.stroke.Thickness = hot and trashSlot.baseThickness + 2 or trashSlot.baseThickness
+		end
+	end
+end
+
+local function isOverFrame(frame, screenPos)
+	local absPos, absSize = frame.AbsolutePosition, frame.AbsoluteSize
+	return screenPos.X >= absPos.X
+		and screenPos.X <= absPos.X + absSize.X
+		and screenPos.Y >= absPos.Y
+		and screenPos.Y <= absPos.Y + absSize.Y
+end
+
+local function bindTrashSlot()
+	local frame = pageBar.frame:WaitForChild("TrashSlot")
+	local stroke = frame:FindFirstChildOfClass("UIStroke")
+	local nameLabel = frame:WaitForChild("ToolName")
+	trashSlot = {
+		frame = frame,
+		nameLabel = nameLabel,
+		image = frame:FindFirstChild("ItemImage"),
+		stroke = stroke,
+		emptyText = nameLabel.Text,
+		emptyStroke = stroke and stroke.Color or WHITE,
+		baseThickness = stroke and stroke.Thickness or 2,
+		hovered = false,
+		hot = false,
+	}
+
+	--- The trashed item's tooltip, or an explanation while the slot is empty
+	local function showTrashTooltip()
+		if currentTrash then
+			showItemTooltip(currentTrash)
+		elseif not suppressTooltip then
+			TooltipModule.show({
+				title = '<font color="#FF5555"><b>Trash</b></font>',
+				desc = '<font color="#AAAAAA">Drop an item here to delete it. The last item you trash stays here until you throw away another or leave, so you can take it back.</font>',
+				click = { { text = "TO DRAG AN ITEM IN", color = "#FF5555", icon = "lmb" } },
+			}, TOOLTIP_SOURCE)
+		end
+	end
+
+	TooltipModule.registerHover(frame, showTrashTooltip)
+	frame.MouseEnter:Connect(function()
+		trashSlot.hovered = true
+		showTrashTooltip()
+	end)
+	frame.MouseLeave:Connect(function()
+		trashSlot.hovered = false
+		hideItemTooltip()
+	end)
+	renderTrash()
 end
 
 -- ===================== HOVER RECONCILE =====================
@@ -652,7 +808,11 @@ reconcileHover = function()
 	local slotData = findSlotAtPosition(Vector2.new(rawMouse.X, rawMouse.Y - inset.Y))
 	if slotData and slotData.toolInfo then
 		showItemTooltip(slotData.toolInfo)
-	elseif TooltipModule.isActiveSource(TOOLTIP_SOURCE) and not hotbarSlots[MENU_SLOT].hovered then
+	elseif
+		TooltipModule.isActiveSource(TOOLTIP_SOURCE)
+		and not hotbarSlots[MENU_SLOT].hovered
+		and not (trashSlot and trashSlot.hovered)
+	then
 		hideItemTooltip() -- the slot under the cursor is empty now
 	end
 end
@@ -680,7 +840,7 @@ local function refreshHotbar()
 	applyHotbarVisibility(false) -- apply visibility based on current preference (no drag override)
 end
 
-local function refreshInventory()
+refreshInventory = function()
 	if not inventoryVisible then
 		return
 	end
@@ -713,6 +873,22 @@ local function refreshInventory()
 		renderSlotFilled(slotData.frame, toolInfo, slotData.hovered)
 	end
 
+	-- ── Pages: only the current page's slots are shown ──
+	local size = pageSize()
+	pageCount = math.ceil((GRID_SLOTS + #currentOverflowData) / size)
+	currentPage = math.clamp(currentPage, 1, pageCount)
+	for i = 1, GRID_SLOTS do
+		gridPool[i].frame.Visible = math.ceil(i / size) == currentPage
+	end
+	for i = 1, #currentOverflowData do
+		overflowPool[i].frame.Visible = math.ceil((GRID_SLOTS + i) / size) == currentPage
+	end
+	if pageBar then
+		pageBar.label.Text = currentPage .. " / " .. pageCount
+		pageBar.prev.TextTransparency = currentPage > 1 and 0 or 0.6
+		pageBar.next.TextTransparency = currentPage < pageCount and 0 or 0.6
+	end
+
 	-- Hide unused overflow pool slots
 	for i = #currentOverflowData + 1, #overflowPool do
 		local slotData = overflowPool[i]
@@ -731,6 +907,7 @@ end
 local function refreshAll()
 	refreshHotbar()
 	refreshInventory()
+	renderTrash()
 	task.defer(reconcileHover) -- after layout: the item under a stationary cursor may have changed
 end
 
@@ -960,7 +1137,39 @@ local function onDragMove(mousePos)
 		_clearDragHighlight()
 		_updateTransferHover(false)
 	end
+	setTrashHot(trashSlot ~= nil and dragState.sourceLocation ~= "trash" and isOverFrame(trashSlot.frame, screenPos))
 end
+
+-- Holding a dragged item over a page arrow flips the page (checked every frame: the cursor may be still)
+local pageHold = { dir = 0, t = 0 }
+RunService.Heartbeat:Connect(function(dt)
+	if not (dragState and dragState.isDragging and pageBar and inventoryVisible) then
+		pageHold.dir = 0
+		return
+	end
+	local rawMouse = UserInputService:GetMouseLocation()
+	local pos = Vector2.new(rawMouse.X, rawMouse.Y - GuiService:GetGuiInset().Y)
+	local dir = 0
+	if isOverFrame(pageBar.prev, pos) then
+		dir = -1
+	elseif isOverFrame(pageBar.next, pos) then
+		dir = 1
+	end
+	if dir == 0 then
+		pageHold.dir = 0
+		return
+	end
+	if dir ~= pageHold.dir then
+		pageHold.dir, pageHold.t = dir, 0
+	end
+	pageHold.t += dt
+	if pageHold.t >= PAGE_HOLD_TIME then
+		pageHold.t = 0
+		if setPage(currentPage + dir) then
+			UIClick:Play()
+		end
+	end
+end)
 
 local function onDragEnd(mousePos)
 	if not dragState then
@@ -978,6 +1187,7 @@ local function onDragEnd(mousePos)
 	local targetSlot, targetLocation, targetSlotIndex, targetIsBlank
 	local overInventory = false
 	local overTransfer = false
+	local overTrash = false
 	local overEquipSlot = nil
 	if wasDragging then
 		local adjustedPos = Vector2.new(mousePos.X, mousePos.Y)
@@ -985,14 +1195,38 @@ local function onDragEnd(mousePos)
 		targetSlot, targetLocation, targetSlotIndex, targetIsBlank = findSlotAtPosition(adjustedPos)
 		overInventory = isOverInventoryArea(adjustedPos)
 		overTransfer = _isOverTransferFrame(adjustedPos)
+		overTrash = trashSlot ~= nil and inventoryVisible and isOverFrame(trashSlot.frame, adjustedPos)
 	end
 
 	_cleanupDrag()
 	_hideTransferFrame()
+	setTrashHot(false)
 	suppressTooltip = false
 
 	-- ── Left click (no drag) does nothing: right click equips ──
 	if not wasDragging then
+		return
+	end
+
+	-- Dragged out of the trash slot onto the inventory: take the item back
+	if sourceLocation == "trash" then
+		if not overTrash and (targetSlot or overInventory) then
+			task.spawn(function()
+				RestoreTrashFunc:InvokeServer()
+			end)
+			if selectSound2 then
+				selectSound2:Play()
+			end
+		end
+		return
+	end
+
+	-- Dropped on the trash slot: the whole stack goes (and stays in the trash slot to be taken back)
+	if overTrash then
+		task.spawn(function()
+			TrashItemFunc:InvokeServer(toolName)
+		end)
+		UIClick:Play()
 		return
 	end
 
@@ -1266,6 +1500,40 @@ getOrCreateOverflowSlot = function(index)
 	return slotData
 end
 
+local function wireTrashSlotInput()
+	-- input comes from the hand-made Select button (or the frame itself if it has none)
+	local target = trashSlot.frame:FindFirstChild("Select") or trashSlot.frame
+	target.InputBegan:Connect(function(input)
+		local kind = input.UserInputType
+		if kind == Enum.UserInputType.MouseButton2 then
+			-- right click = take the trashed item back
+			if currentTrash and not dragState then
+				task.spawn(function()
+					RestoreTrashFunc:InvokeServer()
+				end)
+				UIClick:Play()
+			end
+		elseif kind == Enum.UserInputType.Touch then
+			-- tap with an item selected = trash it; otherwise tap the trashed item = take it back
+			if mobileSelectedName then
+				local name = mobileSelectedName
+				clearMobileSelection()
+				task.spawn(function()
+					TrashItemFunc:InvokeServer(name)
+				end)
+			elseif currentTrash then
+				task.spawn(function()
+					RestoreTrashFunc:InvokeServer()
+				end)
+			end
+		elseif kind == Enum.UserInputType.MouseButton1 and currentTrash then
+			local rawMouse = UserInputService:GetMouseLocation()
+			local mousePos = Vector2.new(rawMouse.X, rawMouse.Y - GuiService:GetGuiInset().Y)
+			_startDragOnSlot(currentTrash, trashSlot.frame, "trash", 1, mousePos)
+		end
+	end)
+end
+
 -- ===================== GLOBAL INPUT (drag tracking) =====================
 UserInputService.InputChanged:Connect(function(input)
 	if input.UserInputType == Enum.UserInputType.MouseMovement and dragState then
@@ -1298,11 +1566,15 @@ UpdateInventoryEvent.OnClientEvent:Connect(function(data)
 	currentHotbarData = data.hotbar or {}
 	currentGridData = data.gridSlots or {}
 	currentOverflowData = data.overflow or {}
+	currentTrash = data.trash or nil -- false when the trash slot is empty
 	currentTotalItems = data.total_items or 0
 	currentMaxCapacity = data.max_capacity or 1000
 
 	refreshAll()
 end)
+
+-- Ask for the current state now that the listener exists (the join-time push may have been missed)
+RequestInventoryEvent:FireServer()
 
 -- ===================== KEY BINDINGS =====================
 local keyToSlot = {
@@ -1380,13 +1652,15 @@ end)
 
 -- ===================== MENUBRIDGE CALLBACKS =====================
 -- CentralizedMenuController notifies us when state changes
+local lastStateMode = nil
 MenuBridge._onStateChanged = function(mode)
 	local wasVisible = inventoryVisible
 	inventoryVisible = (mode ~= nil) -- visible in both "inventory" and "full" modes
 
-	if inventoryVisible and not wasVisible then
-		refreshInventory()
+	if inventoryVisible and (not wasVisible or mode ~= lastStateMode) then
+		refreshInventory() -- also on inventory <-> full: the page size changes with the frame height
 	end
+	lastStateMode = mode
 
 	-- Update scrolling when mode changes (inventory → full or vice versa)
 	if inventoryVisible then
@@ -1427,5 +1701,10 @@ createGridSlots()
 for i = 1, GRID_SLOTS do
 	wireGridSlotInput(i)
 end
+
+bindPageBar()
+bindTrashSlot()
+wireTrashSlotInput()
+refreshHotbar() -- hides the empty template slots (no "Label" placeholders) until the server data arrives
 
 hotbarFrame.Visible = true

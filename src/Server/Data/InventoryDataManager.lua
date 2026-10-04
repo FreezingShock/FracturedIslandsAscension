@@ -72,6 +72,9 @@ local AssignHotbarFunc = ensureRemote("RemoteFunction", "AssignHotbar")
 local AssignGridSlotFunc = ensureRemote("RemoteFunction", "AssignGridSlot")
 local DropItemFunc = ensureRemote("RemoteFunction", "DropItem")
 local MoveToEndFunc = ensureRemote("RemoteFunction", "MoveToEnd")
+local RequestInventoryEvent = ensureRemote("RemoteEvent", "RequestInventory")
+local TrashItemFunc = ensureRemote("RemoteFunction", "TrashItem")
+local RestoreTrashFunc = ensureRemote("RemoteFunction", "RestoreTrash")
 
 -- ===================== PER-PLAYER RUNTIME STATE =====================
 -- Mirrors _Inventory profile data at runtime for fast access.
@@ -174,6 +177,7 @@ local function buildToolInfo(key, info)
 		itemId = itemId, -- registry key
 		displayName = displayName,
 		count = info.count,
+		unstackable = stackLimit(toolName) == 1, -- the client hides the "1x" label on these
 		equippable = regItem == nil or regItem.equippable ~= false,
 		rarity = rarity,
 		description = description,
@@ -181,6 +185,10 @@ local function buildToolInfo(key, info)
 		slot = regItem and regItem.slot or nil, -- armor / accessory slot id
 	}
 end
+
+-- Trash slot: the last trashed stack stays here until the next trash or rejoin (never saved).
+-- [userId] = { toolName, count, rarity, custom }
+local trashBin = {}
 
 --- Find the first empty grid slot index (1-27), or nil if all full.
 local function findFirstEmptyGridSlot(state)
@@ -363,7 +371,13 @@ function InventoryDataManager.SendUpdate(player)
 		totalItems = totalItems + info.count
 	end
 
+	local trashed = trashBin[player.UserId]
 	UpdateInventoryEvent:FireClient(player, {
+		trash = trashed and buildToolInfo(trashed.toolName, {
+			base = trashed.toolName,
+			count = trashed.count,
+			rarity = trashed.rarity,
+		}) or false,
 		hotbar = hotbarTools,
 		gridSlots = gridTools,
 		overflow = overflowTools,
@@ -589,6 +603,59 @@ local function dropItem(player, key: string, all: boolean?): boolean
 		InventoryDataManager.AddItem(player, toolName, removed) -- could not spawn: give it back
 		return false
 	end
+	return true
+end
+
+-- ===================== TRASH =====================
+--- Delete the whole stack in slot `key` (replacing whatever the trash slot held before).
+local function trashItem(player, key: string): boolean
+	local entry = countEntries(player)[key]
+	if not entry then
+		return false -- not owned: nothing to trash
+	end
+	local toolName = entry.base
+	local character = player.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	local backpack = player:FindFirstChild("Backpack")
+	local sample = backpack and backpack:FindFirstChild(toolName) or (character and character:FindFirstChild(toolName))
+	local custom = sample and sample:IsA("Tool") and sample:GetAttribute("Custom") or nil
+	-- RemoveItem only takes Backpack copies: put the held one back first
+	if humanoid then
+		humanoid:UnequipTools()
+	end
+	local removed = InventoryDataManager.RemoveItem(player, key, entry.count)
+	if removed <= 0 then
+		return false
+	end
+	trashBin[player.UserId] = { toolName = toolName, count = removed, rarity = entry.rarity, custom = custom }
+	InventoryDataManager.SendUpdate(player)
+	return true
+end
+
+--- Give the trashed stack back (first free slot). Whatever did not fit stays in the trash slot.
+local function restoreTrash(player): boolean
+	local bin = trashBin[player.UserId]
+	if not bin then
+		return false
+	end
+	local added = InventoryDataManager.AddItem(player, bin.toolName, bin.count)
+	if added <= 0 then
+		return false
+	end
+	if bin.custom ~= nil then
+		local backpack = player:FindFirstChild("Backpack")
+		for _, child in ipairs(backpack and backpack:GetChildren() or {}) do
+			if child:IsA("Tool") and child.Name == bin.toolName and child:GetAttribute("Custom") == nil then
+				child:SetAttribute("Custom", bin.custom)
+			end
+		end
+	end
+	if added >= bin.count then
+		trashBin[player.UserId] = nil
+	else
+		bin.count -= added
+	end
+	InventoryDataManager.SendUpdate(player)
 	return true
 end
 
@@ -1012,6 +1079,7 @@ end
 local function onPlayerLeaving(player)
 	saveInventoryToProfile(player) -- no-op if SkillsDataManager already released the profile (its hook saved first)
 	playerState[player.UserId] = nil
+	trashBin[player.UserId] = nil
 	lastDropAt[player.UserId] = nil
 end
 
@@ -1083,6 +1151,28 @@ end
 ItemDrops.setGrantHandler(function(player, toolName, count)
 	return InventoryDataManager.AddItem(player, toolName, count)
 end)
+
+-- The client asks for its inventory once its listener is connected (the first push at join can arrive before
+-- the client script has finished loading and would otherwise be lost)
+RequestInventoryEvent.OnServerEvent:Connect(function(player)
+	if allow(player) then
+		InventoryDataManager.SendUpdate(player)
+	end
+end)
+
+TrashItemFunc.OnServerInvoke = function(player, key)
+	if not allow(player) or type(key) ~= "string" or #key > 100 then
+		return false
+	end
+	return trashItem(player, key)
+end
+
+RestoreTrashFunc.OnServerInvoke = function(player)
+	if not allow(player) then
+		return false
+	end
+	return restoreTrash(player)
+end
 
 MoveToEndFunc.OnServerInvoke = function(player, toolName)
 	if not allow(player) or type(toolName) ~= "string" then
