@@ -27,6 +27,8 @@
 
 	  icon         optional: icon key | "rbxassetid://" | { image, rectOffset, rectSize }; omit to use
 	               ItemIcons (ALIASES[id] or the key equal to the id), see ItemIcons.lua
+	  model        optional: ItemModels key (default = item id); see ItemModels.lua
+	  custom       reserved for per-item customization (string); carried on the Tool and drops
 	  maxStack, toolName
 --]]
 
@@ -119,6 +121,8 @@ function Define.item(id: string, spec: any, category: string?): any
 		category = cat,
 		slot = slot,
 		icon = spec.icon or "",
+		model = spec.model, -- key into ItemModels.MODELS (defaults to the item id)
+		custom = spec.custom, -- reserved per-item customization data (string); unused for now
 		maxStack = spec.maxStack or defaults.maxStack,
 		toolName = spec.toolName or name,
 		stats = stats,

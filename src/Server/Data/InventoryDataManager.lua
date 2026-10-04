@@ -37,6 +37,7 @@ local ServerScriptService = game:GetService("ServerScriptService")
 
 local SkillsDataManager = require(ServerScriptService:WaitForChild("SkillsDataManager")) :: any
 local ItemTools = require(ServerScriptService:WaitForChild("ItemTools")) :: any
+local ItemDrops = require(ServerScriptService:WaitForChild("ItemDrops")) :: any
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local ItemRegistry = require(Modules:WaitForChild("Items")) :: any
 
@@ -392,14 +393,24 @@ function InventoryDataManager.AddItem(player, toolName: string, count: number): 
 		clone.Parent = backpack
 	end
 
-	-- Auto-assign to first empty grid slot if this is a new tool type
+	-- New tool type: first empty hotbar item slot (1..8, 9 is the menu), then the first empty grid slot
 	local state = playerState[player.UserId]
 	if state and not existing[toolName] then
-		-- New tool type — assign grid slot if not already placed
 		if not findGridSlotForTool(state, toolName) and not findHotbarSlotForTool(state, toolName) then
-			local emptySlot = findFirstEmptyGridSlot(state)
-			if emptySlot then
-				state.gridSlots[emptySlot] = toolName
+			local hotbarSlot
+			for i = 1, MAX_HOTBAR_SLOTS - 1 do
+				if not state.hotbarSlots[i] then
+					hotbarSlot = i
+					break
+				end
+			end
+			if hotbarSlot then
+				state.hotbarSlots[hotbarSlot] = toolName
+			else
+				local emptySlot = findFirstEmptyGridSlot(state)
+				if emptySlot then
+					state.gridSlots[emptySlot] = toolName
+				end
 			end
 		end
 	end
@@ -456,65 +467,70 @@ end
 -- ===================== DROP ITEM =====================
 --- Drop entire stack of a tool to the world at the player's position.
 --- Returns true if anything was dropped.
-local function dropItem(player, toolName: string): boolean
+--- Drop items into the world as ItemDrops (Minecraft style). `all` = the whole stack, otherwise one.
+--- The Tools are destroyed (and slots cleared by RemoveItem) BEFORE the drop is created.
+local lastDropAt = {} -- [userId] = os.clock()
+
+local function dropItem(player, toolName: string, all: boolean?): boolean
 	local character = player.Character
-	if not character then
+	local rootPart = character and character:FindFirstChild("HumanoidRootPart")
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	if not (rootPart and humanoid) or humanoid.Health <= 0 then
 		return false
 	end
-	local rootPart = character:FindFirstChild("HumanoidRootPart")
-	if not rootPart then
-		return false
-	end
-
-	-- Unequip first if this tool is equipped
-	local humanoid = character:FindFirstChildOfClass("Humanoid")
-	if humanoid then
-		for _, child in ipairs(character:GetChildren()) do
-			if child:IsA("Tool") and child.Name == toolName then
-				humanoid:UnequipTools()
-				break
-			end
-		end
-	end
-
-	-- Gather all instances of this tool from Backpack + Character
-	local toDrop = {}
-	for _, container in ipairs(getContainers(player)) do
-		for _, child in ipairs(container:GetChildren()) do
-			if child:IsA("Tool") and child.Name == toolName then
-				table.insert(toDrop, child)
-			end
-		end
-	end
-
-	if #toDrop == 0 then
+	local now = os.clock()
+	if now - (lastDropAt[player.UserId] or 0) < 0.1 then
 		return false
 	end
 
-	-- Calculate drop position
-	local dropPos = rootPart.Position + rootPart.CFrame.LookVector * DROP_FORWARD_OFFSET + Vector3.new(0, 2, 0)
-
-	for _, tool in ipairs(toDrop) do
-		tool.Parent = workspace
-		if tool:FindFirstChild("Handle") then
-			tool.Handle.CFrame = CFrame.new(dropPos)
+	local backpackCount, heldCount = 0, 0
+	local backpack = player:FindFirstChild("Backpack")
+	for _, child in ipairs(backpack and backpack:GetChildren() or {}) do
+		if child:IsA("Tool") and child.Name == toolName then
+			backpackCount += 1
 		end
 	end
-
-	-- Clear hotbar and grid slots for this tool
-	local state = playerState[player.UserId]
-	if state then
-		local hotbarIdx = findHotbarSlotForTool(state, toolName)
-		if hotbarIdx then
-			state.hotbarSlots[hotbarIdx] = nil
-		end
-		local gridIdx = findGridSlotForTool(state, toolName)
-		if gridIdx then
-			state.gridSlots[gridIdx] = nil
+	for _, child in ipairs(character:GetChildren()) do
+		if child:IsA("Tool") and child.Name == toolName then
+			heldCount += 1
 		end
 	end
+	local owned = backpackCount + heldCount
+	if owned == 0 then
+		return false
+	end
 
-	InventoryDataManager.SendUpdate(player)
+	local amount = all and owned or 1
+	local custom
+	local sample = backpack and backpack:FindFirstChild(toolName) or character:FindFirstChild(toolName)
+	if sample and sample:IsA("Tool") then
+		custom = sample:GetAttribute("Custom")
+	end
+
+	-- RemoveItem only takes Backpack copies: put the held one back first when it has to go
+	if heldCount > 0 and (all or backpackCount == 0) then
+		humanoid:UnequipTools()
+	end
+	local removed = InventoryDataManager.RemoveItem(player, toolName, amount)
+	if removed <= 0 then
+		return false
+	end
+	lastDropAt[player.UserId] = now
+
+	local look = rootPart.CFrame.LookVector
+	local position = rootPart.Position + look * DROP_FORWARD_OFFSET + Vector3.new(0, 1.5, 0)
+	local id = ItemDrops.spawn({
+		toolName = toolName,
+		count = removed,
+		position = position,
+		velocity = look * 14 + Vector3.new(0, 14, 0),
+		ownerId = player.UserId,
+		custom = custom,
+	})
+	if not id then
+		InventoryDataManager.AddItem(player, toolName, removed) -- could not spawn: give it back
+		return false
+	end
 	return true
 end
 
@@ -943,6 +959,7 @@ end
 local function onPlayerLeaving(player)
 	saveInventoryToProfile(player)
 	playerState[player.UserId] = nil
+	lastDropAt[player.UserId] = nil
 end
 
 -- ===================== WIRE REMOTES =====================
@@ -981,12 +998,17 @@ AssignGridSlotFunc.OnServerInvoke = function(player, gridIndex, toolName)
 	return assignGridSlot(player, gridIndex, toolName)
 end
 
-DropItemFunc.OnServerInvoke = function(player, toolName)
-	if type(toolName) ~= "string" then
+DropItemFunc.OnServerInvoke = function(player, toolName, all)
+	if type(toolName) ~= "string" or (all ~= nil and type(all) ~= "boolean") then
 		return false
 	end
-	return dropItem(player, toolName)
+	return dropItem(player, toolName, all)
 end
+
+-- Picked-up drops go through the normal AddItem path (first free slot, capacity and stack limits)
+ItemDrops.setGrantHandler(function(player, toolName, count)
+	return InventoryDataManager.AddItem(player, toolName, count)
+end)
 
 MoveToEndFunc.OnServerInvoke = function(player, toolName)
 	if type(toolName) ~= "string" then

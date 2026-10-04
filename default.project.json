@@ -31,6 +31,9 @@
       "InventoryTestCommands": {
         "$path": "src/Server/Admin/InventoryTestCommands.server.lua"
       },
+      "ItemDrops": {
+        "$path": "src/Server/Inventory/ItemDrops.lua"
+      },
       "ItemTools": {
         "$path": "src/Server/Inventory/ItemTools.lua"
       },
@@ -110,6 +113,9 @@
         },
         "ItemIcons": {
           "$path": "src/Shared/Modules/Inventory/ItemIcons.lua"
+        },
+        "ItemModels": {
+          "$path": "src/Shared/Modules/Inventory/ItemModels.lua"
         },
         "ItemRegistry": {
           "$path": "src/Shared/Modules/Inventory/ItemRegistry.lua"
@@ -191,6 +197,9 @@
         },
         "InventoryController": {
           "$path": "src/Client/Inventory/InventoryController.client.lua"
+        },
+        "ItemDropRenderer": {
+          "$path": "src/Client/Inventory/ItemDropRenderer.client.lua"
         },
         "LiquidGlassBootstrap": {
           "$path": "src/Client/Menu/LiquidGlassBootstrap.client.lua"

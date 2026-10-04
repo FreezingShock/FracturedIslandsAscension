@@ -1033,7 +1033,7 @@ local function onDragEnd(mousePos)
 	end
 
 	-- Dropped outside everything → drop item to world
-	DropItemFunc:InvokeServer(toolName)
+	DropItemFunc:InvokeServer(toolName, true) -- dragging a stack out of the inventory drops all of it
 	UIClick:Play()
 end
 
@@ -1277,6 +1277,19 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
 	if key == Enum.KeyCode.G then
 		if MenuBridge.isOpen() then
 			MenuBridge.closeAll()
+		end
+		return
+	end
+
+	-- Q → drop one of the held item (Ctrl+Q → the whole stack)
+	if key == Enum.KeyCode.Q then
+		local character = player.Character
+		local held = character and character:FindFirstChildOfClass("Tool")
+		if held then
+			local ctrl = UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) or UserInputService:IsKeyDown(Enum.KeyCode.RightControl)
+			task.spawn(function()
+				DropItemFunc:InvokeServer(held.Name, ctrl)
+			end)
 		end
 		return
 	end
