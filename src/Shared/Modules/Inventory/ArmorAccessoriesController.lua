@@ -209,7 +209,7 @@ local function onSlotClick(slotId: string)
 	if not equipped[slotId] or not UnequipItemFunc then
 		return
 	end
-	TooltipModule.forceHide()
+	-- (the tooltip stays: loadEquipped re-reads the pointer once the server answers)
 	task.spawn(function()
 		UnequipItemFunc:InvokeServer(slotId)
 	end)
@@ -292,6 +292,9 @@ addView = function(slotId: string, button: GuiButton)
 
 	table.insert(conns, SlotFx.bind(button))
 	renderView(slotId, view)
+	TooltipModule.registerHover(button, function()
+		showSlotTooltip(slotId, button)
+	end)
 
 	return view, function()
 		for _, conn in ipairs(conns) do
@@ -316,6 +319,12 @@ local function loadEquipped(data: { [string]: string }?)
 		end
 	end
 	renderAll()
+	-- a worn/removed piece changes what the slot under a still cursor should say
+	task.defer(function()
+		if TooltipModule.isVisible() then
+			TooltipModule.recheckPointer(false)
+		end
+	end)
 end
 
 -- ===================== INIT =====================

@@ -1150,6 +1150,7 @@ end
 
 -- ===================== NAVIGATE TO ROOT =====================
 local function navigateToRoot(animated)
+	TooltipModule.forceHide()
 	local nav = currentNav()
 	if nav and nav.config and nav.config.module then
 		nav.config.module.close()
@@ -1185,6 +1186,8 @@ local function navigateToPage(gridKey, buttonKey, buttonConfig, animated)
 	if not frame then
 		return
 	end
+
+	TooltipModule.forceHide() -- the page slides in: the button's tooltip must not stay on screen
 
 	if navDepth() > 0 then
 		local oldNav = currentNav()
@@ -1236,6 +1239,7 @@ end
 -- ===================== NAVIGATE BACK =====================
 local function navigateBack()
 	local depth = navDepth()
+	TooltipModule.forceHide()
 
 	if depth >= 2 then
 		local nav = currentNav()
@@ -1483,8 +1487,12 @@ GridMenuModule.registerPooledGrid(ROOT_GRID, GridTemplates:WaitForChild("NexusMe
 	onWireTooltips = function(clonedButtons)
 		-- Dynamic Profile tooltip (moved from manual wiring section below)
 		local conns = {}
+		local hovers = {} -- what each button's MouseEnter shows (lets the pointer be re-read after a page change)
 		local profileBtn = clonedButtons["Profile"]
 		if profileBtn then
+			hovers.Profile = function()
+				ProfilePageModule.showProfileSummaryTooltip()
+			end
 			table.insert(
 				conns,
 				profileBtn.MouseEnter:Connect(function()
@@ -1506,7 +1514,7 @@ GridMenuModule.registerPooledGrid(ROOT_GRID, GridTemplates:WaitForChild("NexusMe
 				table.insert(conns, conn)
 			end
 		end
-		return conns
+		return conns, hovers
 	end,
 })
 
@@ -1530,9 +1538,13 @@ GridMenuModule.registerPooledGrid("StatisticsGrid", GridTemplates:WaitForChild("
 	itemOrders = {},
 	onWireTooltips = function(clonedButtons)
 		local conns = {}
+		local hovers = {}
 		for _, skillName in ipairs(STATISTICS_SKILLS) do
 			local btn = clonedButtons[skillName .. "Statistics"]
 			if btn then
+				hovers[skillName .. "Statistics"] = function()
+					StatisticsPageModule.showSkillTooltip(skillName, btn)
+				end
 				table.insert(
 					conns,
 					btn.MouseEnter:Connect(function()
@@ -1547,7 +1559,7 @@ GridMenuModule.registerPooledGrid("StatisticsGrid", GridTemplates:WaitForChild("
 				)
 			end
 		end
-		return conns
+		return conns, hovers
 	end,
 })
 
@@ -1563,6 +1575,7 @@ GridMenuModule.registerPooledGrid("SkillsGrid", GridTemplates:WaitForChild("Skil
 	itemOrders = {},
 	onWireTooltips = function(clonedButtons)
 		local conns = {}
+		local hovers = {}
 		local SKILLGRID_STAT_MAP = {
 			FarmingSkills = "Farming",
 			ForagingSkills = "Foraging",
@@ -1573,6 +1586,9 @@ GridMenuModule.registerPooledGrid("SkillsGrid", GridTemplates:WaitForChild("Skil
 		for buttonName, statKey in pairs(SKILLGRID_STAT_MAP) do
 			local btn = clonedButtons[buttonName]
 			if btn then
+				hovers[buttonName] = function()
+					SkillsPageModule.showGridSkillTooltip(statKey)
+				end
 				table.insert(
 					conns,
 					btn.MouseEnter:Connect(function()
@@ -1587,7 +1603,7 @@ GridMenuModule.registerPooledGrid("SkillsGrid", GridTemplates:WaitForChild("Skil
 				)
 			end
 		end
-		return conns
+		return conns, hovers
 	end,
 })
 
@@ -1597,11 +1613,15 @@ GridMenuModule.registerPooledGrid("ProfileGrid", GridTemplates:WaitForChild("Pro
 	itemOrders = ProfileConfig.PROFILE_ITEM_ORDERS,
 	onWireTooltips = function(clonedButtons)
 		local conns = {}
+		local hovers = {}
 		-- Skill attribute dynamic tooltips
 		for skillName, buttonName in pairs(ProfileConfig.SKILL_BUTTON_MAP) do
 			local btn = clonedButtons[buttonName]
 			if btn then
 				local capturedSkill = skillName
+				hovers[buttonName] = function()
+					ProfilePageModule.showSkillAttributeTooltip(capturedSkill)
+				end
 				table.insert(
 					conns,
 					btn.MouseEnter:Connect(function()
@@ -1631,6 +1651,9 @@ GridMenuModule.registerPooledGrid("ProfileGrid", GridTemplates:WaitForChild("Pro
 		-- MyProfile full tooltip
 		local myProfileBtn = clonedButtons["MyProfile"]
 		if myProfileBtn then
+			hovers.MyProfile = function()
+				ProfilePageModule.showFullProfileTooltip()
+			end
 			table.insert(
 				conns,
 				myProfileBtn.MouseEnter:Connect(function()
@@ -1645,7 +1668,7 @@ GridMenuModule.registerPooledGrid("ProfileGrid", GridTemplates:WaitForChild("Pro
 				end)
 			)
 		end
-		return conns
+		return conns, hovers
 	end,
 })
 

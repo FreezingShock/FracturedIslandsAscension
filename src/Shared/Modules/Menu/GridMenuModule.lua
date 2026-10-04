@@ -67,8 +67,8 @@ local activeGrid = nil -- currently visible gridKey (legacy OR pooled)
 local pooledGrids = {} -- gridKey → { templateFolder, buttonConfigs, blankGroups, itemOrders, title, hooks }
 
 local bufferData = {
-	A = { frame = nil, connections = {}, gridKey = nil },
-	B = { frame = nil, connections = {}, gridKey = nil },
+	A = { frame = nil, connections = {}, gridKey = nil, hoverButtons = {} },
+	B = { frame = nil, connections = {}, gridKey = nil, hoverButtons = {} },
 }
 local activeBuffer = "A" -- label of the buffer currently showing pooled content
 local blankTemplate = nil -- BlankSlot template for pooled grids
@@ -169,6 +169,36 @@ local function findBufferForGrid(gridKey)
 	return nil
 end
 
+-- ===================== QUIESCE (outgoing buffer) =====================
+--- The outgoing buffer stays on screen for the whole crossfade. Its buttons must stop reacting NOW:
+--- otherwise hovering them shows the OLD menu's tooltip over the new menu, and clicking them navigates twice.
+local function quiesceBuffer(label)
+	local bd = bufferData[label]
+	for _, conn in ipairs(bd.connections) do
+		conn:Disconnect()
+	end
+	table.clear(bd.connections)
+	for _, btn in ipairs(bd.hoverButtons) do
+		TooltipModule.unregisterHover(btn)
+	end
+	table.clear(bd.hoverButtons)
+	if bd.frame then
+		bd.frame.Interactable = false
+	end
+end
+
+--- Look at what is under the stationary cursor once the new page has been laid out.
+local recheckToken = 0
+local function recheckPointerSoon()
+	recheckToken += 1
+	local token = recheckToken
+	task.delay(0.12, function()
+		if token == recheckToken and TooltipModule then
+			TooltipModule.recheckPointer(false)
+		end
+	end)
+end
+
 -- ===================== DEPOPULATE BUFFER =====================
 
 --- Disconnect connections, call hooks, destroy cloned children.
@@ -194,6 +224,10 @@ local function depopulateBuffer(label)
 		conn:Disconnect()
 	end
 	table.clear(bd.connections)
+	for _, btn in ipairs(bd.hoverButtons) do
+		TooltipModule.unregisterHover(btn)
+	end
+	table.clear(bd.hoverButtons)
 
 	-- Destroy cloned children
 	local destroyed = clearBufferChildren(bd.frame)
@@ -235,6 +269,7 @@ local function populateBuffer(label, gridKey)
 	end
 	bd.frame.Visible = false
 	bd.frame.GroupTransparency = 0
+	bd.frame.Interactable = true
 
 	bd.gridKey = gridKey -- claimed up front: depopulateBuffer then cleans this buffer even if a hook below errors
 	bd.gen = (bd.gen or 0) + 1
@@ -316,6 +351,10 @@ local function populateBuffer(label, gridKey)
 					TooltipModule.show(cfg.tooltipData, nil, btn)
 				end)
 			)
+			TooltipModule.registerHover(btn, function()
+				TooltipModule.show(cfg.tooltipData, nil, btn)
+			end)
+			table.insert(bd.hoverButtons, btn)
 			table.insert(
 				bd.connections,
 				btn.MouseLeave:Connect(function()
@@ -327,12 +366,20 @@ local function populateBuffer(label, gridKey)
 
 	-- 5. Hook: dynamic tooltip wiring (returns extra connections)
 	if pooled.hooks and pooled.hooks.onWireTooltips then
-		local ok, extraConns = pcall(pooled.hooks.onWireTooltips, clonedButtons)
+		-- returns (connections, hovers?) - hovers = { [buttonName] = function } is what each button's MouseEnter does
+		local ok, extraConns, hovers = pcall(pooled.hooks.onWireTooltips, clonedButtons)
 		if not ok then
 			warn("[GridPool] onWireTooltips failed for " .. gridKey .. ": " .. tostring(extraConns))
-		elseif extraConns then
-			for _, conn in ipairs(extraConns) do
+		else
+			for _, conn in ipairs(extraConns or {}) do
 				table.insert(bd.connections, conn)
+			end
+			for buttonName, enter in pairs(hovers or {}) do
+				local btn = clonedButtons[buttonName]
+				if btn then
+					TooltipModule.registerHover(btn, enter)
+					table.insert(bd.hoverButtons, btn)
+				end
 			end
 		end
 	end
@@ -394,6 +441,7 @@ local function performTransition(sourceKey, targetKey, animated)
 		local oldLabel = findBufferForGrid(sourceKey) or activeBuffer
 		local newLabel = (oldLabel == "A") and "B" or "A"
 
+		quiesceBuffer(oldLabel)
 		populateBuffer(newLabel, targetKey)
 
 		local oldFrame = bufferData[oldLabel].frame
@@ -440,6 +488,7 @@ local function performTransition(sourceKey, targetKey, animated)
 		local oldFrame = bufferData[oldLabel].frame
 		local oldGen = bufferData[oldLabel].gen
 
+		quiesceBuffer(oldLabel)
 		cancelBufferTween(oldLabel)
 
 		local twOut = TweenService:Create(oldFrame, fadeTweenOut, { GroupTransparency = 1 })
@@ -706,6 +755,7 @@ function M.navigateToGrid(gridKey)
 
 	-- Perform visual transition
 	performTransition(sourceKey, gridKey, true)
+	recheckPointerSoon() -- the cursor is probably over a button of the new page: show its tooltip
 
 	-- Update title
 	local title = tgtPooled and pooledGrids[gridKey].title or grids[gridKey].title
@@ -735,6 +785,7 @@ function M.navigateBack()
 
 	-- Perform visual transition
 	performTransition(sourceKey, activeGrid, true)
+	recheckPointerSoon()
 
 	-- Update title
 	local title

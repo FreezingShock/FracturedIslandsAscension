@@ -54,6 +54,15 @@ local TABS = {
 }
 local CATEGORIES = { false, "weapon", "armor", "accessory", "material", "consumable", "misc" } -- false = all
 local RARITIES = { false, 0, 1, 2, 3, 4, 5, 6 }
+local CATEGORY_COLORS = {
+	all = "#FFFFFF",
+	weapon = "#FF5555",
+	armor = "#55FFFF",
+	accessory = "#FF55FF",
+	material = "#55FF55",
+	consumable = "#FFAA00",
+	misc = "#AAAAAA",
+}
 local STACK_CAP = 64
 
 -- ===================== AUDIO =====================
@@ -153,9 +162,24 @@ local function shiftDown()
 	return UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) or UserInputService:IsKeyDown(Enum.KeyCode.RightShift)
 end
 
+-- ===================== BUTTON TEXT STYLE =====================
+-- Every piece of text on an admin button: Silkscreen, a 2px outline, and a white -> grey vertical-ish fade.
+local BUTTON_FONT = Font.new("rbxassetid://12187371840") -- Silkscreen (TooltipModule.Style.FONT_PIXEL)
+local BUTTON_TEXT_GRADIENT = ColorSequence.new(Color3.fromRGB(255, 255, 255), Color3.fromRGB(170, 170, 170))
+
+local function styleButtonText(textObject)
+	textObject.FontFace = BUTTON_FONT
+	local stroke = textObject:FindFirstChildOfClass("UIStroke") or Instance.new("UIStroke")
+	stroke.Thickness = 2
+	stroke.Parent = textObject
+	local gradient = textObject:FindFirstChildOfClass("UIGradient") or Instance.new("UIGradient")
+	gradient.Color = BUTTON_TEXT_GRADIENT
+	gradient.Rotation = 90 -- top white, bottom grey
+	gradient.Parent = textObject
+end
+
 -- ===================== SLOT BUILDERS =====================
-local function addLabel(slot, text)
-	local countLabel = slot:FindFirstChild("ItemCount")
+local function addLabel(slot, text, color)
 	local label = Instance.new("TextLabel")
 	label.Name = "Label"
 	label.BackgroundTransparency = 1
@@ -163,15 +187,10 @@ local function addLabel(slot, text)
 	label.Position = UDim2.fromScale(0.5, 0.5)
 	label.Size = UDim2.fromScale(0.9, 0.55)
 	label.TextScaled = true
-	label.TextColor3 = Color3.new(1, 1, 1)
+	label.TextColor3 = color or Color3.new(1, 1, 1)
 	label.Text = text
 	label.ZIndex = 5
-	if countLabel then
-		label.FontFace = countLabel.FontFace
-	end
-	local stroke = Instance.new("UIStroke")
-	stroke.Thickness = 1
-	stroke.Parent = label
+	styleButtonText(label)
 	label.Parent = slot
 	return label
 end
@@ -217,16 +236,14 @@ local function newSlot(lo, o)
 		countLabel.TextScaled = true
 		countLabel.TextColor3 = Color3.new(1, 1, 1)
 		countLabel.ZIndex = 6
-		local countStroke = Instance.new("UIStroke")
-		countStroke.Thickness = 1
-		countStroke.Parent = countLabel
+		styleButtonText(countLabel)
 		countLabel.Parent = slot
 	end
 	if countLabel then
 		countLabel.Text = o.count or ""
 	end
 	if o.label then
-		addLabel(slot, o.label)
+		addLabel(slot, o.label, o.labelColor and hexColor(o.labelColor))
 	end
 
 	if o.tip then
@@ -243,6 +260,12 @@ local function newSlot(lo, o)
 		slot.MouseButton1Click:Connect(function()
 			UIClick:Play()
 			o.onClick(shiftDown())
+		end)
+	end
+	if o.onRightClick then
+		slot.MouseButton2Click:Connect(function()
+			UIClick:Play()
+			o.onRightClick()
 		end)
 	end
 
@@ -263,21 +286,93 @@ local function newInput(lo, o)
 	box.BackgroundColor3 = Color3.new(0, 0, 0)
 	box.BackgroundTransparency = 0.4
 	box.BorderSizePixel = 0
-	box.TextColor3 = Color3.new(1, 1, 1)
+	box.TextColor3 = o.textColor and hexColor(o.textColor) or Color3.new(1, 1, 1)
 	box.PlaceholderText = o.placeholder or ""
 	box.Text = o.text or ""
 	box.ClearTextOnFocus = false
 	box.TextScaled = true
 	box.ZIndex = 6
-	local countLabel = slot:FindFirstChild("ItemCount")
-	if countLabel then
-		box.FontFace = countLabel.FontFace
-	end
+	styleButtonText(box)
 	box.FocusLost:Connect(function()
 		o.onChange(box.Text)
 	end)
 	box.Parent = slot
 	return slot, box
+end
+
+-- ===================== SELECTOR (cycling filter button) =====================
+-- A button that steps through a list of options. The tooltip shows EVERY option as a bullet list with a thick
+-- arrow on the selected one: left click goes down the list, right click goes up. Each option has its own
+-- colour, used for its tooltip line and for the button's text (Silkscreen, see styleButtonText).
+--   o: name, title, color (title colour), desc (string | function), options = { { value, label, color } },
+--      get() -> current value, set(value)  (set() normally rebuilds the page)
+local SELECTOR_SLOT_COLOR = "#3A3A3A" -- neutral, so the coloured text stays readable
+
+local function selectorTip(o, index)
+	local lines = {}
+	for i, opt in ipairs(o.options) do
+		if i == index then
+			table.insert(lines, rich("#FFFF55", "►") .. " " .. rich(opt.color, "<b>" .. opt.label .. "</b>"))
+		else
+			table.insert(lines, rich("#AAAAAA", "•") .. " " .. rich(opt.color, opt.label))
+		end
+	end
+	local desc = type(o.desc) == "function" and o.desc() or o.desc
+	return {
+		title = rich(o.color, "<b>" .. o.title .. "</b>"),
+		description = desc,
+		blocks = { { text = table.concat(lines, "\n"), align = "Left", dynamic = true } },
+		dividers = { d1 = true, d4 = true }, -- a divider above and below the list
+		click = {
+			{ text = "TO GO DOWN", color = "#55FFFF", icon = "lmb" },
+			{ text = "TO GO UP", color = "#55FF55", icon = "rmb" },
+		},
+	}
+end
+
+local function newSelector(lo, o)
+	local index = 1
+	local current = o.get()
+	for i, opt in ipairs(o.options) do
+		if opt.value == current then
+			index = i
+			break
+		end
+	end
+	local opt = o.options[index]
+
+	local function step(delta)
+		o.set(o.options[(index - 1 + delta) % #o.options + 1].value)
+	end
+
+	local slot = newSlot(lo, {
+		name = o.name,
+		color = SELECTOR_SLOT_COLOR,
+		label = opt.label,
+		labelColor = opt.color,
+		tip = function()
+			return selectorTip(o, index)
+		end,
+		onClick = function()
+			step(1)
+		end,
+		onRightClick = function()
+			step(-1)
+		end,
+	})
+	-- A click rebuilds the page, so the slot under the cursor is brand new and never gets a MouseEnter:
+	-- once it has been laid out, put the tooltip straight back (showing the new selection) if the cursor is on it.
+	task.delay(0.08, function()
+		if not slot.Parent or not TooltipModule.isShown(slot) then
+			return
+		end
+		local mouse = UserInputService:GetMouseLocation() - game:GetService("GuiService"):GetGuiInset()
+		local pos, size = slot.AbsolutePosition, slot.AbsoluteSize
+		if mouse.X >= pos.X and mouse.X <= pos.X + size.X and mouse.Y >= pos.Y and mouse.Y <= pos.Y + size.Y then
+			TooltipModule.show(selectorTip(o, index), TOOLTIP_SOURCE, slot)
+		end
+	end)
+	return slot
 end
 
 -- ===================== PAGE CHROME =====================
@@ -363,6 +458,7 @@ local function buildItems()
 	newInput(45, {
 		name = "Search",
 		color = "#55FF55",
+		textColor = "#55FF55",
 		placeholder = "search",
 		text = view.search,
 		tip = { title = rich("#55FF55", "<b>Search</b>"), desc = rich("#AAAAAA", "Matches name or id."), click = "" },
@@ -372,25 +468,52 @@ local function buildItems()
 			rebuild()
 		end,
 	})
-	newSlot(46, {
+	local categoryOptions = {}
+	for _, category in ipairs(CATEGORIES) do
+		table.insert(categoryOptions, {
+			value = category,
+			label = category or "all",
+			color = CATEGORY_COLORS[category or "all"],
+		})
+	end
+	newSelector(46, {
 		name = "Category",
+		title = "Category",
 		color = "#FFAA00",
-		label = view.category or "all",
-		tip = { title = rich("#FFAA00", "<b>Category</b>"), desc = rich("#AAAAAA", "Showing: " .. (view.category or "all")), click = rich("#FFFF55", "Click to cycle!") },
-		onClick = function(shift)
-			view.category = cycle(CATEGORIES, view.category, shift and -1 or 1)
+		desc = rich("#AAAAAA", "Filter the item list."),
+		options = categoryOptions,
+		get = function()
+			return view.category
+		end,
+		set = function(value)
+			view.category = value
 			view.itemPage = 1
 			rebuild()
 		end,
 	})
-	local rarityConfig = view.rarity ~= false and Items.getRarity(view.rarity)
-	newSlot(47, {
+
+	local rarityOptions = {}
+	for _, rarity in ipairs(RARITIES) do
+		local config = rarity ~= false and Items.getRarity(rarity)
+		table.insert(rarityOptions, {
+			value = rarity,
+			label = config and config.name or "any",
+			color = config and config.hexColor or "#FFFFFF",
+		})
+	end
+	newSelector(47, {
 		name = "Rarity",
-		color = rarityConfig and rarityConfig.hexColor or "#AAAAAA",
-		label = rarityConfig and rarityConfig.name or "any",
-		tip = { title = rich("#FFFFFF", "<b>Rarity</b>"), desc = rich("#AAAAAA", string.format("%d matching items", #matches)), click = rich("#FFFF55", "Click to cycle!") },
-		onClick = function(shift)
-			view.rarity = cycle(RARITIES, view.rarity, shift and -1 or 1)
+		title = "Rarity",
+		color = "#FFFFFF",
+		desc = function()
+			return rich("#AAAAAA", string.format("%d matching items", #matches))
+		end,
+		options = rarityOptions,
+		get = function()
+			return view.rarity
+		end,
+		set = function(value)
+			view.rarity = value
 			view.itemPage = 1
 			rebuild()
 		end,
@@ -583,13 +706,22 @@ local function buildBonuses()
 	end
 
 	-- Row 3: mode, amount, duration, add
-	newSlot(28, {
+	newSelector(28, {
 		name = "Mode",
+		title = "Bonus type",
 		color = "#55FFFF",
-		label = view.bonusMode == "pct" and "%" or "Flat",
-		tip = { title = rich("#55FFFF", "<b>Bonus type</b>"), desc = rich("#AAAAAA", view.bonusMode == "pct" and "Percent: x(1 + amount/100)" or "Flat: added to the attribute"), click = rich("#FFFF55", "Click to toggle!") },
-		onClick = function()
-			view.bonusMode = view.bonusMode == "flat" and "pct" or "flat"
+		desc = function()
+			return rich("#AAAAAA", view.bonusMode == "pct" and "Percent: x(1 + amount/100)" or "Flat: added to the attribute")
+		end,
+		options = {
+			{ value = "flat", label = "Flat", color = "#55FF55" },
+			{ value = "pct", label = "%", color = "#FFAA00" },
+		},
+		get = function()
+			return view.bonusMode
+		end,
+		set = function(value)
+			view.bonusMode = value
 			rebuild()
 		end,
 	})

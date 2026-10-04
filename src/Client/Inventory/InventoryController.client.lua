@@ -400,6 +400,17 @@ local function createHotbarSlots()
 			hovered = false,
 		}
 		hotbarSlots[i] = slotData
+		TooltipModule.registerHover(newSlot, function()
+			if i == MENU_SLOT then
+				TooltipModule.show({
+					title = '<font color="#FFFF55"><b>Menu</b></font>',
+					desc = '<font color="#AAAAAA">Open the Nexus Menu and inventory.</font>',
+					click = '<font color="#FFFF55">Click to view!</font>',
+				}, TOOLTIP_SOURCE)
+			elseif slotData.toolInfo then
+				showItemTooltip(slotData.toolInfo)
+			end
+		end)
 		LiquidGlassHandler.apply(newSlot, {
 			SeparatedBorderOutline = {
 				enabled = true,
@@ -498,6 +509,11 @@ local function createGridSlots()
 			isBlank = true,
 		}
 		gridPool[i] = slotData
+		TooltipModule.registerHover(newSlot, function()
+			if slotData.toolInfo then
+				showItemTooltip(slotData.toolInfo)
+			end
+		end)
 
 		-- GlassVisible = false: only the hover outline + stroke; the 3D glass parts are never built for these slots
 		LiquidGlassHandler.apply(newSlot, {
@@ -556,6 +572,11 @@ local function getOrCreateOverflowSlot(index)
 		inUse = false,
 	}
 	overflowPool[index] = slotData
+	TooltipModule.registerHover(newSlot, function()
+		if slotData.toolInfo then
+			showItemTooltip(slotData.toolInfo)
+		end
+	end)
 
 	LiquidGlassHandler.apply(newSlot, {
 		GlassVisible = false,
@@ -614,6 +635,26 @@ local function updateScrolling()
 	local mode = MenuBridge.getMode()
 	local hasOverflow = #currentOverflowData > 0
 	inventoryFrame.ScrollingEnabled = (mode == "full") or hasOverflow
+end
+
+-- ===================== HOVER RECONCILE =====================
+--- Make the tooltip match what is under the cursor right now. Needed because MouseEnter only fires on mouse
+--- MOVEMENT: after a refresh (equip, pickup, drop, swap) the slot under a still cursor holds a different item,
+--- and after a drag the tooltip was suppressed - neither would update until the mouse moved.
+local findSlotAtPosition -- defined with the drag system below
+local reconcileHover
+reconcileHover = function()
+	if suppressTooltip or (dragState and dragState.isDragging) then
+		return
+	end
+	local rawMouse = UserInputService:GetMouseLocation()
+	local inset = GuiService:GetGuiInset()
+	local slotData = findSlotAtPosition(Vector2.new(rawMouse.X, rawMouse.Y - inset.Y))
+	if slotData and slotData.toolInfo then
+		showItemTooltip(slotData.toolInfo)
+	elseif TooltipModule.isActiveSource(TOOLTIP_SOURCE) and not hotbarSlots[MENU_SLOT].hovered then
+		hideItemTooltip() -- the slot under the cursor is empty now
+	end
 end
 
 -- ===================== REFRESH DISPLAY =====================
@@ -690,6 +731,7 @@ end
 local function refreshAll()
 	refreshHotbar()
 	refreshInventory()
+	task.defer(reconcileHover) -- after layout: the item under a stationary cursor may have changed
 end
 
 -- ===================== EQUIP TRACKING =====================
@@ -717,7 +759,7 @@ player.CharacterAdded:Connect(setupCharacterEquipTracking)
 
 --- Find a slot at the given screen position.
 --- Returns: slotData, location ("hotbar"|"grid"|"overflow"|nil), index, isBlank
-local function findSlotAtPosition(screenPos)
+findSlotAtPosition = function(screenPos)
 	-- Check hotbar slots (1-8, skip menu slot 9)
 	for i = 1, MAX_HOTBAR - 1 do
 		local slotData = hotbarSlots[i]
@@ -862,9 +904,7 @@ local function _startDragOnSlot(toolInfo, slotFrame, location, slotIndex, mouseP
 		_showTransferFrame()
 	end
 
-	suppressTooltip = true
-	TooltipModule.forceHide()
-
+	-- (the tooltip stays while the button is merely held/clicked; it hides once the drag really starts)
 	dragState = {
 		toolName = toolInfo.name,
 		itemId = toolInfo.itemId,
@@ -891,6 +931,8 @@ local function onDragMove(mousePos)
 			return
 		end
 		dragState.isDragging = true
+		suppressTooltip = true
+		TooltipModule.forceHide()
 		dragState.ghost = _createDragGhost(dragState.sourceFrame)
 		dragState.sourceFrame.BackgroundTransparency = DIM_TRANSPARENCY
 	end
@@ -1104,7 +1146,6 @@ local function rightClickEquip(toolInfo, location, slotIndex)
 	else
 		EquipToolByNameFunc:InvokeServer(toolInfo.name)
 	end
-	TooltipModule.forceHide()
 	UIClick:Play()
 end
 
@@ -1238,24 +1279,17 @@ UserInputService.InputEnded:Connect(function(input)
 	end
 end)
 
--- ===================== TOOLTIP SUPPRESSION ON CLICK =====================
-UserInputService.InputBegan:Connect(function(input, _)
-	if input.UserInputType == Enum.UserInputType.MouseButton1 then
-		suppressTooltip = true
-		TooltipModule.forceHide()
-	end
-end)
-
+-- ===================== TOOLTIP AFTER A CLICK / DROP =====================
+-- A plain click keeps the tooltip (nothing hides it any more). When a drag ends the tooltip was suppressed, so
+-- release re-reads what is under the cursor and shows that item's tooltip (the slot may hold something new).
 UserInputService.InputEnded:Connect(function(input)
 	if input.UserInputType == Enum.UserInputType.MouseButton1 then
-		suppressTooltip = false
-		local rawMouse = UserInputService:GetMouseLocation()
-		local inset = GuiService:GetGuiInset()
-		local adjustedPos = Vector2.new(rawMouse.X, rawMouse.Y - inset.Y)
-		local slotData, _, _, _ = findSlotAtPosition(adjustedPos)
-		if slotData and slotData.toolInfo and not dragState then
-			showItemTooltip(slotData.toolInfo)
-		end
+		task.defer(function()
+			if not dragState then
+				suppressTooltip = false
+				reconcileHover()
+			end
+		end)
 	end
 end)
 

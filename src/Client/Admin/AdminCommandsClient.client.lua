@@ -127,6 +127,7 @@ local function showDropdown(matches, textBox)
 			btn.TextXAlignment = Enum.TextXAlignment.Left
 			btn.RichText = true
 			btn.AutoButtonColor = false
+			btn.Selectable = false
 			btn.LayoutOrder = i
 			btn.ZIndex = 11
 

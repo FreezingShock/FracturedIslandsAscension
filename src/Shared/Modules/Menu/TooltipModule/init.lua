@@ -46,6 +46,7 @@
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
+local GuiService = game:GetService("GuiService")
 local UserInputService = game:GetService("UserInputService")
 local TweenService = game:GetService("TweenService")
 
@@ -80,6 +81,11 @@ local function installInert(reason: string)
 		return false
 	end
 	API.isVisible = function()
+		return false
+	end
+	API.registerHover = noop
+	API.unregisterHover = noop
+	API.recheckPointer = function()
 		return false
 	end
 	API.getFrame = function()
@@ -140,6 +146,17 @@ local div1 = child(frame, "Divider1")
 local div2 = child(frame, "Divider2")
 local div3 = child(frame, "Divider3")
 local div4 = frame:FindFirstChild("Divider4")
+-- The template's Divider4 is an empty 0-width stub (it sits between the blocks and the click pills).
+-- Give it Divider3's look so a tooltip can ask for a divider under its list (dividers = { d4 = true }).
+if div3 and div4 and div3 ~= div4 then
+	local order = div4.LayoutOrder
+	div4:Destroy()
+	div4 = div3:Clone()
+	div4.Name = "Divider4"
+	div4.LayoutOrder = order
+	div4.Visible = false
+	div4.Parent = frame
+end
 local levelBar = child(frame, "LevelBar")
 local levelLabel = levelBar and levelBar:FindFirstChild("LevelLabel", true)
 local progressBar = child(frame, "ProgressBar")
@@ -842,7 +859,7 @@ local function renderDividers(cfg, hasDesc, hasLevel, hasProgress, hasStats, has
 	end
 	setVisible(div1, pick("d1", hasDesc and (hasLevel or hasProgress or (hasBlocks and not hasStats))))
 	setVisible(div3, pick("d3", hasBlocks and (hasStats or hasLevel or hasProgress)))
-	setVisible(div4, false)
+	setVisible(div4, pick("d4", false))
 end
 
 -- ===================== NORMALIZE (legacy support) =====================
@@ -1013,6 +1030,54 @@ UserInputService.InputEnded:Connect(function(input)
 		onShiftChanged(false)
 	end
 end)
+
+-- ===================== HOVER REGISTRY (pointer recognition) =====================
+-- MouseEnter only fires when the mouse MOVES onto an element. If the element under a stationary cursor is
+-- replaced (a click changes the page, the inventory refreshes, a slot is rebuilt) the new element never gets
+-- a MouseEnter, so the tooltip vanished or an old one lingered until the mouse moved again.
+-- Owners register "what to show for this element"; recheckPointer() looks at what is under the cursor RIGHT
+-- NOW and shows its tooltip (or hides ours if the cursor is over nothing that has one).
+local hoverEnter: { [GuiObject]: () -> () } = setmetatable({}, { __mode = "k" }) :: any
+
+--- enterFn is what MouseEnter would do for `gui` (without sounds). Registered elements are looked up by
+--- walking up from the GuiObjects under the cursor, so registering a container covers its children.
+function API.registerHover(gui: GuiObject, enterFn: () -> ())
+	hoverEnter[gui] = enterFn
+end
+
+function API.unregisterHover(gui: GuiObject)
+	hoverEnter[gui] = nil
+end
+
+--- Show the tooltip of whatever registered element is under the cursor. Returns true if one was found.
+--- `hideIfNone`: also hide the tooltip when nothing registered is under the cursor (used after refreshes).
+function API.recheckPointer(hideIfNone: boolean?): boolean
+	-- GetMouseLocation includes the top bar (GuiInset); GetGuiObjectsAtPosition / AbsolutePosition do not
+	local mouse = UserInputService:GetMouseLocation() - GuiService:GetGuiInset()
+	local ok, objects = pcall(function()
+		return playerGui:GetGuiObjectsAtPosition(mouse.X, mouse.Y)
+	end)
+	if ok then
+		for _, object in ipairs(objects) do
+			if object:IsDescendantOf(host) then
+				continue
+			end
+			local node: Instance? = object
+			while node and node ~= playerGui do
+				local enter = hoverEnter[node :: GuiObject]
+				if enter then
+					enter()
+					return true
+				end
+				node = node.Parent
+			end
+		end
+	end
+	if hideIfNone then
+		API.hide(nil)
+	end
+	return false
+end
 
 -- ===================== PUBLIC API =====================
 
