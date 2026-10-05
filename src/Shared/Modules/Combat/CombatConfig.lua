@@ -25,6 +25,16 @@
 	  New weapon type (spear, bow, ...) ...... copy CombatConfig.sword, change weaponType, steps and slots.
 	  Longer / shorter combo ................. add or remove entries in steps (the loop uses #steps).
 
+	DAMAGE AND HIT DETECTION (server: DamageService; fired by WeaponManager at each step's hitFrame)
+	  steps[i].reach        studs the swing reaches in front of the swinger (measured to the target's edge)
+	  steps[i].arc          degrees of the cone in front of the swinger that can be hit (total width)
+	  steps[i].damageMult   multiplier on this step's damage (the finisher hits hardest)
+	  steps[i].knockback    horizontal push on the target (studs/second, scaled by its mass)
+	  steps[i].maxTargets   how many targets one swing may hit (nearest first)
+	  CombatConfig.damage   the formula numbers, see below
+	  CombatConfig.hit      what a hit looks like (flash, damage number styles, rise / life)
+	  CombatConfig.dummy    the training dummies (DummyService)
+
 	FX AND SOUND (same layering: library -> type -> per-weapon override)
 	  CombatConfig.sounds[key] = { id, volume, pitch = {min, max} }   id "" = silent; ids can be rbxassetid:// or rbxasset://
 	  CombatConfig.fx[key]     = { trail = {...}, burst = {...} }      the swing trail ribbon and the spark burst
@@ -59,6 +69,41 @@
 --]]
 
 local CombatConfig = {}
+
+-- ===================== DAMAGE / HIT / DUMMY NUMBERS =====================
+-- damage = (weapon Damage x rarity scaling + flatBase) x (1 + Strength x strengthScale) x step.damageMult
+-- crit   = rolls against CritChance (percent, capped at critChanceCap); a crit multiplies by 1 + (critBase + CritIncrease) x critScale
+-- Strength / CritChance / CritIncrease = the player's stat chain value + the held weapon's own stat of that name.
+CombatConfig.damage = {
+	flatBase = 5,
+	strengthScale = 0.01, -- +1% per Strength
+	critBase = 50, -- every crit already deals +50% before CritIncrease
+	critScale = 0.01, -- +1% per CritIncrease point
+	critChanceCap = 100,
+	verticalTolerance = 7, -- studs above / below the swinger a target may be and still be hit
+	lineOfSight = true, -- a wall between swinger and target blocks the hit
+}
+
+CombatConfig.hit = {
+	flashColor = Color3.fromRGB(255, 255, 255), -- Highlight fill on the target
+	flashTime = 0.18,
+	numberRise = 3.5, -- studs a damage number floats up
+	numberTime = 0.9, -- seconds it lives
+	numberSpread = 1.2, -- random sideways offset so stacked hits do not overlap
+	normal = { color = "#FFFFFF", stroke = "#555555", scale = 1 },
+	-- crit: blue number with the Crit Increase stat icon behind it (template child CritBadge; sheet cell { 3, 0 } of the
+	-- stat spritesheet, 170px cells = ProfileConfig / TooltipModule Style.SPRITE), darker blue and a little transparent
+	crit = {
+		color = "#5555FF", stroke = "#0000AA", scale = 1.45,
+		badge = { color = "#0000AA", transparency = 0.45 },
+	},
+}
+
+CombatConfig.dummy = {
+	health = 1000,
+	respawnSeconds = 3,
+	returnHomeAfter = 2, -- seconds without a hit before a knocked-away dummy walks back to its marker
+}
 
 -- ===================== 1. LIBRARY =====================
 -- Paste the published animation ids here as "rbxassetid://123". Keys are free-form; steps and slots refer to them.
@@ -123,12 +168,16 @@ CombatConfig.sword = {
 	bufferTime = 0.35,
 	steps = {
 		{ name = "SlashDownLeft", animation = "sword_combo1", duration = 0.50, hitFrame = 0.20, recovery = 0.05,
+			reach = 9, arc = 130, damageMult = 1.0, knockback = 14, maxTargets = 4,
 			sound = "sword_atk1", soundAt = 0.17, trail = { from = 0.10, to = 0.36 } },
 		{ name = "SlashDownRight", animation = "sword_combo2", duration = 0.50, hitFrame = 0.20, recovery = 0.05,
+			reach = 9, arc = 130, damageMult = 1.0, knockback = 14, maxTargets = 4,
 			sound = "sword_atk2", soundAt = 0.17, trail = { from = 0.10, to = 0.36 } },
 		{ name = "Jab", animation = "sword_combo3", duration = 0.47, hitFrame = 0.17, recovery = 0.05,
+			reach = 12, arc = 40, damageMult = 1.1, knockback = 20, maxTargets = 2,
 			sound = "sword_atk3", soundAt = 0.14, trail = { from = 0.12, to = 0.30 } },
 		{ name = "OverheadSlash", animation = "sword_combo4", duration = 0.70, hitFrame = 0.32, recovery = 0.30,
+			reach = 10, arc = 150, damageMult = 1.5, knockback = 30, maxTargets = 6,
 			sound = "sword_atk4", soundAt = 0.29, trail = { from = 0.18, to = 0.46 } },
 	},
 	slots = {

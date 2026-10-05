@@ -4,6 +4,12 @@
     "$className": "DataModel",
     "ServerScriptService": {
       "$className": "ServerScriptService",
+      "AbilityInit": {
+        "$path": "src/Server/Combat/AbilityInit.server.lua"
+      },
+      "AbilityService": {
+        "$path": "src/Server/Combat/AbilityService.lua"
+      },
       "AttributeStatManager": {
         "$path": "src/Server/Data/AttributeStatManager.lua"
       },
@@ -12,6 +18,15 @@
       },
       "ChatService": {
         "$path": "src/Server/Chat/ChatService.lua"
+      },
+      "DamageService": {
+        "$path": "src/Server/Combat/DamageService.lua"
+      },
+      "DummyInit": {
+        "$path": "src/Server/Combat/DummyInit.server.lua"
+      },
+      "DummyService": {
+        "$path": "src/Server/Combat/DummyService.lua"
       },
       "EquipmentInit": {
         "$path": "src/Server/Inventory/EquipmentInit.server.lua"
@@ -72,6 +87,9 @@
       "$className": "ReplicatedStorage",
       "Modules": {
         "$className": "Folder",
+        "AbilityConfig": {
+          "$path": "src/Shared/Modules/Combat/AbilityConfig.lua"
+        },
         "AdminConfig": {
           "$path": "src/Shared/Modules/Admin/AdminConfig.lua"
         },
@@ -198,6 +216,9 @@
       "$className": "StarterPlayer",
       "StarterPlayerScripts": {
         "$className": "StarterPlayerScripts",
+        "AbilityController": {
+          "$path": "src/Client/Combat/AbilityController.client.lua"
+        },
         "AdminCommandsClient": {
           "$path": "src/Client/Admin/AdminCommandsClient.client.lua"
         },
@@ -221,6 +242,9 @@
         },
         "CurrencyHUD": {
           "$path": "src/Client/HUD/CurrencyHUD.client.lua"
+        },
+        "DamageNumberController": {
+          "$path": "src/Client/Combat/DamageNumberController.client.lua"
         },
         "HeldItemNameController": {
           "$path": "src/Client/HUD/HeldItemNameController.client.lua"

@@ -12,7 +12,7 @@
 	  slot         "Helmet" ... (armor / accessory only; see Items/Slots)
 	  stats        { Strength = 50, Defense = {flat=5, mult=0.1}, Damage = 250 }
 	  weapon       { weaponType, attackSpeed, knockback, range }   (weapons)
-	  abilities    { { name, key, text, cooldown, type }, ... }
+	  abilities    { { name, key, text, cooldown, type, ability = "<AbilityConfig id>" }, ... }
 
 	  -- tooltip template toggles (each section appears only when you set it) --
 	  typeTag      badge text   (defaults from category: Weapon, Armor ...)

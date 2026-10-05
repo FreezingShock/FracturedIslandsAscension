@@ -8,6 +8,7 @@
 
 	  CombatAnimator.play(character, weaponType, stepIndex, attackSpeed, weaponId?) -> AnimationTrack?   combo step
 	  CombatAnimator.playSlot(character, weaponType, slot, weaponId?, speed?)       -> AnimationTrack?   "equip", "idle", ...
+	  CombatAnimator.playKey(character, key, speed?)                                -> AnimationTrack?   one library key (abilities)
 	  CombatAnimator.stopSlot(character, slot)
 	  CombatAnimator.stop(character)                 stops the combo step and every slot
 	  CombatAnimator.preload(weaponType?)            loads the animation assets of one type (or all types) ahead of time
@@ -97,6 +98,27 @@ function CombatAnimator.playSlot(character: Model, weaponType: string, slot: str
 	return track
 end
 
+--- Play one library animation by key (an ability's `animation`). Replaces the running combo step.
+function CombatAnimator.playKey(character: Model, key: string?, speed: number?): AnimationTrack?
+	local animator = getAnimator(character)
+	local entry = key and key ~= "" and CombatConfig.animations[key]
+	if not (animator and entry) then
+		return nil
+	end
+	local mine = getState(animator)
+	if mine.current then
+		mine.current:Stop(0.08)
+		mine.current = nil
+	end
+	local track = trackFor(animator, mine, key :: string, entry)
+	if not track then
+		return nil
+	end
+	track:Play(entry.fade or 0.06, 1, (speed or 1) * (entry.speed or 1))
+	mine.current = track
+	return track
+end
+
 function CombatAnimator.stopSlot(character: Model, slot: string)
 	local animator = getAnimator(character)
 	local mine = animator and state[animator]
@@ -127,15 +149,25 @@ end
 function CombatAnimator.preload(weaponType: string?)
 	local types = weaponType and { weaponType } or CombatConfig.types()
 	local assets, seen = {}, {}
+	local keys = {}
 	for _, t in ipairs(types) do
 		for _, key in ipairs(CombatConfig.libraryKeysFor(t)) do
-			local entry = CombatConfig.animations[key]
-			if entry and entry.id and entry.id ~= "" and not seen[entry.id] then
-				seen[entry.id] = true
-				local animation = Instance.new("Animation")
-				animation.AnimationId = entry.id
-				table.insert(assets, animation)
-			end
+			table.insert(keys, key)
+		end
+	end
+	local abilityConfig = script.Parent:FindFirstChild("AbilityConfig")
+	if abilityConfig then -- ability animations too
+		for _, key in ipairs((require(abilityConfig) :: any).animationKeys()) do
+			table.insert(keys, key)
+		end
+	end
+	for _, key in ipairs(keys) do
+		local entry = CombatConfig.animations[key]
+		if entry and entry.id and entry.id ~= "" and not seen[entry.id] then
+			seen[entry.id] = true
+			local animation = Instance.new("Animation")
+			animation.AnimationId = entry.id
+			table.insert(assets, animation)
 		end
 	end
 	if #assets > 0 then

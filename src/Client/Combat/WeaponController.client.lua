@@ -31,6 +31,7 @@ local Modules = ReplicatedStorage:WaitForChild("Modules")
 local WeaponRegistry = require(Modules:WaitForChild("WeaponRegistry")) :: any
 local TooltipModule = require(Modules:WaitForChild("TooltipModule")) :: any
 local CombatConfig = require(Modules:WaitForChild("CombatConfig")) :: any
+local AbilityConfig = require(Modules:WaitForChild("AbilityConfig")) :: any
 local CombatAnimator = require(Modules:WaitForChild("CombatAnimator")) :: any
 local CombatFX = require(Modules:WaitForChild("CombatFX")) :: any
 local MenuBridge = require(Modules:WaitForChild("MenuBridge")) :: any
@@ -38,8 +39,7 @@ local MenuBridge = require(Modules:WaitForChild("MenuBridge")) :: any
 -- ===================== REMOTES =====================
 local EquipWeaponEvent = ReplicatedStorage:WaitForChild("EquipWeapon")
 local UnequipWeaponEvent = ReplicatedStorage:WaitForChild("UnequipWeapon")
-local WeaponAbilityEvent = ReplicatedStorage:WaitForChild("WeaponAbility")
-local WeaponHitEvent = ReplicatedStorage:WaitForChild("WeaponHit")
+local AbilityCastEvent = ReplicatedStorage:WaitForChild("AbilityCast")
 local UpdateWeaponStatsEvent = ReplicatedStorage:WaitForChild("UpdateWeaponStats")
 local SwordSwingEvent = ReplicatedStorage:WaitForChild("SwordSwing")
 
@@ -47,10 +47,6 @@ local SwordSwingEvent = ReplicatedStorage:WaitForChild("SwordSwing")
 local currentWeapon = nil
 local currentStats = {}
 local currentAbilities = {}
--- R and T belong to the camera (R = perspective, T = cursor lock; see CameraController), so abilities use Q for now
-local abilityKeybinds = {
-	[Enum.KeyCode.Q] = "Q",
-}
 local weaponTrail = nil
 local animatedFor = nil -- weapon id whose equip/idle animations are running
 local lastSwingTime = 0
@@ -128,24 +124,7 @@ UpdateWeaponStatsEvent.OnClientEvent:Connect(function(stats)
 	-- TODO: Update weapon UI panel with new stats
 end)
 
--- Ability cast event (feedback)
-WeaponAbilityEvent.OnClientEvent:Connect(function(data)
-	local abilityName = data.abilityName
-	local cooldown = data.cooldown or 5
-	dprint("[WeaponController] Ability triggered: " .. abilityName .. " (CD: " .. cooldown .. "s)")
-	-- TODO: Play VFX/SFX for ability
-	-- TODO: Update cooldown UI
-end)
-
--- Weapon hit event (from server, for damage numbers)
-WeaponHitEvent.OnClientEvent:Connect(function(data)
-	local target = data.target
-	local damage = data.damage
-	local isCrit = data.isCrit
-	local position = data.position
-	-- TODO: Show damage number floating text at position
-	-- TODO: Play hit sound / particle effect
-end)
+-- Hit feedback (flash, damage numbers, impact sound) is DamageNumberController: it listens to the WeaponHit remote.
 
 -- ===================== EQUIP ON HOTBAR SLOT SELECTION =====================
 
@@ -282,30 +261,43 @@ player:GetAttributeChangedSignal("ComboStep"):Connect(function()
 end)
 
 -- ===================== ABILITY INPUT =====================
+-- A key press only asks the server ("I pressed Q"). The server checks the weapon, mana and cooldown and casts; the
+-- effects (animation, sound, ring, embers, cooldown / mana HUD) are AbilityController, driven by the server's broadcast.
+
+local function abilityKeyName(input: InputObject): string?
+	if input.UserInputType == Enum.UserInputType.MouseButton2 then
+		return "RMB"
+	elseif input.UserInputType == Enum.UserInputType.Keyboard then
+		return input.KeyCode.Name
+	end
+	return nil
+end
 
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
-	if gameProcessed then
+	if gameProcessed or not currentWeapon or MenuBridge.isOpen() then
 		return
 	end
-
-	if input.UserInputType ~= Enum.UserInputType.Keyboard then
+	local keyName = abilityKeyName(input)
+	if not keyName or not AbilityConfig.byKey(currentWeapon.id, keyName) then
+		return -- not one of this weapon's ability keys
+	end
+	local character = player.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	if not humanoid or humanoid.Health <= 0 or not character:FindFirstChild(currentWeapon.toolName) then
 		return
 	end
+	faceCursor() -- cones / lines are aimed along the body
+	AbilityCastEvent:FireServer(keyName)
+end)
 
-	local keyName = abilityKeybinds[input.KeyCode]
-	if not keyName or not currentWeapon then
+-- the server accepted our cast: the combo is locked for the cast time (mirrors WeaponManager.Lock)
+AbilityCastEvent.OnClientEvent:Connect(function(data)
+	if type(data) ~= "table" or data.caster ~= player then
 		return
 	end
-
-	-- Find ability with this key
-	for _, ability in ipairs(currentWeapon.abilities or {}) do
-		if ability.key == keyName and ability.type == "active" then
-			-- Try to cast on server
-			-- TODO: Create remote to TryAbility(abilityName) on server
-			dprint("[WeaponController] Attempting ability: " .. ability.name)
-			break
-		end
-	end
+	local ability = AbilityConfig.get(data.abilityId, data.weaponId)
+	combo.busyUntil = math.max(combo.busyUntil, os.clock() + (ability and ability.castTime or 0.5))
+	combo.buffered = false
 end)
 
 -- ===================== WEAPON INFO PANEL =====================

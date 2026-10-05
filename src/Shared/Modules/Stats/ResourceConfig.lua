@@ -17,8 +17,8 @@
 	  color      fill colour of the bar text; the unfilled part is this colour darkened (EMPTY_DARKEN)
 	  max        function(stat) -> maximum. `stat("Defense")` returns that stat's final value from the stat chain.
 	  source     "humanoid": current value IS Humanoid.Health / MaxHealth. Omit for a plain server-side value.
-	  regen      nil = no regeneration, else { stat = <stat key>, unit = "percentPerSecond" | "perSecond", delay = seconds
-	             without taking damage / spending before regeneration starts }
+	  regen      nil = no regeneration, else { stat = <stat key> OR amount = <fixed number>, unit = "percentPerSecond" |
+	             "perSecond", delay = seconds without taking damage / spending before regeneration starts }
 	  startFull  true = starts (and respawns) full
 
 	Formulas (change the numbers here, nowhere else):
@@ -58,7 +58,8 @@ ResourceConfig.resources = {
 		max = function(stat)
 			return 100 + stat("Intelligence") * MANA_PER_INTELLIGENCE
 		end,
-		regen = nil, -- spending / regen arrives with spells
+		-- a fixed 2% of max per second, starting 3s after the last spend (ability cast)
+		regen = { amount = 2, unit = "percentPerSecond", delay = 3 },
 	},
 	{
 		key = "Stamina",

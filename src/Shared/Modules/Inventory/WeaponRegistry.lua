@@ -49,6 +49,7 @@ for _, def in ipairs(Items.list("weapon")) do
 	for _, ability in ipairs(def.abilities or {}) do
 		table.insert(abilities, {
 			name = ability.name,
+			ability = ability.ability, -- AbilityConfig library id (nil = text-only / passive)
 			type = ability.type,
 			cooldown = ability.cooldown,
 			key = ability.key,

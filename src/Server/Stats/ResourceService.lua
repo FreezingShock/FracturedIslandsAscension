@@ -160,7 +160,7 @@ task.spawn(function()
 				local regen = entry.regen
 				if regen then
 					local key = entry.key
-					local amount = stat(regen.stat)
+					local amount = regen.stat and stat(regen.stat) or regen.amount or 0
 					local idleFor = os.clock() - (state.lastHit[key] or 0)
 					if amount > 0 and idleFor >= (regen.delay or 0) then
 						local perTick = regen.unit == "percentPerSecond" and state.max[key] * amount / 100 or amount

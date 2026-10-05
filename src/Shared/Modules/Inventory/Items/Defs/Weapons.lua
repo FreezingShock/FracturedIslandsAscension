@@ -29,7 +29,8 @@ return {
 			},
 			{
 				name = "Overload",
-				key = "HOLD RMB",
+				ability = "overload", -- AbilityConfig library entry (cost, shape, damage, zone)
+				key = "RMB",
 				cooldown = 10,
 				text = 'Release a cloud of embers rain around you dealing <font color="#FF5555" family="rbxassetid://12187371840">500 Damage</font> every 3 seconds, to any enemy within <font color="#55FF55" family="rbxassetid://12187371840">50 studs</font>.',
 			},
@@ -61,11 +62,11 @@ return {
 		abilities = {
 			{ name = "Holy Burst", text = "Heals <font color=\"#55FF55\">10%</font> of damage dealt." },
 			{
-				name = "Divine Strike",
-				key = "Q",
-				cooldown = 5,
-				damage = 50,
-				text = "Unleash a divine slash, dealing <font color=\"#FF5555\">2x damage</font> in a cone.",
+				name = "Holy Nova",
+				ability = "holy_nova", -- AbilityConfig library entry
+				key = "Z",
+				cooldown = 6,
+				text = "Unleash a burst of holy light around you, dealing <font color=\"#FF5555\">300% damage</font> to every enemy within <font color=\"#55FF55\">18 studs</font> and knocking them back.",
 			},
 		},
 	},

@@ -5,7 +5,6 @@
 --  Server-authoritative weapon system.
 --  - Tracks equipped weapons per player
 --  - Applies stat bonuses when equipped
---  - Manages ability cooldowns
 --  - Validates hits and applies damage
 --  - Fires remote events for VFX/SFX
 --
@@ -14,8 +13,8 @@
 --    WeaponManager.UnequipWeapon(player)
 --    WeaponManager.GetEquipped(player) → weaponId or nil
 --    WeaponManager.GetStats(player) → { damage, critChance, ... }
---    WeaponManager.TryAbility(player, abilityName) → success
---    WeaponManager.OnWeaponHit(player, targetPlayer, damage)
+--    WeaponManager.Lock(player, seconds)  (an ability cast locks the combo; abilities live in AbilityService)
+--    (sword hits: TrySwing -> onSwingHit -> DamageService.swing at each step's hit frame)
 -- ============================================================
 
 local Players = game:GetService("Players")
@@ -28,6 +27,7 @@ local CombatConfig = require(Modules:WaitForChild("CombatConfig")) :: any
 local RateLimiter = require(ServerScriptService:WaitForChild("RateLimiter")) :: any
 local AttributeStatManager = require(ServerScriptService:WaitForChild("AttributeStatManager")) :: any
 local MovementService = require(ServerScriptService:WaitForChild("MovementService")) :: any
+local DamageService = require(ServerScriptService:WaitForChild("DamageService")) :: any
 local SkillsDataManager = require(ServerScriptService:WaitForChild("SkillsDataManager")) :: any
 
 local WeaponManager = {}
@@ -46,24 +46,27 @@ end
 
 local EquipWeaponEvent = ensureRemote("RemoteEvent", "EquipWeapon")
 local UnequipWeaponEvent = ensureRemote("RemoteEvent", "UnequipWeapon")
-local WeaponAbilityEvent = ensureRemote("RemoteEvent", "WeaponAbility")
-local WeaponHitEvent = ensureRemote("RemoteEvent", "WeaponHit")
+ensureRemote("RemoteEvent", "WeaponHit") -- DamageService broadcasts every hit on it: (target, position, damage, isCrit, ...)
 local UpdateWeaponStatsEvent = ensureRemote("RemoteEvent", "UpdateWeaponStats")
 local SwordSwingEvent = ensureRemote("RemoteEvent", "SwordSwing") -- client -> server: "I clicked"; server -> clients: (player, step, speed)
 
 -- ===================== RUNTIME STATE =====================
 -- [userId] = { weaponId, toolInstance, stats, abilities }
 local playerWeapons = {}
--- [userId] = { [abilityName] = lastCastTime }
-local abilityDodges = {}
-
 -- ===================== COMBO STATE =====================
 -- [userId] = { step, busyUntil, expiresAt, ticket, slowed, baseSpeed }
 local combos = {}
 local SWING_SLACK = 0.1 -- network jitter allowance when a swing arrives just before the previous one has ended
 
---- Assign `WeaponManager.onSwingHit = function(player, stepIndex, weaponId)` later: called at each swing's hit frame.
---- (Damage and hit detection plug in here.)
+--- Called at each accepted swing's hit frame: the hit is only resolved if the same weapon is still held (a weapon
+--- switch or reset in between cancels it). Replace `WeaponManager.onSwingHit` to change what a swing does.
+WeaponManager.onSwingHit = function(player, stepIndex, weaponId)
+	local state = playerWeapons[player.UserId]
+	if not state or state.weaponId ~= weaponId then
+		return
+	end
+	DamageService.swing(player, stepIndex, weaponId, state.stats)
+end
 
 -- ===================== HELPERS =====================
 
@@ -99,36 +102,6 @@ local function removeWeaponStats(player)
 		return
 	end
 	-- TODO: Call AttributeStatManager API to remove bonuses
-end
-
---- Check if an ability is off cooldown (`cooldown` = that ability's cooldown in seconds).
-local function isAbilityReady(player, abilityName, cooldown)
-	if not abilityDodges[player.UserId] then
-		abilityDodges[player.UserId] = {}
-	end
-	local lastCast = abilityDodges[player.UserId][abilityName]
-	return lastCast == nil or (os.clock() - lastCast) >= (cooldown or 0)
-end
-
---- Mark ability as just-cast.
-local function markAbilityCast(player, abilityName, cooldown)
-	if not abilityDodges[player.UserId] then
-		abilityDodges[player.UserId] = {}
-	end
-	abilityDodges[player.UserId][abilityName] = os.clock()
-end
-
---- Get cooldown remaining for an ability.
-local function getAbilityCooldown(player, abilityName, cooldown)
-	if not abilityDodges[player.UserId] then
-		return 0
-	end
-	local lastCast = abilityDodges[player.UserId][abilityName]
-	if not lastCast then
-		return 0
-	end
-	local elapsed = os.clock() - lastCast
-	return math.max(0, cooldown - elapsed)
 end
 
 -- ===================== SWORD COMBO =====================
@@ -333,127 +306,20 @@ function WeaponManager.GetStats(player)
 end
 
 -- ===================== ABILITIES =====================
+-- Key-cast abilities (cost, cooldown, shape, damage) live in AbilityService + AbilityConfig. This is the one hook it needs.
 
---- Attempt to cast an ability. Returns success, remaining cooldown.
-function WeaponManager.TryAbility(player, abilityName: string): (boolean, number?)
-	local state = playerWeapons[player.UserId]
-	if not state then
-		return false, nil
-	end
-
-	-- Find ability in equipped weapon
-	local ability = nil
-	for _, ab in ipairs(state.abilities) do
-		if ab.name == abilityName then
-			ability = ab
-			break
-		end
-	end
-
-	if not ability then
-		return false, nil
-	end
-
-	-- Passive abilities can't be cast
-	if ability.type == "passive" then
-		return false, nil
-	end
-
-	-- Check cooldown
-	local cooldown = ability.cooldown or 5
-	if not isAbilityReady(player, abilityName, cooldown) then
-		local remaining = getAbilityCooldown(player, abilityName, cooldown)
-		return false, remaining
-	end
-
-	-- Mark cast
-	markAbilityCast(player, abilityName, cooldown)
-
-	-- Fire event for client VFX/SFX
-	WeaponAbilityEvent:FireClient(player, {
-		abilityName = abilityName,
-		weaponId = state.weaponId,
-		cooldown = cooldown,
-	})
-
-	-- TODO: Apply ability effects (damage, particles, etc.)
-	return true, cooldown
-end
-
---- Get cooldown info for an ability.
-function WeaponManager.GetAbilityCooldown(player, abilityName: string): (number, number)
-	local state = playerWeapons[player.UserId]
-	if not state then
-		return 0, 0
-	end
-
-	local ability = nil
-	for _, ab in ipairs(state.abilities) do
-		if ab.name == abilityName then
-			ability = ab
-			break
-		end
-	end
-
-	if not ability or ability.type == "passive" then
-		return 0, 0
-	end
-
-	local cooldown = ability.cooldown or 5
-	local remaining = getAbilityCooldown(player, abilityName, cooldown)
-	return cooldown, remaining
-end
-
--- ===================== DAMAGE & HIT REGISTRATION =====================
-
---- Handle a weapon hit. Apply damage with rarity scaling, crits, etc.
---- Returns { damage, isCrit, knockback }
-function WeaponManager.OnWeaponHit(player, targetPlayer, hitConfig)
-	hitConfig = hitConfig or {}
-
-	local state = playerWeapons[player.UserId]
-	if not state then
-		return nil
-	end
-
-	local stats = state.stats
-	local baseDamage = stats.baseDamage or 10
-	local critChance = stats.critChance or 0.1
-	local critMultiplier = stats.critMultiplier or 1.5
-	local knockback = stats.knockback or 15
-
-	-- Compute damage
-	local isCrit = math.random() < critChance
-	local finalDamage = baseDamage
-	if isCrit then
-		finalDamage = finalDamage * critMultiplier
-	end
-
-	-- TODO: Apply damage to targetPlayer's health
-	-- Call damage system / AttributeStatManager
-
-	-- Fire hit event for VFX
-	WeaponHitEvent:FireAllClients({
-		attacker = player.Name,
-		target = targetPlayer.Name,
-		damage = finalDamage,
-		isCrit = isCrit,
-		position = hitConfig.position,
-		weaponId = state.weaponId,
-	})
-
-	return {
-		damage = finalDamage,
-		isCrit = isCrit,
-		knockback = knockback,
-	}
+--- Lock the combo for `seconds` (a cast in progress): swings are refused until it ends.
+function WeaponManager.Lock(player, seconds: number)
+	local c = getCombo(player)
+	local untilTime = os.clock() + seconds
+	c.busyUntil = math.max(c.busyUntil, untilTime)
+	c.expiresAt = math.max(c.expiresAt, untilTime + 0.2)
 end
 
 -- ===================== PLAYER LIFECYCLE =====================
 
 --- Clean up when player leaves.
 local function onPlayerLeaving(player)
-	abilityDodges[player.UserId] = nil
 	playerWeapons[player.UserId] = nil
 	combos[player.UserId] = nil
 end
