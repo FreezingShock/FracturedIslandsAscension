@@ -13,6 +13,12 @@
 	           own colour) up to it, a darker gray (stroke colour x gray) after it. Keep that gradient's Rotation at 0.
 	The fill eases toward the real value; the Label always shows the exact number.
 
+	Pixel panels: when StarterGui.StatsMenu.HudRoot.ResourcePanels holds a "<row>Panel" (built by
+	tools/studio/build_resource_panels.luau), that resource is drawn by the panel instead: Bar.Fill is resized in 4 px
+	steps (Main/Highlight/Shade/EndCap are children of it) and Value / ValueShadow show "current / max". The matching
+	Stats row is hidden. HudRoot is scaled down on narrow screens (HudTheme.hud). Rows without a panel (Stamina) keep
+	the glyph bar above.
+
 	The whole Stats group fades out while the Nexus Menu or the inventory is open (MenuBridge.isOpen) and fades back in
 	when it closes.
 --]]
@@ -26,6 +32,7 @@ local TweenService = game:GetService("TweenService")
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local ResourceConfig = require(Modules:WaitForChild("ResourceConfig")) :: any
 local MenuBridge = require(Modules:WaitForChild("MenuBridge")) :: any
+local HudTheme = require(Modules:WaitForChild("Config"):WaitForChild("HudTheme")) :: any
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -33,6 +40,7 @@ local playerGui = player:WaitForChild("PlayerGui")
 local EASE_SPEED = 8 -- higher = the bar catches up faster
 local FADE_OUT = TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.Out) -- a menu opens
 local FADE_IN = TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out) -- the menu is gone
+local PIXEL = 4 -- panel fills move in whole art pixels
 local STOP_WIDTH = 0.0005 -- width of the hard colour stop in the stroke gradient (0..1)
 
 local function toHex(color: Color3): string
@@ -49,6 +57,14 @@ local bars: { [string]: any } = {}
 local function renderBar(bar: any)
 	local entry = bar.entry
 	local fraction = math.clamp(bar.shown, 0, 1)
+	if bar.fill then
+		local steps = math.floor(fraction * bar.innerWidth / PIXEL + 0.5)
+		if fraction > 0 and steps == 0 then
+			steps = 1 -- never look empty while there is health left
+		end
+		bar.fill.Size = UDim2.new(0, steps * PIXEL, 1, 0)
+		return
+	end
 	local filled = math.floor(fraction * bar.total + 0.5)
 	if fraction > 0 and filled == 0 then
 		filled = 1 -- never look empty while there is health left
@@ -98,19 +114,22 @@ local function refresh(bar: any, snap: boolean?)
 		bar.shown = bar.target
 		renderBar(bar)
 	end
-	if bar.label then
+	if bar.value then
+		local text = string.format("%d / %d", math.round(current), math.round(max))
+		bar.value.Text = text
+		bar.shadow.Text = text
+	elseif bar.label then
 		bar.label.Text = string.format("%s: %d/%d", bar.entry.label, math.round(current), math.round(max))
 	end
 end
 
 -- ===================== FADE WITH THE MENUS =====================
-local statsGroup: CanvasGroup? = nil
-local menuHidden: boolean? = nil -- what the Stats group currently shows (true = faded out)
-local fadeTween: Tween? = nil
+local fadeGroups: { CanvasGroup } = {} -- the Stats group and the pixel panels
+local menuHidden: boolean? = nil -- what the groups currently show (true = faded out)
+local fadeTweens: { Tween } = {}
 
 local function applyFade(instant: boolean?)
-	local group = statsGroup
-	if not group then
+	if #fadeGroups == 0 then
 		return
 	end
 	local hide = MenuBridge.isOpen()
@@ -118,15 +137,28 @@ local function applyFade(instant: boolean?)
 		return
 	end
 	menuHidden = hide
-	if fadeTween then
-		fadeTween:Cancel()
+	for _, tween in ipairs(fadeTweens) do
+		tween:Cancel()
 	end
+	table.clear(fadeTweens)
 	local goal = hide and 1 or 0
-	if instant then
-		group.GroupTransparency = goal
-	else
-		fadeTween = TweenService:Create(group, hide and FADE_OUT or FADE_IN, { GroupTransparency = goal })
-		fadeTween:Play()
+	for _, group in ipairs(fadeGroups) do
+		if instant then
+			group.GroupTransparency = goal
+		else
+			local tween = TweenService:Create(group, hide and FADE_OUT or FADE_IN, { GroupTransparency = goal })
+			table.insert(fadeTweens, tween)
+			tween:Play()
+		end
+	end
+end
+
+--- Scale HudRoot down on narrow screens (1:1 from HudTheme.hud.fullScaleWidth up).
+local function fitHud(root: Instance?)
+	local scale = root and root:FindFirstChildOfClass("UIScale")
+	local camera = workspace.CurrentCamera
+	if scale and camera then
+		scale.Scale = math.clamp(camera.ViewportSize.X / HudTheme.hud.fullScaleWidth, HudTheme.hud.minScale, 1)
 	end
 end
 
@@ -138,33 +170,66 @@ local function bind(gui: Instance)
 		return
 	end
 	table.clear(bars)
-	statsGroup = stats:IsA("CanvasGroup") and stats or nil
+	table.clear(fadeGroups)
+	if stats:IsA("CanvasGroup") then
+		table.insert(fadeGroups, stats)
+	end
+	local hudRoot = gui:FindFirstChild("HudRoot")
+	local panels = hudRoot and hudRoot:FindFirstChild("ResourcePanels")
+	if panels and panels:IsA("CanvasGroup") then
+		table.insert(fadeGroups, panels)
+	end
 	menuHidden = nil
 	applyFade(true) -- a freshly created GUI starts in the right state
+	fitHud(hudRoot)
 	for _, entry in ipairs(ResourceConfig.resources) do
-		local row = stats:WaitForChild(entry.row, 10)
-		local label = row and row:FindFirstChild("Label")
-		local progress = row and row:FindFirstChild("Progress")
-		if not (row and progress and progress:IsA("TextLabel")) then
-			warn("[ResourceBars] StatsMenu row '" .. entry.row .. "' needs a Progress TextLabel")
-			continue
+		local panel = panels and panels:FindFirstChild(entry.row .. "Panel")
+		local bar: any
+		if panel then
+			local row = stats:FindFirstChild(entry.row)
+			if row and row:IsA("GuiObject") then
+				row.Visible = false -- the panel replaces the old row
+			end
+			local barFrame = panel:FindFirstChild("Bar") -- the panel itself also has a "Fill" (its wood), so go through Bar
+			local fill = barFrame and barFrame:FindFirstChild("Fill")
+			local value = panel:FindFirstChild("Value")
+			local shadow = panel:FindFirstChild("ValueShadow")
+			if not (fill and value and shadow) then
+				warn("[ResourceBars] " .. entry.row .. "Panel needs Bar.Fill, Value and ValueShadow")
+				continue
+			end
+			bar = {
+				entry = entry,
+				fill = fill,
+				value = value,
+				shadow = shadow,
+				innerWidth = HudTheme.resourcePanel.barSize.X - 8,
+			}
+		else
+			local row = stats:WaitForChild(entry.row, 10)
+			local label = row and row:FindFirstChild("Label")
+			local progress = row and row:FindFirstChild("Progress")
+			if not (row and progress and progress:IsA("TextLabel")) then
+				warn("[ResourceBars] StatsMenu row '" .. entry.row .. "' needs a Progress TextLabel")
+				continue
+			end
+			progress.RichText = true
+			local original = progress.Text
+			local stroke = progress:FindFirstChildOfClass("UIStroke")
+			local gradient = stroke and stroke:FindFirstChildOfClass("UIGradient")
+			if not gradient and not warned then
+				warned = true
+				warn("[ResourceBars] no UIGradient under Progress > UIStroke: the unfilled stroke will not darken")
+			end
+			bar = {
+				entry = entry,
+				label = label and label:IsA("TextLabel") and label or nil,
+				progress = progress,
+				gradient = gradient,
+				glyph = utf8.char(utf8.codepoint(original, 1)),
+				total = utf8.len(original),
+			}
 		end
-		progress.RichText = true
-		local original = progress.Text
-		local stroke = progress:FindFirstChildOfClass("UIStroke")
-		local gradient = stroke and stroke:FindFirstChildOfClass("UIGradient")
-		if not gradient and not warned then
-			warned = true
-			warn("[ResourceBars] no UIGradient under Progress > UIStroke: the unfilled stroke will not darken")
-		end
-		local bar = {
-			entry = entry,
-			label = label and label:IsA("TextLabel") and label or nil,
-			progress = progress,
-			gradient = gradient,
-			glyph = utf8.char(utf8.codepoint(original, 1)),
-			total = utf8.len(original),
-		}
 		bars[entry.key] = bar
 		refresh(bar, true)
 		for _, name in ipairs({ entry.key, "Max" .. entry.key }) do
@@ -176,6 +241,22 @@ local function bind(gui: Instance)
 		end
 	end
 end
+
+local function onViewportChanged()
+	local gui = playerGui:FindFirstChild("StatsMenu")
+	fitHud(gui and gui:FindFirstChild("HudRoot"))
+end
+local function watchCamera()
+	local camera = workspace.CurrentCamera
+	if camera then
+		camera:GetPropertyChangedSignal("ViewportSize"):Connect(onViewportChanged)
+	end
+end
+watchCamera()
+workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(function()
+	watchCamera()
+	onViewportChanged()
+end)
 
 local existing = playerGui:FindFirstChild("StatsMenu")
 if existing then
