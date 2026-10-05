@@ -78,14 +78,11 @@ HudTheme.resourcePanel = {
 	capPx = 4, -- bright end cap on the fill
 }
 
--- HUD root: a 1088 x 276 box anchored bottom centre; the controller scales it down on narrow screens
+-- StatsMenu.Stats scaling and row order (Stats is a horizontal list: Health | Stamina | Mana)
 HudTheme.hud = {
-	size = Vector2.new(1088, 276),
-	bottomMargin = 12,
-	fullScaleWidth = 1280, -- viewport width at which the HUD is shown at 1:1
+	fullScaleWidth = 1280, -- viewport width at which the HUD is shown at 1:1; Stats' UIScale shrinks it below that
 	minScale = 0.5,
-	healthPos = Vector2.new(40, 16),
-	manaPos = Vector2.new(692, 16),
+	rowOrder = { Health = 1, Stamina = 2, Mana = 3 },
 }
 
 HudTheme.icons = {

@@ -1,25 +1,24 @@
 -- build_resource_panels.luau
--- Builds StarterGui.StatsMenu.HudRoot (the pixel HUD from Figma "FIA HUD") with the Health and Mana panels:
---   HudRoot (Frame, UIScale) > ResourcePanels (CanvasGroup) > HealthPanel / ManaPanel
---   each panel: Outline, Fill, Highlight, Shade, EdgeLight, ValueShadow, Value, Bar (Outline, Track, Fill > Main/Highlight/Shade/EndCap), Icon
--- Everything comes from ReplicatedStorage.Modules.HudTheme. ResourceBarsController finds the panels by name
--- (<ResourceConfig row> .. "Panel") and drives Bar.Fill and Value; it hides the old Stats.Health / Stats.Mana rows.
--- Run on the Edit datamodel with the Studio MCP. Refuses to overwrite an existing HudRoot unless FORCE = true.
+-- Turns StarterGui.StatsMenu.Stats.Health and .Mana into the pixel panels from Figma "FIA HUD" (colors, sizes and
+-- icons come from ReplicatedStorage.Modules.Config.HudTheme):
+--   Stats > Health / Mana (Frame 356 x 96): Outline, Fill, Highlight, Shade, EdgeLight, ValueShadow, Value,
+--           Bar (Outline, Track, Fill > Main / Highlight / Shade / EndCap), Icon (heart / pencil, one Frame per pixel run)
+-- The old hand-made children (Icon, Label, Progress) are kept but renamed Legacy* and hidden. Stats gets a UIScale
+-- (ResourceBarsController shrinks it on narrow screens) and the rows are ordered Health | Stamina | Mana.
+-- ResourceBarsController finds a row's Bar and drives Bar.Fill and Value; rows without a Bar (Stamina) keep the old bar.
+-- Run on the Edit datamodel with the Studio MCP. Skips a row that already has a Bar unless FORCE = true.
 local FORCE = false
 
-local T = require(game.ReplicatedStorage.Modules.Config.HudTheme)
+local T = require(game.ReplicatedStorage.Modules.Config.HudTheme:Clone()) -- a clone, so a stale require cache never wins
 local gui = game.StarterGui:FindFirstChild("StatsMenu")
 assert(gui, "StarterGui.StatsMenu is missing")
-local existing = gui:FindFirstChild("HudRoot")
-if existing then
-	if not FORCE then
-		return "HudRoot already exists (set FORCE = true to rebuild it)"
-	end
-	existing:Destroy()
-end
-local font = gui.Stats.Health.Label.FontFace -- the game's HUD font
+local stats = gui:FindFirstChild("Stats")
+assert(stats, "StatsMenu.Stats is missing")
+local font = stats.Health:FindFirstChild("LegacyLabel") and stats.Health.LegacyLabel.FontFace
+	or stats.Health.Label.FontFace -- the game's HUD font
 
 local C, P, H = T.colors, T.resourcePanel, T.hud
+local BUILT = { "Outline", "Fill", "Highlight", "Shade", "EdgeLight", "ValueShadow", "Value", "Bar", "Icon" }
 
 local function hex(h)
 	local n = tonumber(h:sub(2), 16)
@@ -109,44 +108,69 @@ local function bar(parent, x, y, track, fill, light, dark, cap)
 	return b
 end
 
-local function panel(parent, name, pos, kind)
+local function buildRow(row, kind)
+	if row:FindFirstChild("Bar") then
+		if not FORCE then
+			return row.Name .. ": already built (set FORCE = true to rebuild)"
+		end
+		for _, name in ipairs(BUILT) do
+			local child = row:FindFirstChild(name)
+			if child then
+				child:Destroy()
+			end
+		end
+	end
+	-- keep the hand-made children, hidden and renamed so the new Icon does not clash
+	for _, name in ipairs({ "Icon", "Label", "Progress" }) do
+		local legacy = row:FindFirstChild(name)
+		if legacy and legacy:IsA("GuiObject") then
+			legacy.Name = "Legacy" .. name
+			legacy.Visible = false
+		end
+	end
+	row.AutomaticSize = Enum.AutomaticSize.None
+	row.Size = UDim2.fromOffset(P.size.X, P.size.Y)
+	row.BackgroundTransparency = 1
+
 	local w, h = P.size.X, P.size.Y
-	local p = frame(parent, name, pos.X, pos.Y, w, h, nil)
-	stepBox(p, "Outline", 0, 0, w, h, C.panelBorder, 4)
-	stepBox(p, "Fill", 4, 4, w - 8, h - 8, C.panelFill, 4)
-	frame(p, "Highlight", 8, 4, w - 16, 4, C.panelHighlight)
-	frame(p, "Shade", 8, h - 8, w - 16, 4, C.panelShadow)
-	frame(p, "EdgeLight", w - 8, 12, 4, h - 24, C.panelHighlight).BackgroundTransparency = 0.5
-	label(p, "ValueShadow", C.textShadow, P.textY)
-	label(p, "Value", C.text, P.textY)
+	stepBox(row, "Outline", 0, 0, w, h, C.panelBorder, 4)
+	stepBox(row, "Fill", 4, 4, w - 8, h - 8, C.panelFill, 4)
+	frame(row, "Highlight", 8, 4, w - 16, 4, C.panelHighlight)
+	frame(row, "Shade", 8, h - 8, w - 16, 4, C.panelShadow)
+	frame(row, "EdgeLight", w - 8, 12, 4, h - 24, C.panelHighlight).BackgroundTransparency = 0.5
+	label(row, "ValueShadow", C.textShadow, P.textY)
+	label(row, "Value", C.text, P.textY)
 	local barY = P.barY
 	if kind == "health" then
-		bar(p, 56, barY, C.hpTrack, C.hpFill, C.hpLight, C.hpDark, C.hpCap)
+		bar(row, 56, barY, C.hpTrack, C.hpFill, C.hpLight, C.hpDark, C.hpCap)
 		local s = T.icons.heart
-		pixelIcon(p, s, P.iconMargin, barY + P.barSize.Y / 2 - (#s.rows * s.cell) / 2)
+		pixelIcon(row, s, P.iconMargin, barY + P.barSize.Y / 2 - (#s.rows * s.cell) / 2)
 	else
 		local barX = 24
-		bar(p, barX, barY, C.manaTrack, C.manaFill, C.manaLight, C.manaDark, C.manaCap)
+		bar(row, barX, barY, C.manaTrack, C.manaFill, C.manaLight, C.manaDark, C.manaCap)
 		local s = T.icons.pencil
-		pixelIcon(p, s, barX + P.barSize.X + P.iconGap, barY + P.barSize.Y / 2 - (#s.rows * s.cell) / 2)
+		pixelIcon(row, s, barX + P.barSize.X + P.iconGap, barY + P.barSize.Y / 2 - (#s.rows * s.cell) / 2)
 	end
-	return p
+	return row.Name .. ": built"
 end
 
-local root = frame(gui, "HudRoot", 0, 0, H.size.X, H.size.Y, nil)
-root.AnchorPoint = Vector2.new(0.5, 1)
-root.Position = UDim2.new(0.5, 0, 1, -H.bottomMargin)
-local scale = Instance.new("UIScale")
-scale.Name = "Scale"
-scale.Parent = root
-
-local group = Instance.new("CanvasGroup")
-group.Name = "ResourcePanels"
-group.BackgroundTransparency = 1
-group.BorderSizePixel = 0
-group.Size = UDim2.fromScale(1, 1)
-group.Parent = root
-
-panel(group, "HealthPanel", H.healthPos, "health")
-panel(group, "ManaPanel", H.manaPos, "mana")
-return "built StatsMenu.HudRoot with " .. #group:GetDescendants() .. " descendants"
+local out = {}
+local legacyRoot = gui:FindFirstChild("HudRoot") -- an earlier version of this builder made a separate HudRoot
+if legacyRoot then
+	legacyRoot:Destroy()
+	table.insert(out, "removed old HudRoot")
+end
+table.insert(out, buildRow(stats.Health, "health"))
+table.insert(out, buildRow(stats.Mana, "mana"))
+for name, order in pairs(H.rowOrder) do
+	local row = stats:FindFirstChild(name)
+	if row then
+		row.LayoutOrder = order
+	end
+end
+if not stats:FindFirstChildOfClass("UIScale") then
+	local scale = Instance.new("UIScale")
+	scale.Name = "Scale"
+	scale.Parent = stats
+end
+return table.concat(out, "; ")

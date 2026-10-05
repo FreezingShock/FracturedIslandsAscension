@@ -13,11 +13,10 @@
 	           own colour) up to it, a darker gray (stroke colour x gray) after it. Keep that gradient's Rotation at 0.
 	The fill eases toward the real value; the Label always shows the exact number.
 
-	Pixel panels: when StarterGui.StatsMenu.HudRoot.ResourcePanels holds a "<row>Panel" (built by
-	tools/studio/build_resource_panels.luau), that resource is drawn by the panel instead: Bar.Fill is resized in 4 px
-	steps (Main/Highlight/Shade/EndCap are children of it) and Value / ValueShadow show "current / max". The matching
-	Stats row is hidden. HudRoot is scaled down on narrow screens (HudTheme.hud). Rows without a panel (Stamina) keep
-	the glyph bar above.
+	Pixel rows: a Stats row that holds a Bar (built by tools/studio/build_resource_panels.luau: Health and Mana) is
+	drawn as a pixel panel: Bar.Fill is resized in 4 px steps (Main/Highlight/Shade/EndCap are children of it) and
+	Value / ValueShadow show "current / max". Rows without a Bar (Stamina) keep the glyph bar above. Stats carries a
+	UIScale that shrinks the whole group on narrow screens (HudTheme.hud).
 
 	The whole Stats group fades out while the Nexus Menu or the inventory is open (MenuBridge.isOpen) and fades back in
 	when it closes.
@@ -124,7 +123,7 @@ local function refresh(bar: any, snap: boolean?)
 end
 
 -- ===================== FADE WITH THE MENUS =====================
-local fadeGroups: { CanvasGroup } = {} -- the Stats group and the pixel panels
+local fadeGroups: { CanvasGroup } = {} -- the Stats group
 local menuHidden: boolean? = nil -- what the groups currently show (true = faded out)
 local fadeTweens: { Tween } = {}
 
@@ -153,9 +152,9 @@ local function applyFade(instant: boolean?)
 	end
 end
 
---- Scale HudRoot down on narrow screens (1:1 from HudTheme.hud.fullScaleWidth up).
-local function fitHud(root: Instance?)
-	local scale = root and root:FindFirstChildOfClass("UIScale")
+--- Scale the Stats group down on narrow screens (1:1 from HudTheme.hud.fullScaleWidth up).
+local function fitHud(stats: Instance?)
+	local scale = stats and stats:FindFirstChildOfClass("UIScale")
 	local camera = workspace.CurrentCamera
 	if scale and camera then
 		scale.Scale = math.clamp(camera.ViewportSize.X / HudTheme.hud.fullScaleWidth, HudTheme.hud.minScale, 1)
@@ -174,28 +173,19 @@ local function bind(gui: Instance)
 	if stats:IsA("CanvasGroup") then
 		table.insert(fadeGroups, stats)
 	end
-	local hudRoot = gui:FindFirstChild("HudRoot")
-	local panels = hudRoot and hudRoot:FindFirstChild("ResourcePanels")
-	if panels and panels:IsA("CanvasGroup") then
-		table.insert(fadeGroups, panels)
-	end
 	menuHidden = nil
 	applyFade(true) -- a freshly created GUI starts in the right state
-	fitHud(hudRoot)
+	fitHud(stats)
 	for _, entry in ipairs(ResourceConfig.resources) do
-		local panel = panels and panels:FindFirstChild(entry.row .. "Panel")
+		local panel = stats:FindFirstChild(entry.row)
+		local barFrame = panel and panel:FindFirstChild("Bar") -- the row itself also has a "Fill" (its wood), so go through Bar
 		local bar: any
-		if panel then
-			local row = stats:FindFirstChild(entry.row)
-			if row and row:IsA("GuiObject") then
-				row.Visible = false -- the panel replaces the old row
-			end
-			local barFrame = panel:FindFirstChild("Bar") -- the panel itself also has a "Fill" (its wood), so go through Bar
-			local fill = barFrame and barFrame:FindFirstChild("Fill")
+		if barFrame then
+			local fill = barFrame:FindFirstChild("Fill")
 			local value = panel:FindFirstChild("Value")
 			local shadow = panel:FindFirstChild("ValueShadow")
 			if not (fill and value and shadow) then
-				warn("[ResourceBars] " .. entry.row .. "Panel needs Bar.Fill, Value and ValueShadow")
+				warn("[ResourceBars] " .. entry.row .. " needs Bar.Fill, Value and ValueShadow")
 				continue
 			end
 			bar = {
@@ -244,7 +234,7 @@ end
 
 local function onViewportChanged()
 	local gui = playerGui:FindFirstChild("StatsMenu")
-	fitHud(gui and gui:FindFirstChild("HudRoot"))
+	fitHud(gui and gui:FindFirstChild("Stats"))
 end
 local function watchCamera()
 	local camera = workspace.CurrentCamera
