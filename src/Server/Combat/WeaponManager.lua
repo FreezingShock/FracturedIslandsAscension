@@ -27,6 +27,7 @@ local WeaponRegistry = require(Modules:WaitForChild("WeaponRegistry")) :: any
 local CombatConfig = require(Modules:WaitForChild("CombatConfig")) :: any
 local RateLimiter = require(ServerScriptService:WaitForChild("RateLimiter")) :: any
 local AttributeStatManager = require(ServerScriptService:WaitForChild("AttributeStatManager")) :: any
+local MovementService = require(ServerScriptService:WaitForChild("MovementService")) :: any
 local SkillsDataManager = require(ServerScriptService:WaitForChild("SkillsDataManager")) :: any
 
 local WeaponManager = {}
@@ -134,7 +135,7 @@ end
 local function getCombo(player)
 	local c = combos[player.UserId]
 	if not c then
-		c = { step = 0, busyUntil = 0, expiresAt = 0, ticket = 0, slowed = false, baseSpeed = 16 }
+		c = { step = 0, busyUntil = 0, expiresAt = 0, ticket = 0, slowed = false }
 		combos[player.UserId] = c
 	end
 	return c
@@ -143,10 +144,7 @@ end
 local function restoreWalkSpeed(player, c)
 	if c.slowed then
 		c.slowed = false
-		local humanoid = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
-		if humanoid then
-			humanoid.WalkSpeed = c.baseSpeed
-		end
+		MovementService.SetFactor(player, "combat", nil)
 	end
 end
 
@@ -197,11 +195,8 @@ function WeaponManager.TrySwing(player): (boolean, number?)
 	player:SetAttribute("ComboStep", stepIndex)
 
 	-- slower walking while swinging (the finisher is heavier)
-	if not c.slowed then
-		c.baseSpeed = humanoid.WalkSpeed
-		c.slowed = true
-	end
-	humanoid.WalkSpeed = c.baseSpeed * (stepIndex == stepCount and typeConfig.finisherMoveSpeedFactor or typeConfig.moveSpeedFactor)
+	c.slowed = true
+	MovementService.SetFactor(player, "combat", stepIndex == stepCount and typeConfig.finisherMoveSpeedFactor or typeConfig.moveSpeedFactor)
 
 	SwordSwingEvent:FireAllClients(player, stepIndex, speed, weapon.config.weaponType, weapon.weaponId)
 

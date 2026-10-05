@@ -23,6 +23,10 @@ local ProfileConfig = require(Modules:WaitForChild("ProfileConfig")) :: any
 
 local AttributeStatManager = {}
 
+--- Fired (server side) with the player whenever their final stats may have changed (the same moments StatUpdated is
+--- sent to the client). ResourceService listens to resize max health / mana / stamina.
+AttributeStatManager.Changed = Instance.new("BindableEvent")
+
 -- ===================== REFERENCES =====================
 local BASE_STATS = ProfileConfig.BASE_STATS
 local ATTRIBUTE_CATEGORIES = ProfileConfig.ATTRIBUTE_CATEGORIES
@@ -158,6 +162,7 @@ local function fireStatUpdate(player)
 	local payload = buildStatPayload(player)
 	if payload then
 		StatUpdated:FireClient(player, payload)
+		AttributeStatManager.Changed:Fire(player)
 	end
 end
 
@@ -182,9 +187,11 @@ end
 
 local tempBonuses = {} -- [userId] = { [bonusId] = { id, attr, mode, amount, expiresAt } } (admin panel)
 
--- Debug boosts ("admin" from /set, "admin:<n>" from the admin panel) never persist.
+-- Debug boosts ("admin" from /set, "admin:<n>" from the admin panel) and session boosts ("session:<name>", e.g. sprint)
+-- never persist: they are stripped when a profile loads, so a crash mid-boost cannot leave one behind.
 local function isAdminBoost(boost)
-	return boost.id == "admin" or (type(boost.id) == "string" and boost.id:sub(1, 6) == "admin:")
+	return boost.id == "admin"
+		or (type(boost.id) == "string" and (boost.id:sub(1, 6) == "admin:" or boost.id:sub(1, 8) == "session:"))
 end
 
 local function stripAdminFrom(list)

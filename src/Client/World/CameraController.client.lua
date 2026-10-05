@@ -34,6 +34,7 @@ end
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 local MenuBridge = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("MenuBridge")) :: any
+local MovementConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("MovementConfig")) :: any
 local UserGameSettings = UserSettings():GetService("UserGameSettings")
 
 -- ===================== CONFIG =====================
@@ -77,6 +78,7 @@ local phase = 1
 local distance = PHASES[1].distance -- smoothed values
 local shoulder = PHASES[1].shoulder
 local fov = PHASES[1].fov
+local sprintFov = 0 -- extra field of view while sprinting (MovementConfig.sprint.fovBonus), eased in and out
 local yaw, pitch = 0, 0
 local cursorFree = false -- toggled with T
 local rightMouseDown = false -- the free camera looks around while right mouse is held
@@ -298,6 +300,11 @@ local function updateCamera(dt: number)
 	distance += (target.distance - distance) * alpha
 	shoulder += (target.shoulder - shoulder) * alpha
 	fov += (target.fov - fov) * alpha
+	local sprintTarget = player:GetAttribute("Sprinting") and MovementConfig.sprint.fovBonus or 0
+	sprintFov += (sprintTarget - sprintFov) * (1 - math.exp(-dt * MovementConfig.sprint.fovSpeed))
+	if math.abs(sprintFov - sprintTarget) < 0.01 then
+		sprintFov = sprintTarget
+	end
 	if math.abs(distance - target.distance) < 0.005 then
 		distance = target.distance
 	end
@@ -320,7 +327,7 @@ local function updateCamera(dt: number)
 	end
 	camera.CFrame = CFrame.new(position) * rotation
 	camera.Focus = CFrame.new(focus)
-	camera.FieldOfView = fov
+	camera.FieldOfView = fov + sprintFov
 
 	-- hide the body in first person (arms and held items stay), fade it back in as the camera pulls away
 	local fade = math.clamp((THIRD_PERSON_ABOVE - distance) / (THIRD_PERSON_ABOVE - FIRST_PERSON_BELOW), 0, 1)

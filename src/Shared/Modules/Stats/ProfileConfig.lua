@@ -52,6 +52,7 @@ ProfileConfig.BASE_STATS = {
 
 	-- Misc / General
 	Speed = 16, -- Roblox default is 16
+	Vitality = 5, -- stamina regenerated per second (ResourceConfig: Stamina regen)
 	JumpHeight = 0, -- Roblox default; overridden by Humanoid.JumpHeight (7.2 studs base)
 	MagicFind = 0,
 	PetLuck = 0,
@@ -236,6 +237,13 @@ ProfileConfig.ATTRIBUTE_CATEGORIES = {
 			color = "#FFFFFF",
 			icon = { 2, 0 }, -- SmallStar
 			description = "Increases movement speed.",
+		},
+		{
+			key = "Vitality",
+			name = "Vitality",
+			color = "#FFAA00",
+			icon = { 4, 3 }, -- Starburst
+			description = "Stamina regenerated per second.\n\n<font weight='900' color='#FFAA00'>Each point:</font> +1 stamina per second.",
 		},
 		{
 			key = "JumpHeight",
