@@ -34,11 +34,23 @@
       "Main": {
         "$path": "src/Server/Main.server.lua"
       },
+      "MovementInit": {
+        "$path": "src/Server/Stats/MovementInit.server.lua"
+      },
+      "MovementService": {
+        "$path": "src/Server/Stats/MovementService.lua"
+      },
       "ProfileService": {
         "$path": "src/Server/Data/ProfileService.luau"
       },
       "RateLimiter": {
         "$path": "src/Server/Data/RateLimiter.lua"
+      },
+      "ResourceInit": {
+        "$path": "src/Server/Stats/ResourceInit.server.lua"
+      },
+      "ResourceService": {
+        "$path": "src/Server/Stats/ResourceService.lua"
       },
       "SkillsDataManager": {
         "$path": "src/Server/Data/SkillsDataManager.lua"
@@ -135,11 +147,17 @@
         "MoneyLib": {
           "$path": "src/Shared/Modules/Util/MoneyLib.lua"
         },
+        "MovementConfig": {
+          "$path": "src/Shared/Modules/Stats/MovementConfig.lua"
+        },
         "ProfileConfig": {
           "$path": "src/Shared/Modules/Stats/ProfileConfig.lua"
         },
         "ProfilePageModule": {
           "$path": "src/Shared/Modules/Menu/Pages/ProfilePageModule.lua"
+        },
+        "ResourceConfig": {
+          "$path": "src/Shared/Modules/Stats/ResourceConfig.lua"
         },
         "SettingsPageModule": {
           "$path": "src/Shared/Modules/Menu/Pages/SettingsPageModule.lua"
@@ -204,6 +222,9 @@
         "CurrencyHUD": {
           "$path": "src/Client/HUD/CurrencyHUD.client.lua"
         },
+        "HeldItemNameController": {
+          "$path": "src/Client/HUD/HeldItemNameController.client.lua"
+        },
         "InventoryController": {
           "$path": "src/Client/Inventory/InventoryController.client.lua"
         },
@@ -212,6 +233,12 @@
         },
         "LiquidGlassBootstrap": {
           "$path": "src/Client/Menu/LiquidGlassBootstrap.client.lua"
+        },
+        "ResourceBarsController": {
+          "$path": "src/Client/HUD/ResourceBarsController.client.lua"
+        },
+        "SprintController": {
+          "$path": "src/Client/World/SprintController.client.lua"
         },
         "TreeSway": {
           "$path": "src/Client/World/TreeSway.client.lua"
