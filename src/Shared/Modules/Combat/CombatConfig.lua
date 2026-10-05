@@ -28,7 +28,8 @@
 	FX AND SOUND (same layering: library -> type -> per-weapon override)
 	  CombatConfig.sounds[key] = { id, volume, pitch = {min, max} }   id "" = silent; ids can be rbxassetid:// or rbxasset://
 	  CombatConfig.fx[key]     = { trail = {...}, burst = {...} }      the swing trail ribbon and the spark burst
-	  steps[i].sound / soundAt        sound key played soundAt seconds into the swing
+	  steps[i].sound / soundAt        sound key played soundAt seconds into the swing (at attack speed 1; scales with it)
+	                                  the attack sounds are ~0.09s accents, so soundAt sits just before hitFrame
 	  steps[i].trail = { from, to }   seconds (at attack speed 1) the trail ribbon is visible
 	  type.fx                          fx key every weapon of the type uses
 	  type.slotSounds[name]            sound key for a situation ("equip", later "impact", ...)
@@ -76,9 +77,12 @@ CombatConfig.animations = {
 -- Sounds. Defaults are Roblox's own bundled sword sounds (free, nothing to upload). To use your own audio, upload it
 -- to Creator Hub and put "rbxassetid://<id>" here. Please keep to audio you own or that is licensed for games.
 CombatConfig.sounds = {
-	sword_swing = { id = "rbxasset://sounds/swordslash.wav", volume = 0.55, pitch = { 0.92, 1.08 } },
-	sword_lunge = { id = "rbxasset://sounds/swordlunge.wav", volume = 0.65, pitch = { 0.95, 1.05 } },
-	sword_heavy = { id = "rbxasset://sounds/swordslash.wav", volume = 0.75, pitch = { 0.70, 0.80 } },
+	-- one attack sound per combo step. They are 3D sounds on the sword: minDistance = full volume within that many
+	-- studs, silent beyond maxDistance, so anyone nearby hears them from the blade.
+	sword_atk1 = { id = "rbxassetid://87733479853952", volume = 0.8, pitch = { 0.97, 1.03 }, minDistance = 12, maxDistance = 90 },
+	sword_atk2 = { id = "rbxassetid://83101665211645", volume = 0.8, pitch = { 0.97, 1.03 }, minDistance = 12, maxDistance = 90 },
+	sword_atk3 = { id = "rbxassetid://109876336137523", volume = 0.8, pitch = { 0.97, 1.03 }, minDistance = 12, maxDistance = 90 },
+	sword_atk4 = { id = "rbxassetid://120264723935510", volume = 0.9, pitch = { 0.97, 1.03 }, minDistance = 14, maxDistance = 100 },
 	sword_equip = { id = "rbxasset://sounds/unsheath.wav", volume = 0.45, pitch = { 0.95, 1.05 } },
 	sword_impact = { id = "", volume = 0.7, pitch = { 0.9, 1.1 } }, -- reserved for the damage system
 }
@@ -119,13 +123,13 @@ CombatConfig.sword = {
 	bufferTime = 0.35,
 	steps = {
 		{ name = "SlashDownLeft", animation = "sword_combo1", duration = 0.50, hitFrame = 0.20, recovery = 0.05,
-			sound = "sword_swing", soundAt = 0.08, trail = { from = 0.10, to = 0.36 } },
+			sound = "sword_atk1", soundAt = 0.17, trail = { from = 0.10, to = 0.36 } },
 		{ name = "SlashDownRight", animation = "sword_combo2", duration = 0.50, hitFrame = 0.20, recovery = 0.05,
-			sound = "sword_swing", soundAt = 0.08, trail = { from = 0.10, to = 0.36 } },
+			sound = "sword_atk2", soundAt = 0.17, trail = { from = 0.10, to = 0.36 } },
 		{ name = "Jab", animation = "sword_combo3", duration = 0.47, hitFrame = 0.17, recovery = 0.05,
-			sound = "sword_lunge", soundAt = 0.08, trail = { from = 0.12, to = 0.30 } },
+			sound = "sword_atk3", soundAt = 0.14, trail = { from = 0.12, to = 0.30 } },
 		{ name = "OverheadSlash", animation = "sword_combo4", duration = 0.70, hitFrame = 0.32, recovery = 0.30,
-			sound = "sword_heavy", soundAt = 0.16, trail = { from = 0.18, to = 0.46 } },
+			sound = "sword_atk4", soundAt = 0.29, trail = { from = 0.18, to = 0.46 } },
 	},
 	slots = {
 		equip = "sword_equip",

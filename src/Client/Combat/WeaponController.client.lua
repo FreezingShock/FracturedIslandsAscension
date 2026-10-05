@@ -173,8 +173,40 @@ local function comboAllowed(): boolean
 	if not humanoid or humanoid.Health <= 0 or not character:FindFirstChild(currentWeapon.toolName) then
 		return false
 	end
-	-- only while the cursor is locked to the game view and no menu is open
-	return UserInputService.MouseBehavior == Enum.MouseBehavior.LockCenter and not MenuBridge.isOpen()
+	-- works with the cursor locked or free (T, third-person free camera); never while a menu is open. A click on a
+	-- GUI button is already filtered out by gameProcessed in the input handler.
+	return not MenuBridge.isOpen()
+end
+
+--- With a free cursor there is no crosshair, so the character turns toward where the cursor points (on the ground
+--- plane at hip height; above the horizon it falls back to the camera's heading).
+local function faceCursor()
+	if UserInputService.MouseBehavior == Enum.MouseBehavior.LockCenter then
+		return -- the locked camera already steers the body
+	end
+	local character = player.Character
+	local root = character and character:FindFirstChild("HumanoidRootPart")
+	local camera = workspace.CurrentCamera
+	if not (root and camera) then
+		return
+	end
+	local mouse = UserInputService:GetMouseLocation()
+	local ray = camera:ViewportPointToRay(mouse.X, mouse.Y)
+	local flat
+	if math.abs(ray.Direction.Y) > 1e-3 then
+		local t = (root.Position.Y - ray.Origin.Y) / ray.Direction.Y
+		if t > 0 then
+			local hit = ray.Origin + ray.Direction * t
+			flat = Vector3.new(hit.X - root.Position.X, 0, hit.Z - root.Position.Z)
+		end
+	end
+	if not flat or flat.Magnitude < 0.75 then
+		local look = camera.CFrame.LookVector
+		flat = Vector3.new(look.X, 0, look.Z)
+	end
+	if flat.Magnitude > 1e-3 then
+		root.CFrame = CFrame.lookAt(root.Position, root.Position + flat)
+	end
 end
 
 local function startSwing()
@@ -191,6 +223,7 @@ local function startSwing()
 	combo.expiresAt = combo.busyUntil + typeConfig.comboWindow
 	combo.buffered = false
 
+	faceCursor()
 	CombatAnimator.play(player.Character, currentWeapon.weaponType, stepIndex, speed, currentWeapon.id)
 	CombatFX.swing(player.Character, currentWeapon.weaponType, stepIndex, speed, currentWeapon.id)
 	SwordSwingEvent:FireServer()

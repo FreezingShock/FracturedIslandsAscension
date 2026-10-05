@@ -129,7 +129,9 @@ local function playSound(parent: Instance, entry: any)
 	sound.Volume = entry.volume or 0.6
 	local pitch = entry.pitch
 	sound.PlaybackSpeed = pitch and (pitch[1] + (pitch[2] - pitch[1]) * math.random()) or 1
-	sound.RollOffMaxDistance = entry.maxDistance or 70
+	sound.RollOffMode = Enum.RollOffMode.InverseTapered
+	sound.RollOffMinDistance = entry.minDistance or 12
+	sound.RollOffMaxDistance = entry.maxDistance or 80
 	sound.Parent = parent
 	sound:Play()
 	Debris:AddItem(sound, 4)

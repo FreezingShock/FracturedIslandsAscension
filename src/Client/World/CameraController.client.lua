@@ -8,15 +8,16 @@
 	    (character faces where you look) -> free camera, just like Roblox (cursor free, hold right mouse to look
 	    around, wheel zooms, character turns to its walking direction). R from the free camera returns to first
 	    person with the cursor locked again.
-	  * T toggles the cursor in the first two phases. The cursor is also free while a menu / the inventory is
+	  * T toggles the cursor in the first two phases (first person and over the shoulder). The cursor is also free while a menu / the inventory is
 	    open, while typing, and while Roblox's own menu is open.
 	  * While the cursor is free the camera stands still (except the free camera while right mouse is held).
 
 	The camera is Scriptable (own mouse look + collision) so the phase blend is smooth and the lock logic has
 	exactly one owner. Desktop only: touch-only devices keep Roblox's default camera.
 
-	GUI: ReplicatedStorage-free. The "Click T to Unlock Cursor" hint is hand-made in Studio
-	(StarterGui.CursorHint > Hint [CanvasGroup] > Label); this script only fades it and sets its text.
+	GUI: ReplicatedStorage-free. The view labels are hand-made in Studio
+	(StarterGui.ViewMenu > View [CanvasGroup] > POV [TextLabel] and Cursor [TextLabel]); this script only sets their
+	rich text, eases POV's main text colour between perspectives and fades the Cursor label (phases 1-2 only).
 --]]
 
 local Players = game:GetService("Players")
@@ -37,9 +38,10 @@ local UserGameSettings = UserSettings():GetService("UserGameSettings")
 
 -- ===================== CONFIG =====================
 local PHASES = {
-	{ name = "first", distance = 0, shoulder = 0, faceCamera = true },
-	{ name = "shoulder", distance = 8, shoulder = 2.4, faceCamera = true },
-	{ name = "free", distance = 11, shoulder = 0, faceCamera = false }, -- distance follows the wheel zoom
+	-- fov = vertical field of view in degrees (Roblox default 70, max 120); it blends between phases like the distance
+	{ name = "first", distance = 0, shoulder = 0, faceCamera = true, fov = 100 },
+	{ name = "shoulder", distance = 8, shoulder = 2.4, faceCamera = true, fov = 75 },
+	{ name = "free", distance = 11, shoulder = 0, faceCamera = false, fov = 70 }, -- distance follows the wheel zoom
 }
 local FREE_PHASE = 3
 local FREE_ZOOM_MIN, FREE_ZOOM_MAX, FREE_ZOOM_STEP = 3, 30, 1.5
@@ -52,13 +54,29 @@ local THIRD_PERSON_ABOVE = 1.7 -- camera distance where the body is fully visibl
 local HEAD_TO_CHEST = Vector3.new(0, 1.6, 0) -- third person focus above the root part
 local SKIP_FRAMES_AFTER_LOCK = 2 -- ignore the mouse jump when the cursor locks again
 
-local HINT_LOCKED = 'Click <font color="#FFFF55">T</font> to <font color="#55FF55">Unlock Cursor</font>'
-local HINT_FREE = 'Click <font color="#FFFF55">T</font> to <font color="#55FF55">Lock Cursor</font>'
+-- view labels: rich text for the POV label per phase (the label's own TextColor3 is the main colour and eases between them;
+-- the gray brackets and coloured keyword are rich-text spans) and the two states of the Cursor label
+local POV_STYLE = {
+	{ text = "FIRST PERSON", color = Color3.fromRGB(85, 85, 255) },
+	{
+		text = 'THIRD PERSON <font color="#AAAAAA">(</font><font color="#FFAA00">OTS</font><font color="#AAAAAA">)</font>',
+		color = Color3.fromRGB(255, 85, 255),
+	},
+	{
+		text = 'THIRD PERSON <font color="#AAAAAA">(</font><font color="#55FF55">FREE</font><font color="#AAAAAA">)</font>',
+		color = Color3.fromRGB(170, 0, 170),
+	},
+}
+local CURSOR_LOCKED = '<font color="#55FF55">CURSOR LOCKED</font> (<font color="#FFFF55">T</font>)'
+local CURSOR_UNLOCKED = '<font color="#55FFFF">CURSOR UNLOCKED</font> (<font color="#FFFF55">T</font>)'
+local COLOR_EASE = TweenInfo.new(0.35, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+local FADE = TweenInfo.new(0.25, Enum.EasingStyle.Quad)
 
 -- ===================== STATE =====================
 local phase = 1
 local distance = PHASES[1].distance -- smoothed values
 local shoulder = PHASES[1].shoulder
+local fov = PHASES[1].fov
 local yaw, pitch = 0, 0
 local cursorFree = false -- toggled with T
 local rightMouseDown = false -- the free camera looks around while right mouse is held
@@ -120,37 +138,67 @@ if player.Character then
 	task.spawn(onCharacter, player.Character)
 end
 
--- ===================== HINT LABEL (hand-made in Studio) =====================
-local hintGroup: CanvasGroup? = nil
-local hintLabel: TextLabel? = nil
+-- ===================== VIEW LABELS (hand-made in Studio) =====================
+local viewGroup: CanvasGroup? = nil
+local povLabel: TextLabel? = nil
+local cursorLabel: TextLabel? = nil
+local cursorStroke: UIStroke? = nil
 task.spawn(function()
-	local gui = playerGui:WaitForChild("CursorHint", 10)
+	local gui = playerGui:WaitForChild("ViewMenu", 10)
 	if not gui then
-		warn("[CameraController] StarterGui.CursorHint is missing: no cursor hint will be shown")
+		warn("[CameraController] StarterGui.ViewMenu is missing: no view labels will be shown")
 		return
 	end
-	hintGroup = gui:WaitForChild("Hint") :: CanvasGroup
-	hintLabel = (hintGroup :: CanvasGroup):WaitForChild("Label") :: TextLabel
-	(hintLabel :: TextLabel).RichText = true
-	;(hintGroup :: CanvasGroup).GroupTransparency = 1
+	local group = gui:WaitForChild("View") :: CanvasGroup
+	local pov = group:WaitForChild("POV") :: TextLabel
+	local cursor = group:WaitForChild("Cursor") :: TextLabel
+	pov.RichText = true
+	cursor.RichText = true
+	cursorStroke = cursor:FindFirstChildOfClass("UIStroke")
+	group.GroupTransparency = 1
+	povLabel, cursorLabel, viewGroup = pov, cursor, group
 end)
 
-local hintShown: boolean? = nil
-local hintTween: Tween? = nil
-local function updateHint(show: boolean)
-	if not hintGroup or not hintLabel then
+local tweens: { [string]: Tween } = {}
+local function play(key: string, object: Instance, info: TweenInfo, goal: { [string]: any })
+	if tweens[key] then
+		tweens[key]:Cancel()
+	end
+	tweens[key] = TweenService:Create(object, info, goal)
+	tweens[key]:Play()
+end
+
+local shownGroup: boolean? = nil
+local shownCursor: boolean? = nil
+local shownPhase: number? = nil
+local shownCursorFree: boolean? = nil
+local function updateView(showGroup: boolean)
+	local group, pov, cursor = viewGroup, povLabel, cursorLabel
+	if not (group and pov and cursor) then
 		return
 	end
-	hintLabel.Text = cursorFree and HINT_FREE or HINT_LOCKED
-	if hintShown == show then
-		return
+	if shownGroup ~= showGroup then
+		shownGroup = showGroup
+		play("group", group, FADE, { GroupTransparency = showGroup and 0 or 1 })
 	end
-	hintShown = show
-	if hintTween then
-		hintTween:Cancel()
+	if shownPhase ~= phase then
+		shownPhase = phase
+		local style = POV_STYLE[phase]
+		pov.Text = style.text
+		play("povColor", pov, COLOR_EASE, { TextColor3 = style.color }) -- eases the main colour between perspectives
 	end
-	hintTween = TweenService:Create(hintGroup, TweenInfo.new(0.25, Enum.EasingStyle.Quad), { GroupTransparency = show and 0 or 1 })
-	hintTween:Play()
+	if shownCursorFree ~= cursorFree then
+		shownCursorFree = cursorFree
+		cursor.Text = cursorFree and CURSOR_UNLOCKED or CURSOR_LOCKED
+	end
+	local cursorVisible = phase ~= FREE_PHASE -- the free camera always has a free cursor, so T means nothing there
+	if shownCursor ~= cursorVisible then
+		shownCursor = cursorVisible
+		play("cursor", cursor, FADE, { TextTransparency = cursorVisible and 0 or 1 })
+		if cursorStroke then
+			play("cursorStroke", cursorStroke, FADE, { Transparency = cursorVisible and 0 or 1 })
+		end
+	end
 end
 
 -- ===================== INPUT =====================
@@ -249,6 +297,7 @@ local function updateCamera(dt: number)
 	local alpha = 1 - math.exp(-dt * BLEND_SPEED)
 	distance += (target.distance - distance) * alpha
 	shoulder += (target.shoulder - shoulder) * alpha
+	fov += (target.fov - fov) * alpha
 	if math.abs(distance - target.distance) < 0.005 then
 		distance = target.distance
 	end
@@ -271,6 +320,7 @@ local function updateCamera(dt: number)
 	end
 	camera.CFrame = CFrame.new(position) * rotation
 	camera.Focus = CFrame.new(focus)
+	camera.FieldOfView = fov
 
 	-- hide the body in first person (arms and held items stay), fade it back in as the camera pulls away
 	local fade = math.clamp((THIRD_PERSON_ABOVE - distance) / (THIRD_PERSON_ABOVE - FIRST_PERSON_BELOW), 0, 1)
@@ -308,5 +358,5 @@ RunService:BindToRenderStep("FIACursorLock", Enum.RenderPriority.Last.Value, fun
 	locked = shouldLock
 	UserInputService.MouseBehavior = behavior
 	UserInputService.MouseIconEnabled = not shouldLock
-	updateHint(phase == 1 and not MenuBridge.isOpen())
+	updateView(not MenuBridge.isOpen())
 end)
