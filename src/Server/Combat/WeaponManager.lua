@@ -24,6 +24,8 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 
 local WeaponRegistry = require(Modules:WaitForChild("WeaponRegistry")) :: any
+local CombatConfig = require(Modules:WaitForChild("CombatConfig")) :: any
+local RateLimiter = require(ServerScriptService:WaitForChild("RateLimiter")) :: any
 local AttributeStatManager = require(ServerScriptService:WaitForChild("AttributeStatManager")) :: any
 local SkillsDataManager = require(ServerScriptService:WaitForChild("SkillsDataManager")) :: any
 
@@ -46,12 +48,21 @@ local UnequipWeaponEvent = ensureRemote("RemoteEvent", "UnequipWeapon")
 local WeaponAbilityEvent = ensureRemote("RemoteEvent", "WeaponAbility")
 local WeaponHitEvent = ensureRemote("RemoteEvent", "WeaponHit")
 local UpdateWeaponStatsEvent = ensureRemote("RemoteEvent", "UpdateWeaponStats")
+local SwordSwingEvent = ensureRemote("RemoteEvent", "SwordSwing") -- client -> server: "I clicked"; server -> clients: (player, step, speed)
 
 -- ===================== RUNTIME STATE =====================
 -- [userId] = { weaponId, toolInstance, stats, abilities }
 local playerWeapons = {}
 -- [userId] = { [abilityName] = lastCastTime }
 local abilityDodges = {}
+
+-- ===================== COMBO STATE =====================
+-- [userId] = { step, busyUntil, expiresAt, ticket, slowed, baseSpeed }
+local combos = {}
+local SWING_SLACK = 0.1 -- network jitter allowance when a swing arrives just before the previous one has ended
+
+--- Assign `WeaponManager.onSwingHit = function(player, stepIndex, weaponId)` later: called at each swing's hit frame.
+--- (Damage and hit detection plug in here.)
 
 -- ===================== HELPERS =====================
 
@@ -119,6 +130,108 @@ local function getAbilityCooldown(player, abilityName, cooldown)
 	return math.max(0, cooldown - elapsed)
 end
 
+-- ===================== SWORD COMBO =====================
+local function getCombo(player)
+	local c = combos[player.UserId]
+	if not c then
+		c = { step = 0, busyUntil = 0, expiresAt = 0, ticket = 0, slowed = false, baseSpeed = 16 }
+		combos[player.UserId] = c
+	end
+	return c
+end
+
+local function restoreWalkSpeed(player, c)
+	if c.slowed then
+		c.slowed = false
+		local humanoid = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
+		if humanoid then
+			humanoid.WalkSpeed = c.baseSpeed
+		end
+	end
+end
+
+--- Drop the combo (weapon changed, death, leave): step 0, walk speed back.
+local function resetCombo(player)
+	local c = combos[player.UserId]
+	if not c then
+		return
+	end
+	c.ticket += 1
+	c.step = 0
+	c.busyUntil = 0
+	c.expiresAt = 0
+	restoreWalkSpeed(player, c)
+	player:SetAttribute("ComboStep", 0)
+end
+
+--- A click with the held weapon. Returns (accepted, stepIndex).
+function WeaponManager.TrySwing(player): (boolean, number?)
+	local weapon = playerWeapons[player.UserId]
+	local typeConfig = weapon and CombatConfig.get(weapon.config.weaponType)
+	local character = player.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	if not (typeConfig and humanoid) or humanoid.Health <= 0 then
+		return false, nil
+	end
+	if not character:FindFirstChild(weapon.config.toolName) then
+		return false, nil -- not actually in hand
+	end
+
+	local c = getCombo(player)
+	local now = os.clock()
+	if now < c.busyUntil - SWING_SLACK then
+		return false, nil -- still swinging
+	end
+
+	local stepCount = #typeConfig.steps
+	local stepIndex = (c.step >= stepCount or now > c.expiresAt) and 1 or c.step + 1
+	local step = typeConfig.steps[stepIndex]
+	local speed = math.max(0.5, weapon.stats.attackSpeed or 1)
+	local swingTime = CombatConfig.swingTime(step, speed)
+
+	c.ticket += 1
+	local ticket = c.ticket
+	c.step = stepIndex
+	c.busyUntil = now + swingTime
+	c.expiresAt = c.busyUntil + typeConfig.comboWindow
+	player:SetAttribute("ComboStep", stepIndex)
+
+	-- slower walking while swinging (the finisher is heavier)
+	if not c.slowed then
+		c.baseSpeed = humanoid.WalkSpeed
+		c.slowed = true
+	end
+	humanoid.WalkSpeed = c.baseSpeed * (stepIndex == stepCount and typeConfig.finisherMoveSpeedFactor or typeConfig.moveSpeedFactor)
+
+	SwordSwingEvent:FireAllClients(player, stepIndex, speed, weapon.config.weaponType, weapon.weaponId)
+
+	task.delay(step.hitFrame / speed, function()
+		local hook = (WeaponManager :: any).onSwingHit
+		if hook and c.ticket == ticket then
+			hook(player, stepIndex, weapon.weaponId)
+		end
+	end)
+	task.delay(swingTime, function()
+		if c.ticket == ticket then
+			restoreWalkSpeed(player, c)
+		end
+	end)
+	task.delay(swingTime + typeConfig.comboWindow, function()
+		if c.ticket == ticket then
+			c.step = 0
+			player:SetAttribute("ComboStep", 0)
+		end
+	end)
+	return true, stepIndex
+end
+
+local swingAllowed = RateLimiter.new(8, 6)
+SwordSwingEvent.OnServerEvent:Connect(function(player)
+	if swingAllowed(player) then
+		WeaponManager.TrySwing(player)
+	end
+end)
+
 -- ===================== EQUIP / UNEQUIP =====================
 
 --- Equip a weapon by its ID. Must be in player's inventory.
@@ -150,6 +263,7 @@ function WeaponManager.EquipWeapon(player, weaponId: string): boolean
 	if playerWeapons[player.UserId] then
 		WeaponManager.UnequipWeapon(player)
 	end
+	resetCombo(player)
 
 	-- Equip via Humanoid (nothing to do when the Tool is already in hand)
 	local humanoid = character:FindFirstChildOfClass("Humanoid")
@@ -200,6 +314,7 @@ function WeaponManager.UnequipWeapon(player): boolean
 
 	-- Clear state
 	playerWeapons[player.UserId] = nil
+	resetCombo(player)
 
 	-- Fire events
 	UnequipWeaponEvent:FireClient(player)
@@ -345,6 +460,7 @@ end
 local function onPlayerLeaving(player)
 	abilityDodges[player.UserId] = nil
 	playerWeapons[player.UserId] = nil
+	combos[player.UserId] = nil
 end
 
 Players.PlayerRemoving:Connect(onPlayerLeaving)

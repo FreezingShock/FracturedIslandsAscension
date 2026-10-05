@@ -93,6 +93,15 @@
         "CollectionsPageModule": {
           "$path": "src/Shared/Modules/Menu/Pages/CollectionsPageModule.lua"
         },
+        "CombatAnimator": {
+          "$path": "src/Shared/Modules/Combat/CombatAnimator.lua"
+        },
+        "CombatConfig": {
+          "$path": "src/Shared/Modules/Combat/CombatConfig.lua"
+        },
+        "CombatFX": {
+          "$path": "src/Shared/Modules/Combat/CombatFX.lua"
+        },
         "Config": {
           "$path": "src/Shared/Modules/Config"
         },

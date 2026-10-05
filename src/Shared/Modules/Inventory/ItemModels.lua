@@ -18,8 +18,23 @@ local ItemModels = {}
 ItemModels.SPRITE_SIZE = 2 -- studs (width and height of a sprite item)
 ItemModels.SPRITE_PIXELS = 16 -- sprite thickness = SPRITE_SIZE / SPRITE_PIXELS
 
+-- The pixel swords (Blender, assets/blender/swords): the mesh origin is the grip, which sits 1.17 studs below the
+-- Handle's centre (Roblox centres a mesh on its bounding box), so the grip offset moves the hand to the handle.
+-- Templates live in ServerStorage.ItemModels (SwordWood / Stone / Iron / Gold / Diamond; Wood and Stone are ready
+-- for items that do not exist yet).
+-- The grip is also rolled 90 degrees about the blade, so the FLAT side of the blade faces left/right like a
+-- Minecraft sword (seen from behind you see the thin edge).
+local PIXEL_SWORD_GRIP = {
+	pos = Vector3.new(0, -1.17, 0),
+	forward = Vector3.new(-1, 0, 0),
+	up = Vector3.new(0, 1, 0),
+	right = Vector3.new(0, 0, -1),
+}
+
 ItemModels.MODELS = {
-	sword_basic = { template = "BasicSword", scale = 0.55 },
+	sword_basic = { template = "SwordIron", grip = PIXEL_SWORD_GRIP }, -- Iron Sword (iron_sword icon)
+	solar_blade = { template = "SwordGold", grip = PIXEL_SWORD_GRIP }, -- Solar Blade (golden_sword icon)
+	sword_legendary = { template = "SwordDiamond", grip = PIXEL_SWORD_GRIP }, -- Excalibur (diamond_sword icon)
 }
 
 --- Grip applied to sprite Handles (unless the def's entry sets its own).

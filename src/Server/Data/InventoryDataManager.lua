@@ -82,7 +82,60 @@ local playerState = {} -- [userId] = { toolOrder, nextOrderIndex, hotbarSlots, g
 
 -- ===================== HELPERS =====================
 
---- Get all Tool-holding containers for a player.
+-- ===================== TOOL STASH (inventory survives death) =====================
+-- Roblox empties the Backpack when a character respawns, and this inventory IS the Tools. So when a character dies
+-- or is removed the Tools are parked in a server-only folder (ServerStorage._ToolStash/<userId>), counted as part
+-- of the inventory (saves and the UI keep seeing them), and moved into the new Backpack once it exists.
+local stashRoot = ServerStorage:FindFirstChild("_ToolStash")
+if not stashRoot then
+	stashRoot = Instance.new("Folder")
+	stashRoot.Name = "_ToolStash"
+	stashRoot.Parent = ServerStorage
+end
+
+local function getStash(player, create: boolean?)
+	local folder = stashRoot:FindFirstChild(tostring(player.UserId))
+	if not folder and create then
+		folder = Instance.new("Folder")
+		folder.Name = tostring(player.UserId)
+		folder.Parent = stashRoot
+	end
+	return folder
+end
+
+--- Park every Tool (Backpack + held) in the stash. Returns how many were moved.
+local function stashTools(player): number
+	local stash = getStash(player, true)
+	local moved = 0
+	for _, container in ipairs({ player:FindFirstChildOfClass("Backpack"), player.Character }) do
+		if container then
+			for _, child in ipairs(container:GetChildren()) do
+				if child:IsA("Tool") then
+					child.Parent = stash
+					moved += 1
+				end
+			end
+		end
+	end
+	return moved
+end
+
+--- Move the stashed Tools into the current Backpack. Returns how many were moved (0 = nothing to restore).
+local function restoreTools(player): number
+	local stash = getStash(player, false)
+	local backpack = player:FindFirstChildOfClass("Backpack")
+	if not stash or not backpack then
+		return 0
+	end
+	local moved = 0
+	for _, child in ipairs(stash:GetChildren()) do
+		child.Parent = backpack
+		moved += 1
+	end
+	return moved
+end
+
+--- Get all Tool-holding containers for a player (the stash counts: those Tools are still the player's).
 local function getContainers(player)
 	local containers = {}
 	local backpack = player:FindFirstChild("Backpack")
@@ -91,6 +144,10 @@ local function getContainers(player)
 	end
 	if player.Character then
 		table.insert(containers, player.Character)
+	end
+	local stash = getStash(player, false)
+	if stash then
+		table.insert(containers, stash)
 	end
 	return containers
 end
@@ -1117,17 +1174,33 @@ local function onPlayerReady(player)
 	loadInventoryFromProfile(player)
 	task.wait(0.1)
 
-	-- Wire ChildAdded/Removed listeners for live updates
-	local backpack = player:WaitForChild("Backpack")
-	backpack.ChildAdded:Connect(function(child)
-		if child:IsA("Tool") then
-			InventoryDataManager.SendUpdate(player)
+	-- Wire ChildAdded/Removed listeners for live updates (a respawn can hand the player a NEW Backpack)
+	local function wireBackpack(backpack)
+		backpack.ChildAdded:Connect(function(child)
+			if child:IsA("Tool") then
+				InventoryDataManager.SendUpdate(player)
+			end
+		end)
+		backpack.ChildRemoved:Connect(function(child)
+			if child:IsA("Tool") then
+				InventoryDataManager.SendUpdate(player)
+			end
+		end)
+	end
+	wireBackpack(player:WaitForChild("Backpack"))
+	player.ChildAdded:Connect(function(child)
+		if child:IsA("Backpack") then
+			wireBackpack(child)
+			task.defer(function()
+				if restoreTools(player) > 0 then
+					InventoryDataManager.SendUpdate(player)
+				end
+			end)
 		end
 	end)
-	backpack.ChildRemoved:Connect(function(child)
-		if child:IsA("Tool") then
-			InventoryDataManager.SendUpdate(player)
-		end
+	-- the Tools are parked when the character is removed (reset / LoadCharacter) or dies, and restored below
+	player.CharacterRemoving:Connect(function()
+		stashTools(player)
 	end)
 
 	-- Also listen on character for equip/unequip
@@ -1139,11 +1212,23 @@ local function onPlayerReady(player)
 			fresh.drawing = false
 			fresh.heldAt = nil
 		end
+		task.delay(0.25, function()
+			if playerState[player.UserId] and restoreTools(player) > 0 then
+				InventoryDataManager.SendUpdate(player)
+			end
+		end)
 		task.delay(0.6, function()
 			if playerState[player.UserId] then
 				InventoryDataManager.SendUpdate(player)
 			end
 		end)
+		local humanoid = char:FindFirstChildOfClass("Humanoid") or char:WaitForChild("Humanoid", 5)
+		if humanoid then
+			humanoid.Died:Connect(function()
+				stashTools(player) -- park the Tools before the engine empties the Backpack
+				InventoryDataManager.SendUpdate(player)
+			end)
+		end
 		char.ChildAdded:Connect(function(child)
 			if child:IsA("Tool") then
 				InventoryDataManager.SendUpdate(player)
@@ -1187,6 +1272,12 @@ local function onPlayerLeaving(player)
 	saveInventoryToProfile(player) -- no-op if SkillsDataManager already released the profile (its hook saved first)
 	playerState[player.UserId] = nil
 	trashBin[player.UserId] = nil
+	task.delay(10, function() -- after the profile hook has saved
+		local stash = getStash(player, false)
+		if stash then
+			stash:Destroy()
+		end
+	end)
 	lastDropAt[player.UserId] = nil
 end
 

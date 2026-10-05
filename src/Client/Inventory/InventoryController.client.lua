@@ -1728,6 +1728,59 @@ MenuBridge._refreshInventory = function()
 	refreshInventory()
 end
 
+-- ===================== PRELOAD ITEM ASSETS =====================
+-- Meshes and textures of every Tool the player owns are loaded as soon as the Tool shows up (join, pickup,
+-- respawn), long before it is first drawn, so equipping never waits for a download. The parts are kept in a
+-- table so the loaded content stays referenced for the whole session.
+local ContentProvider = game:GetService("ContentProvider")
+local preloadedKeys = {} -- "meshId|textureId" -> true
+local preloadHold = {} -- strong references
+
+local function preloadTool(tool: Instance)
+	local batch = {}
+	for _, d in ipairs(tool:GetDescendants()) do
+		if d:IsA("MeshPart") then
+			local key = d.MeshId .. "|" .. d.TextureID
+			if not preloadedKeys[key] then
+				preloadedKeys[key] = true
+				table.insert(batch, d)
+				table.insert(preloadHold, d)
+			end
+		end
+	end
+	if #batch > 0 then
+		task.spawn(function()
+			pcall(ContentProvider.PreloadAsync, ContentProvider, batch)
+		end)
+	end
+end
+
+local function watchToolContainer(container: Instance)
+	for _, child in ipairs(container:GetChildren()) do
+		if child:IsA("Tool") then
+			preloadTool(child)
+		end
+	end
+	container.ChildAdded:Connect(function(child)
+		if child:IsA("Tool") then
+			preloadTool(child)
+		end
+	end)
+end
+
+task.spawn(function()
+	watchToolContainer(player:WaitForChild("Backpack"))
+end)
+player.ChildAdded:Connect(function(child)
+	if child:IsA("Backpack") then
+		watchToolContainer(child)
+	end
+end)
+if player.Character then
+	watchToolContainer(player.Character)
+end
+player.CharacterAdded:Connect(watchToolContainer)
+
 -- ===================== INITIAL STATE =====================
 createHotbarSlots()
 for i = 1, MAX_HOTBAR do

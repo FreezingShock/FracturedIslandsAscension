@@ -106,6 +106,11 @@ local function addModelHandle(tool: Tool, entry: any): boolean
 			part.Anchored = false
 			part.CanCollide = false
 			part.Massless = true
+			if part:IsA("MeshPart") then
+				pcall(function()
+					part.DoubleSided = true -- visible from both sides (thin pixel meshes)
+				end)
+			end
 			if part ~= handle then
 				local weld = Instance.new("WeldConstraint")
 				weld.Part0 = handle
