@@ -29,6 +29,7 @@ Naming: `*.client.lua` = LocalScript, `*.server.lua` = Script, plain `.lua` = Mo
 - **Subagent:** `lua-explorer` (read-only code search). Verification runs inline via `/fia-verify`; reviews use `/code-review` for large features.
 - **Review checklist:** async callbacks that mutate reused state check `PlaybackState`/generation (tween `Completed` fires on Cancel); saved-data changes backfill via `Reconcile`; server never trusts client values; new RemoteEvents type-check inputs; GUI is looked up by name, so renames break scripts; script names are unique per realm.
 - **Hooks:** blocks hand edits to generated files; regenerates `default.project.json` when a script is added; Stop is blocked while the project file is stale; a small context pack loads at session start.
+- **How Nate drives it:** `/fia-ideate <topic list>` -> answers 3-4 questions -> pastes the `/fia-feature` prompt -> "connected, verify it" (or tests it himself) -> small follow-ups. Once a change is verified, commit + push to `main` + vault session log happen automatically (his call, 2026-10-04); never ship unverified or failing code. Specs always state config shape (library -> type -> override), out of scope, and verification.
 - **Token rules:** never call `get_console_output` (use `/fia-verify`); `Grep`/partial reads instead of whole files; text assertions over screenshots; `/clear` between features.
 - Install the skills user-wide with `python tools/install_skills.py`; validate with `python tools/check_skills.py`.
 
@@ -53,12 +54,12 @@ Naming: `*.client.lua` = LocalScript, `*.server.lua` = Script, plain `.lua` = Mo
 
 ## Vault memory workflow (Obsidian second brain)
 The `obsidian-second-brain` MCP (`mcp__plugin_obsidian-second-brain_vault__*`) is this project's long-term memory and log. Vault paths are relative to `FracturedVault`; use the real `✦`/`✷` characters, never copy-pasted ones.
-- **Session start:** `obsidian_read_note` on `8 - Claude/agents/game-dev.md` (current focus + newest session entry) and the **Codebase & Systems Registry** section of `8 - Claude/projects/fractured-islands.md`. Design intent lives in `8 - Claude/projects/fractured-islands-master-hub.md`.
+- **Session start:** the SessionStart pack already shows the newest session entry; read `8 - Claude/agents/game-dev.md` (current focus) only if needed and the **Codebase & Systems Registry** section of `8 - Claude/projects/fractured-islands.md`. Design intent lives in `8 - Claude/projects/fractured-islands-master-hub.md`.
 - **During work:** if the vault and the code disagree, trust the code for what exists and add the disagreement to the Registry's "Open conflicts" list. Do not rewrite design text or anything in `2 - Creations/` without Nate's explicit go-ahead.
-- **Session end:** update only the Registry rows that changed (`obsidian_replace_text`), append a dated entry to `game-dev.md` (`obsidian_update_note`, heading `Session Log`), and put durable lessons/blockers in `8 - Claude/memory/projects/fractured-islands.md`. Extend existing notes; do not create new vault documentation files.
+- **Session end:** update only the Registry rows that changed (`obsidian_replace_text`), append a dated entry to the current month's log `8 - Claude/agents/game-dev-log-YYYY-MM.md` (`obsidian_update_note` with `append`, no heading, never read the note first; oldest first, newest at the bottom; a new month = a new note with the same header), and put durable lessons/blockers in `8 - Claude/memory/projects/fractured-islands.md`. Extend existing notes; do not create new vault documentation files.
 - Main thread only; no subagents for vault writes.
 
 ## Working agreements
-- Don't commit or push unless asked. Commit messages follow the repo's style: `3.31.1 - Short description of changes`.
+- Commit and push to `main` automatically once a change is verified (standing instruction, 2026-10-04); otherwise don't. Commit messages follow the repo's style: `3.31.1 - Short description of changes`.
 - Prefer editing existing modules over adding new ones; follow the `init/open/close/reset` page-module contract.
 - Verify UI changes in a playtest (`start_stop_play`, `get_console_output`, `screen_capture`) before calling them done.

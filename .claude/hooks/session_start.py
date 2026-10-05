@@ -35,13 +35,13 @@ if counts:
 
 # Latest session-log entry from the vault, if reachable on this machine.
 vault = os.environ.get("OBSIDIAN_VAULT_PATH") or os.path.expanduser(r"~\Documents\Obsidian\FracturedVault")
-note = os.path.join(vault, "8 - Claude", "agents", "game-dev.md")
-if os.path.exists(note):
-    text = open(note, encoding="utf-8").read()
-    m = re.search(r"### Session: .*?(?=\n### Session: |\Z)", text, re.S)
-    if m:
-        entry = m.group(0).splitlines()
-        lines.append("Last vault session entry (agents/game-dev.md):")
+logs = sorted(glob.glob(os.path.join(vault, "8 - Claude", "agents", "game-dev-log-*.md")))
+if logs:
+    text = open(logs[-1], encoding="utf-8").read()
+    entries = re.findall(r"### Session: .*?(?=\n### Session: |\Z)", text, re.S)  # oldest first: the newest entry is last
+    if entries:
+        entry = entries[-1].splitlines()
+        lines.append(f"Last vault session entry ({os.path.basename(logs[-1])}):")
         lines.append("  " + entry[0][:120])
         for l in entry[1:]:
             if l.startswith("- **Next Steps:**") or l.startswith("- **Blockers"):

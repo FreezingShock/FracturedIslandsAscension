@@ -1,7 +1,6 @@
 ---
 name: fia-ship
-description: Wrap up a work session - commit with the repo's version-title convention, update the vault registry and session log, and push to `main`. Manual only. Use at the end of a feature or session.
-disable-model-invocation: true
+description: Wrap up a work session - commit with the repo's version-title convention, update the vault registry and session log, and push to `main`. Runs automatically at the end of /fia-feature once the change is verified, or on request.
 ---
 
 # /fia-ship
@@ -14,11 +13,13 @@ disable-model-invocation: true
 3. **Vault** (only if the vault path exists; use the MCP, never recreate notes):
    - `obsidian_replace_text` on the touched **registry rows** in `8 - Claude/projects/fractured-islands.md`
      (what changed, new modules, new gotchas).
-   - `obsidian_replace_text` to insert a new `### Session:` entry at the top of the Session Log in
-     `8 - Claude/agents/game-dev.md` using its template (Topic, Work Completed, Blockers, Decisions, Next Steps).
+   - `obsidian_update_note` (`append`, no heading) to add a `### Session:` entry to the current month's
+     `8 - Claude/agents/game-dev-log-YYYY-MM.md` (Topic, Work Completed, Blockers, Decisions, Next Steps). Oldest first,
+     newest at the bottom; never read the note first (~30k chars); append blind. Automatic (the user's call, 2026-10-04); skip only when
+     the Obsidian MCP is disconnected and say the log is pending.
    - Durable lessons only -> `8 - Claude/memory/projects/fractured-islands.md` (append).
    - A correction or preference the user stated -> also save it to memory (capture every correction).
 4. **Push** straight to `main`: `git push origin main`. No feature branches and no PRs (the user's call, 2026-10-03).
    Never force-push.
 5. **Report in <=8 lines:** commits (hashes+titles), pushed yes/no, vault updated yes/no, user to-dos
-   (save the place with Ctrl+S, restart Rojo, etc.).
+   (restart Rojo, etc.).
