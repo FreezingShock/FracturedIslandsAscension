@@ -50,6 +50,7 @@ local FILE_CATEGORY = {
 	Materials = "material",
 	Consumables = "consumable",
 	Debug = "misc",
+	Core = "misc",
 }
 
 function Items.register(id: string, spec: any, category: string?)

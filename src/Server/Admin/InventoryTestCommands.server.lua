@@ -213,6 +213,7 @@ COMMANDS.reset = {
 			if invData then
 				invData.hotbarSlots = {}
 			end
+			InventoryDataManager.EnsurePinned(player) -- the Nexus Star always comes back
 			InventoryDataManager.SendUpdate(player)
 		end
 		say(player, "Reset " .. what)

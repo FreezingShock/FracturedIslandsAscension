@@ -203,6 +203,13 @@ local function keyFor(base: string, idx: number): string
 	return idx == 1 and base or (base .. "#" .. idx)
 end
 
+--- Pinned items (def.pinSlot, e.g. the Nexus Star) live in one hotbar slot for good: they cannot be moved, swapped,
+--- dropped or trashed, and nothing else may take their slot.
+local function pinSlotOf(toolName: string): number?
+	local def = ItemRegistry.getByToolName(toolName)
+	return def and def.pinSlot or nil
+end
+
 --- Inventory entries, one per slot-able stack: [key] = { count, rarity, base }
 local function countEntries(player)
 	local result = {}
@@ -236,6 +243,7 @@ local function buildToolInfo(key, info)
 		count = info.count,
 		unstackable = stackLimit(toolName) == 1, -- the client hides the "1x" label on these
 		equippable = regItem == nil or regItem.equippable ~= false,
+		pinned = regItem ~= nil and regItem.pinSlot ~= nil, -- the client skips dragging for these
 		rarity = rarity,
 		description = description,
 		category = regItem and regItem.category or nil,
@@ -505,7 +513,8 @@ function InventoryDataManager.AddItem(player, toolName: string, count: number): 
 		clone.Parent = backpack
 	end
 
-	-- New stacks: first empty hotbar item slot (1..8, 9 is the menu), then the first empty grid slot
+	-- New stacks: a pinned item goes to its slot; others take the selected / first empty hotbar slot (1..8, slot 9
+	-- belongs to the Nexus Star), then the first empty grid slot
 	local state = playerState[player.UserId]
 	if state then
 		local limit = stackLimit(toolName)
@@ -514,7 +523,11 @@ function InventoryDataManager.AddItem(player, toolName: string, count: number): 
 			if not findGridSlotForTool(state, key) and not findHotbarSlotForTool(state, key) then
 				local hotbarSlot
 				local selected = state.selected
-				if selected and not state.hotbarSlots[selected] then
+				local pin = pinSlotOf(toolName)
+				if pin then
+					hotbarSlot = pin
+					state.hotbarSlots[pin] = nil -- whatever sat there goes back to the inventory (autoFillGrid)
+				elseif selected and selected < MAX_HOTBAR_SLOTS and not state.hotbarSlots[selected] then
 					hotbarSlot = selected -- lands in the (empty) selected slot and is drawn at once
 				else
 					for i = 1, MAX_HOTBAR_SLOTS - 1 do
@@ -623,8 +636,8 @@ local lastDropAt = {} -- [userId] = os.clock()
 
 local function dropItem(player, key: string, all: boolean?): boolean
 	local entry = countEntries(player)[key]
-	if not entry then
-		return false
+	if not entry or pinSlotOf(entry.base) then
+		return false -- not owned, or pinned (the Nexus Star cannot be dropped)
 	end
 	local toolName = entry.base
 	local character = player.Character
@@ -693,8 +706,8 @@ end
 --- Delete the whole stack in slot `key` (replacing whatever the trash slot held before).
 local function trashItem(player, key: string): boolean
 	local entry = countEntries(player)[key]
-	if not entry then
-		return false -- not owned: nothing to trash
+	if not entry or pinSlotOf(entry.base) then
+		return false -- not owned (nothing to trash), or pinned (the Nexus Star cannot be trashed)
 	end
 	local toolName = entry.base
 	local character = player.Character
@@ -800,10 +813,11 @@ local function drawKey(player, key: string): boolean
 	return false
 end
 
---- Select hotbar slot 1..8. Like Minecraft one slot is always selected: an empty slot means an empty hand.
+--- Select hotbar slot 1..9 (9 holds the Nexus Star). Like Minecraft one slot is always selected: an empty slot means
+--- an empty hand.
 local function selectSlot(player, slot): boolean
 	local state = playerState[player.UserId]
-	if not state or type(slot) ~= "number" or slot ~= slot or slot % 1 ~= 0 or slot < 1 or slot > MAX_HOTBAR_SLOTS - 1 then
+	if not state or type(slot) ~= "number" or slot ~= slot or slot % 1 ~= 0 or slot < 1 or slot > MAX_HOTBAR_SLOTS then
 		return false
 	end
 	state.selected = slot
@@ -860,7 +874,7 @@ local function equipByName(player, key: string): boolean
 	if not state then
 		return false
 	end
-	for i = 1, MAX_HOTBAR_SLOTS - 1 do
+	for i = 1, MAX_HOTBAR_SLOTS do
 		if state.hotbarSlots[i] == key then
 			return selectSlot(player, i)
 		end
@@ -879,6 +893,9 @@ local function swapItems(player, sourceName: string, targetName: string): boolea
 	local tools = countEntries(player)
 	if not tools[sourceName] or not tools[targetName] then
 		return false
+	end
+	if pinSlotOf(baseOf(sourceName)) or pinSlotOf(baseOf(targetName)) then
+		return false -- pinned items never move
 	end
 
 	-- Locate each tool: hotbar, grid, or overflow (nil for both)
@@ -967,6 +984,12 @@ local function assignHotbar(player, slotIndex: number, toolName: string): boolea
 		return false
 	end
 
+	-- Slot 9 only ever holds the pinned Nexus Star, and a pinned item only ever sits in its own slot
+	local pin = pinSlotOf(baseOf(toolName))
+	if (pin and slotIndex ~= pin) or (not pin and slotIndex == MAX_HOTBAR_SLOTS) then
+		return false
+	end
+
 	-- Remove from any existing hotbar slot
 	for i = 1, MAX_HOTBAR_SLOTS do
 		if state.hotbarSlots[i] == toolName then
@@ -1002,7 +1025,7 @@ local function assignGridSlot(player, gridIndex: number, toolName: string): bool
 
 	-- Validate tool exists
 	local tools = countEntries(player)
-	if not tools[toolName] then
+	if not tools[toolName] or pinSlotOf(baseOf(toolName)) then
 		return false
 	end
 
@@ -1039,7 +1062,7 @@ local function moveToEnd(player, toolName: string): boolean
 
 	-- Find and clear the hotbar slot
 	local hotbarIdx = findHotbarSlotForTool(state, toolName)
-	if not hotbarIdx then
+	if not hotbarIdx or pinSlotOf(baseOf(toolName)) then
 		return false
 	end
 
@@ -1054,6 +1077,29 @@ local function moveToEnd(player, toolName: string): boolean
 
 	InventoryDataManager.SendUpdate(player)
 	return true
+end
+
+-- ===================== PINNED ITEMS =====================
+--- Give the player every pinned item they are missing (the Nexus Star) and put each in its slot. Called when the
+--- inventory loads and after an admin /clear; the caller sends the update.
+function InventoryDataManager.EnsurePinned(player)
+	local state = playerState[player.UserId]
+	if not state then
+		return
+	end
+	for _, def in ipairs(ItemRegistry.list()) do
+		if def.pinSlot then
+			if not countTools(player)[def.toolName] then
+				InventoryDataManager.AddItem(player, def.toolName, 1) -- placed in its slot by AddItem
+			else
+				local gridIdx = findGridSlotForTool(state, def.toolName)
+				if gridIdx then
+					state.gridSlots[gridIdx] = nil
+				end
+				state.hotbarSlots[def.pinSlot] = def.toolName
+			end
+		end
+	end
 end
 
 -- ===================== SAVE INVENTORY TO PROFILE =====================
@@ -1245,6 +1291,8 @@ local function onPlayerReady(player)
 		wireCharacter(player.Character)
 	end
 	player.CharacterAdded:Connect(wireCharacter)
+
+	InventoryDataManager.EnsurePinned(player) -- the Nexus Star, slot 9
 
 	-- Start with the first filled hotbar slot selected (slot 1 when the hotbar is empty)
 	local st = playerState[player.UserId]

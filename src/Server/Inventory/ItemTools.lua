@@ -30,6 +30,9 @@ local function stamp(tool: Tool, def: any)
 	if def.category == "weapon" then
 		tool:SetAttribute("WeaponId", def.id) -- WeaponInit / WeaponManager key
 	end
+	if def.onUse then
+		tool:SetAttribute("OnUse", def.onUse) -- what a left click does while held (client: InventoryController)
+	end
 end
 
 local function applyGrip(tool: Tool, grip: any)

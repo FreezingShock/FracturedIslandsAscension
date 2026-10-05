@@ -122,7 +122,7 @@ local transferBG = transferFrame:WaitForChild("BG")
 -- ===================== CONSTANTS =====================
 local GRID_SLOTS = 27
 local MAX_HOTBAR = 9
-local MENU_SLOT = 9 -- Slot 9 is permanently "Menu"
+local PIN_SLOT = 9 -- slot 9 holds the Nexus Star: a pinned, equippable item (left click with it opens the menu)
 
 -- ===================== TWEEN CONFIG =====================
 local TWEEN_QUINT = TweenInfo.new(0.4, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
@@ -399,20 +399,6 @@ local function renderSlotFilled(slotFrame, toolInfo, isHovered)
 	slotFrame.Swap.Visible = false
 end
 
--- ===================== SLOT 9 — PERMANENT MENU BUTTON =====================
-local function setupMenuSlot(slotFrame)
-	local mythicConf = ItemRegistry.getRarity(6) -- Mythic
-	slotFrame.ToolName.Text = "Menu"
-	slotFrame.StackNum.Text = ""
-	slotFrame.RarityLabel.Text = mythicConf.display
-	slotFrame.RarityLabel.TextColor3 = mythicConf.color
-	slotFrame.UIStroke.Color = mythicConf.color
-	slotFrame.BackgroundColor3 = mythicConf.bgColor
-	slotFrame.BackgroundTransparency = 0.3
-	slotFrame.SlotNum.Text = "C"
-	slotFrame.Visible = true
-end
-
 -- ===================== HOTBAR SLOT CREATION (once) =====================
 local function createHotbarSlots()
 	for i = 1, MAX_HOTBAR do
@@ -431,13 +417,7 @@ local function createHotbarSlots()
 		}
 		hotbarSlots[i] = slotData
 		TooltipModule.registerHover(newSlot, function()
-			if i == MENU_SLOT then
-				TooltipModule.show({
-					title = '<font color="#FFFF55"><b>Menu</b></font>',
-					desc = '<font color="#AAAAAA">Open the Nexus Menu and inventory.</font>',
-					click = '<font color="#FFFF55">Click to view!</font>',
-				}, TOOLTIP_SOURCE)
-			elseif slotData.toolInfo then
+			if slotData.toolInfo then
 				showItemTooltip(slotData.toolInfo)
 			end
 		end)
@@ -449,43 +429,20 @@ local function createHotbarSlots()
 				color = Color3.fromRGB(255, 255, 255),
 			},
 		})
-		if i == MENU_SLOT then
-			-- ── Menu button: always visible, special styling ──
-			setupMenuSlot(newSlot)
+		-- every slot is a normal item slot; slot 9 simply holds the pinned Nexus Star
+		newSlot.MouseEnter:Connect(function()
+			slotData.hovered = true
+			updateSlotVisual(newSlot, slotData.toolInfo, isSelectedSlot(i), true)
+			if slotData.toolInfo then
+				showItemTooltip(slotData.toolInfo)
+			end
+		end)
 
-			newSlot.MouseEnter:Connect(function()
-				slotData.hovered = true
-				local mythicConf = ItemRegistry.getRarity(6)
-				newSlot.BackgroundColor3 = mythicConf.bgColor:Lerp(WHITE, LIGHTEN_FACTOR)
-				TooltipModule.show({
-					title = '<font color="#FFFF55"><b>Menu</b></font>',
-					desc = '<font color="#AAAAAA">Open the Nexus Menu and inventory.</font>',
-					click = '<font color="#FFFF55">Click to view!</font>',
-				}, TOOLTIP_SOURCE)
-			end)
-
-			newSlot.MouseLeave:Connect(function()
-				slotData.hovered = false
-				local mythicConf = ItemRegistry.getRarity(6)
-				newSlot.BackgroundColor3 = mythicConf.bgColor
-				hideItemTooltip()
-			end)
-		else
-			-- ── Normal item slot ──
-			newSlot.MouseEnter:Connect(function()
-				slotData.hovered = true
-				updateSlotVisual(newSlot, slotData.toolInfo, isSelectedSlot(i), true)
-				if slotData.toolInfo then
-					showItemTooltip(slotData.toolInfo)
-				end
-			end)
-
-			newSlot.MouseLeave:Connect(function()
-				slotData.hovered = false
-				updateSlotVisual(newSlot, slotData.toolInfo, isSelectedSlot(i), false)
-				hideItemTooltip()
-			end)
-		end
+		newSlot.MouseLeave:Connect(function()
+			slotData.hovered = false
+			updateSlotVisual(newSlot, slotData.toolInfo, isSelectedSlot(i), false)
+			hideItemTooltip()
+		end)
 	end
 end
 
@@ -638,7 +595,7 @@ local hotbarShowAllPref = false -- mirrors server-saved preference
 -- dragOverride=true forces all slots visible (drag in progress).
 local function applyHotbarVisibility(dragOverride)
 	local showAll = dragOverride or hotbarShowAllPref
-	for i = 1, MAX_HOTBAR - 1 do
+	for i = 1, MAX_HOTBAR do
 		local slotData = hotbarSlots[i]
 		if showAll then
 			slotData.frame.Visible = true
@@ -649,7 +606,7 @@ local function applyHotbarVisibility(dragOverride)
 	end
 end
 
--- Show all 8 item hotbar slots (not slot 9) during drag
+-- Show every hotbar slot during a drag
 local function _showAllHotbarSlots()
 	applyHotbarVisibility(true) -- drag override = force all visible
 end
@@ -813,7 +770,6 @@ reconcileHover = function()
 		showItemTooltip(slotData.toolInfo)
 	elseif
 		TooltipModule.isActiveSource(TOOLTIP_SOURCE)
-		and not hotbarSlots[MENU_SLOT].hovered
 		and not (trashSlot and trashSlot.hovered)
 	then
 		hideItemTooltip() -- the slot under the cursor is empty now
@@ -823,12 +779,6 @@ end
 -- ===================== REFRESH DISPLAY =====================
 local function refreshHotbar()
 	for i = 1, MAX_HOTBAR do
-		if i == MENU_SLOT then
-			-- Menu slot is always visible and never changes from server data
-			setupMenuSlot(hotbarSlots[i].frame)
-			continue
-		end
-
 		local slotData = hotbarSlots[i]
 		local toolInfo = currentHotbarData[i]
 		local hasItem = (type(toolInfo) == "table" and toolInfo.name ~= nil)
@@ -1400,15 +1350,6 @@ local function wireHotbarSlotInput(slotIndex)
 	local slotData = hotbarSlots[slotIndex]
 	local selectBtn = slotData.frame:WaitForChild("Select")
 
-	if slotIndex == MENU_SLOT then
-		-- ── Menu button click → open full Nexus menu ──
-		selectBtn.MouseButton1Down:Connect(function()
-			UIClick:Play()
-			MenuBridge.openFullMenu()
-		end)
-		return
-	end
-
 	selectBtn.MouseButton2Down:Connect(function()
 		rightClickEquip(slotData.toolInfo, "hotbar", slotIndex)
 	end)
@@ -1422,6 +1363,14 @@ local function wireHotbarSlotInput(slotIndex)
 				end
 				clearMobileSelection()
 			end
+			return
+		end
+
+		if slotData.toolInfo.pinned then
+			-- the Nexus Star never moves: a click just selects (holds) it
+			task.spawn(function()
+				EquipToolFunc:InvokeServer(slotIndex)
+			end)
 			return
 		end
 
@@ -1590,7 +1539,7 @@ end)
 RequestInventoryEvent:FireServer()
 
 -- ===================== MOUSE WHEEL HOTBAR SELECT =====================
--- Like Minecraft: the wheel cycles the selected slot (1..8) while the cursor is locked to the game view.
+-- Like Minecraft: the wheel cycles the selected slot (1..9) while the cursor is locked to the game view.
 local lastWheelAt = 0
 UserInputService.InputChanged:Connect(function(input, gameProcessed)
 	if input.UserInputType ~= Enum.UserInputType.MouseWheel or gameProcessed then
@@ -1605,7 +1554,7 @@ UserInputService.InputChanged:Connect(function(input, gameProcessed)
 	end
 	lastWheelAt = now
 	local step = input.Position.Z > 0 and -1 or 1 -- wheel up = previous slot
-	local slot = ((currentSelected - 1 + step) % (MAX_HOTBAR - 1)) + 1
+	local slot = ((currentSelected - 1 + step) % MAX_HOTBAR) + 1
 	currentSelected = slot -- optimistic: the server confirms with the next update
 	refreshHotbar()
 	task.spawn(function()
@@ -1624,7 +1573,6 @@ local keyToSlot = {
 	[Enum.KeyCode.Seven] = 7,
 	[Enum.KeyCode.Eight] = 8,
 	[Enum.KeyCode.Nine] = 9,
-	[Enum.KeyCode.C] = 9,
 }
 
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
@@ -1661,15 +1609,15 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
 		return
 	end
 
+	-- C → open the full Nexus menu + inventory (the Nexus Star does the same on left click)
+	if key == Enum.KeyCode.C then
+		MenuBridge.openFullMenu()
+		return
+	end
+
 	-- Number keys → equip hotbar slot
 	local slotIndex = keyToSlot[key]
 	if slotIndex then
-		if slotIndex == MENU_SLOT then
-			-- Key 9 → open full menu (same as clicking slot 9)
-			MenuBridge.openFullMenu()
-			return
-		end
-
 		if mobileSelectedName then
 			local targetInfo = currentHotbarData[slotIndex]
 			if type(targetInfo) == "table" and targetInfo.name and targetInfo.name ~= mobileSelectedName then
@@ -1684,6 +1632,21 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
 		else
 			EquipToolFunc:InvokeServer(slotIndex)
 		end
+	end
+end)
+
+-- ===================== NEXUS STAR: LEFT CLICK OPENS THE MENU =====================
+-- A held tool with OnUse = "nexusMenu" (item def `onUse`): a left click in the game view opens the Nexus Menu and the
+-- inventory. Clicks on GUI are filtered by gameProcessed, and nothing happens while a menu is already open.
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+	if gameProcessed or input.UserInputType ~= Enum.UserInputType.MouseButton1 or MenuBridge.isOpen() then
+		return
+	end
+	local character = player.Character
+	local held = character and character:FindFirstChildOfClass("Tool")
+	if held and held:GetAttribute("OnUse") == "nexusMenu" then
+		UIClick:Play()
+		MenuBridge.openFullMenu()
 	end
 end)
 

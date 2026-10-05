@@ -46,6 +46,7 @@ ICONS = {
     "lapis_lazuli": "Lapis_Lazuli",
     "lead": "Lead",
     "amethyst_shard": "Amethyst_Shard",
+    "nether_star": "Nether_Star",  # the Nexus Star (hotbar slot 9)
 }
 
 

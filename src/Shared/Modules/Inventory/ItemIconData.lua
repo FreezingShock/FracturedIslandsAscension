@@ -18,6 +18,7 @@ return {
 	lapis_lazuli = "rbxassetid://81484950038697",
 	lead = "rbxassetid://79786146836076",
 	leather = "rbxassetid://122045117880247",
+	nether_star = "rbxassetid://123291085202857",
 	stick = "rbxassetid://116855299256097",
 	wooden_spear = "rbxassetid://90993122828921",
 }

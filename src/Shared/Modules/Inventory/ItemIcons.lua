@@ -39,6 +39,7 @@ local ALIASES: { [string]: any } = {
 	swift_gloves = "leather",
 	sapphire_amulet = "lapis_lazuli",
 	warriors_belt = "lead",
+	nexus_star = "nether_star",
 	rarity_test_0 = { key = "amethyst_shard", tint = "rarity" },
 	rarity_test_1 = { key = "amethyst_shard", tint = "rarity" },
 	rarity_test_2 = { key = "amethyst_shard", tint = "rarity" },

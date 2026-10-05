@@ -30,6 +30,9 @@
 	  model        optional: ItemModels key (default = item id); see ItemModels.lua
 	  custom       reserved for per-item customization (string); carried on the Tool and drops
 	  maxStack, toolName
+pinSlot      hotbar slot (1-9) the item lives in permanently: given to every player, cannot be moved, dropped or
+			trashed (the Nexus Star is pinned to slot 9)
+onUse        what a left click does while the item is held; "nexusMenu" opens the Nexus Menu + inventory
 	  equippable   true = right click holds / wears it (default: weapon, armor, accessory, consumable)
 --]]
 
@@ -124,6 +127,8 @@ function Define.item(id: string, spec: any, category: string?): any
 		icon = spec.icon or "",
 		model = spec.model, -- key into ItemModels.MODELS (defaults to the item id)
 		custom = spec.custom, -- reserved per-item customization data (string); unused for now
+		pinSlot = spec.pinSlot,
+		onUse = spec.onUse,
 		maxStack = spec.maxStack or defaults.maxStack,
 		equippable = if spec.equippable ~= nil then spec.equippable else defaults.equippable,
 		toolName = spec.toolName or name,
