@@ -48,9 +48,10 @@ DropTooltipConfig.defaults = {
 
 	stages = {
 		dot = {
-			show = 60,
-			hide = 64,
+			show = 70,
+			hide = 74,
 			max = 24, -- dots on screen at once, nearest first
+			alwaysOnTop = true, -- the far dot is drawn over walls and props (the folded tag and card keep their own rules)
 			nearAt = 28, -- the gem is full size at this distance ...
 			farAt = 60, -- ... and shrinks to the far size here
 			size = { near = 14, far = 10 }, -- gem size in pixels (the template gem is 14)
@@ -59,12 +60,12 @@ DropTooltipConfig.defaults = {
 			haloTransparency = 0.62, -- ImageTransparency of the soft halo (1 = no halo)
 		},
 		folded = {
-			show = 28,
-			hide = 32,
+			show = 46,
+			hide = 50,
 			max = 10, -- folded tags at once, nearest first; the overflow stays dots
 		},
 		unfold = {
-			range = 28, -- a tag can only unfold inside this distance
+			range = 45, -- a tag can only unfold inside this distance
 			aimRadius = 0.14, -- fraction of the viewport height
 			hoverFirst = true, -- a drop you point AT (its tag or gem under the aim point) beats a closer drop merely inside aimRadius
 			hoverRadius = 0.04, -- fraction of the viewport height around the anchor that counts as pointing AT it
@@ -74,7 +75,8 @@ DropTooltipConfig.defaults = {
 			switchDelay = 0.12, -- seconds before the card moves to another aimed drop
 			maxUnfolded = 1,
 			idleNearest = false, -- true: with nothing aimed at, the nearest folded tag inside idleNearestRadius unfolds by itself
-			idleNearestRadius = 10,
+			idleNearestRadius = 20,
+			idleNearestModes = { free = true }, -- camera modes (player attribute CameraMode: see CameraController PHASES) that turn idleNearest on by themselves
 		},
 	},
 
@@ -124,10 +126,10 @@ DropTooltipConfig.defaults = {
 	sounds = {
 		dotAppear = "",
 		foldedAppear = "",
-		unfold = "",
-		fold = "",
-		pickup = "",
-		useUiClick = true,
+		unfold = "rbxassetid://105736529842995", -- toast in: plays for the local player only, not positional
+		fold = "rbxassetid://119958057244626", -- toast out
+		pickup = "", -- the item pop for pickups is in DropFXConfig.sounds
+		useUiClick = false,
 		volume = 0.35,
 	},
 

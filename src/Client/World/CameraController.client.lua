@@ -76,6 +76,7 @@ local FADE = TweenInfo.new(0.25, Enum.EasingStyle.Quad)
 
 -- ===================== STATE =====================
 local phase = 1
+player:SetAttribute("CameraMode", PHASES[1].name) -- read by DropTooltipController (idleNearestModes)
 local distance = PHASES[1].distance -- smoothed values
 local shoulder = PHASES[1].shoulder
 local fov = PHASES[1].fov
@@ -211,6 +212,7 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
 	end
 	if input.KeyCode == Enum.KeyCode.R then
 		phase = phase % #PHASES + 1
+		player:SetAttribute("CameraMode", PHASES[phase].name)
 		cursorFree = false -- every phase change starts with the cursor locked (the free camera ignores it)
 	elseif input.KeyCode == Enum.KeyCode.T then
 		if phase ~= FREE_PHASE and not MenuBridge.isOpen() then

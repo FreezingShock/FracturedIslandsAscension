@@ -23,6 +23,7 @@ local Debris = game:GetService("Debris")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
+local SoundService = game:GetService("SoundService")
 local TextService = game:GetService("TextService")
 local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
@@ -409,7 +410,8 @@ local function cue(tag: any, slot: string)
 		sound.SoundId = id
 		sound.Volume = sounds.volume
 		sound.RollOffMaxDistance = 60
-		sound.Parent = tag.anchor
+		-- unfold / fold are UI cues for this player: parented to SoundService they are not positional
+		sound.Parent = (slot == "unfold" or slot == "fold") and SoundService or tag.anchor
 		sound:Play()
 		Debris:AddItem(sound, 5)
 	end
@@ -632,6 +634,10 @@ local function updateTag(tag: any, dt: number)
 		tag.gui.AlwaysOnTop = false
 		tag.lifted = false
 	end
+	if not tag.lifted then
+		-- the far dot reads through walls; the folded tag / card stay depth-tested
+		tag.gui.AlwaysOnTop = tag.entry ~= nil and tag.want.dot and tag.entry.cfg.stages.dot.alwaysOnTop == true
+	end
 	if tag.closing and tagIdle(tag) then
 		release(tag)
 	end
@@ -809,6 +815,12 @@ local function aimLevel(e: any, aim: Vector2, viewportHeight: number): number
 	return d2 <= radius * radius and 1 or 0
 end
 
+--- idleNearest is on by config, or while the camera is in one of idleNearestModes (CameraController sets the CameraMode attribute)
+local function idleNearestOn(): boolean
+	local unfold = DEFAULTS.stages.unfold
+	return unfold.idleNearest or (unfold.idleNearestModes ~= nil and unfold.idleNearestModes[player:GetAttribute("CameraMode")] == true)
+end
+
 local function countKeys(t: { [any]: any }): number
 	local n = 0
 	for _ in pairs(t) do
@@ -816,6 +828,9 @@ local function countKeys(t: { [any]: any }): number
 	end
 	return n
 end
+
+local idleTarget: any = nil -- the drop idleNearest has opened (kept until another is clearly closer)
+local IDLE_SWITCH_MARGIN = 1.5 -- studs
 
 local function updateAim(now: number)
 	local camera = workspace.CurrentCamera
@@ -862,16 +877,30 @@ local function updateAim(now: number)
 			count += 1
 		end
 	end
-	if count == 0 and DEFAULTS.stages.unfold.idleNearest then
+	if count == 0 and idleNearestOn() then
+		-- nothing is aimed at: the nearest drop opens by itself. An open card is still stage "unfolded", so BOTH stages are
+		-- candidates (else it would stop being a candidate the moment it opened and flicker), and the choice is sticky:
+		-- it only moves to another drop that is clearly closer, or when the current one leaves the radius.
+		local radius = DEFAULTS.stages.unfold.idleNearestRadius
 		local best
 		for _, e in pairs(entries) do
-			if e.stage == "folded" and e.dist <= DEFAULTS.stages.unfold.idleNearestRadius and (not best or e.dist < best.dist) then
+			if (e.stage == "folded" or e.stage == "unfolded") and e.dist <= radius and (not best or e.dist < best.dist) then
 				best = e
 			end
 		end
-		if best then
-			desired[best] = true
+		local keep = idleTarget
+		if keep and entries[keep.inst] == keep and (keep.stage == "folded" or keep.stage == "unfolded") and keep.dist <= radius * 1.15 then
+			if best and best ~= keep and best.dist < keep.dist - IDLE_SWITCH_MARGIN then
+				idleTarget = best
+			end
+		else
+			idleTarget = best
 		end
+		if idleTarget then
+			desired[idleTarget] = true
+		end
+	else
+		idleTarget = nil
 	end
 
 	for e in pairs(unfolded) do -- the hold ran out
@@ -911,7 +940,7 @@ local function updateAim(now: number)
 			e.selSince = nil
 		end
 	end
-	if DEFAULTS.stages.unfold.idleNearest then
+	if idleNearestOn() then
 		for e in pairs(desired) do
 			if not unfolded[e] and countKeys(unfolded) < slots then
 				unfolded[e] = true

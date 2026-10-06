@@ -22,6 +22,7 @@ local RunService = game:GetService("RunService")
 local ServerScriptService = game:GetService("ServerScriptService")
 local ItemTools = require(ServerScriptService:WaitForChild("ItemTools")) :: any
 local Items = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Items")) :: any
+local STACK = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Config"):WaitForChild("DropStackConfig")) :: any
 
 local ItemDrops = {}
 
@@ -32,17 +33,16 @@ local PICKUP_RADIUS = 5 -- studs from the player's root part
 local PICKUP_DELAY = 0.5 -- everyone, after spawning
 local OWNER_DELAY = 2 -- the player who dropped it
 local FULL_RETRY = 1 -- seconds before retrying a pickup that did not fit
-local MERGE_RADIUS = 2.5 -- settled identical drops closer than this clump together
 local MERGE_INTERVAL = 0.5
-local MAX_DROP_STACK = 999
+local MAX_DROP_STACK = STACK.maxStack -- merge radii, fly time and layer look: Config/DropStackConfig
 
 --- Gear (maxStack 1) never clumps into one drop; resources clump up to MAX_DROP_STACK.
 local function dropStackLimit(toolName: string): number
 	local def = Items.getByToolName(toolName)
 	return math.min(MAX_DROP_STACK, def and def.maxStack or MAX_DROP_STACK)
 end
-local LAYER_STEPS = { 1, 4, 16, 48 } -- count <= step -> that many layers; above the last -> 5
-local LAYER_SPREAD = 0.55 -- studs the extra layers are scattered over
+local LAYER_STEPS = STACK.layers -- count <= step -> that many layers; above the last -> one more
+local MERGE_TAG = "ItemDropMerge" -- an item flying into a stack (client animates it, the server destroys it on arrival)
 local TICK = 0.2
 local BODY_SIZE = 1.2
 local SETTLE_SPEED = 1.5
@@ -168,35 +168,76 @@ end
 
 updateLayers = function(rec)
 	local want = layersFor(rec.count)
-	if rec.layers == want then
+	local have = rec.layers or 1
+	if want == have then
 		return
 	end
 	rec.layers = want
 	for _, inst in ipairs(rec.model:GetChildren()) do
-		if inst:GetAttribute("StackLayer") then
+		local layer = inst:GetAttribute("StackLayer")
+		if layer and layer > want then
 			inst:Destroy()
 		end
 	end
+	-- the rng is drawn for every layer so a layer keeps its place as the stack grows; only NEW layers are built
 	local rng = Random.new(rec.id * 7919)
-	for layer = 2, want do
+	for layer = 2, #LAYER_STEPS + 1 do
 		local offset = Vector3.new(
-			(rng:NextNumber() - 0.5) * LAYER_SPREAD,
-			(rng:NextNumber() - 0.5) * LAYER_SPREAD * 0.4,
-			(rng:NextNumber() - 0.5) * LAYER_SPREAD
+			(rng:NextNumber() - 0.5) * STACK.layerSpread[1],
+			(rng:NextNumber() - 0.5) * STACK.layerSpread[2],
+			(rng:NextNumber() - 0.5) * STACK.layerSpread[1]
 		)
 		local turn = CFrame.Angles(0, (rng:NextNumber() - 0.5) * 0.6, 0)
-		for _, entry in ipairs(rec.template) do
-			local part = entry.part:Clone()
-			part:SetAttribute("StackLayer", layer)
-			part.CFrame = rec.body.CFrame * CFrame.new(offset) * turn * entry.rel
-			part.Anchored = rec.base ~= nil
-			local weld = Instance.new("WeldConstraint")
-			weld.Part0 = rec.body
-			weld.Part1 = part
-			weld.Parent = part
-			part.Parent = rec.model
+		if layer > have and layer <= want then
+			for _, entry in ipairs(rec.template) do
+				local part = entry.part:Clone()
+				local rel = CFrame.new(offset) * turn * entry.rel
+				part:SetAttribute("StackLayer", layer)
+				part:SetAttribute("Rel", rel) -- the client re-seats a late layer on its own posed Body from this
+				part.CFrame = rec.body.CFrame * rel
+				part.Anchored = rec.base ~= nil
+				local weld = Instance.new("WeldConstraint")
+				weld.Part0 = rec.body
+				weld.Part1 = part
+				weld.Parent = part
+				part.Parent = rec.model
+			end
 		end
 	end
+end
+
+--- An item that merges does not pop out of existence: it keeps its model, loses its drop identity and flies into
+--- the stack (ItemDropRenderer animates it, the server destroys it once it has arrived).
+local function fly(model: Model, keepId: number, color: any)
+	model:SetAttribute("MergeInto", keepId)
+	model:SetAttribute("DropColor", color)
+	for _, part in ipairs(model:GetDescendants()) do
+		if part:IsA("BasePart") then
+			part.Anchored = true
+			part.CanCollide = false
+		end
+	end
+	CollectionService:RemoveTag(model, TAG)
+	CollectionService:RemoveTag(model, "DropTooltip")
+	CollectionService:AddTag(model, MERGE_TAG)
+	task.delay(STACK.flyTime + 0.2, function()
+		model:Destroy()
+	end)
+end
+
+--- Add `count` to a stack. The count / layers / punch land when the flying item arrives, so it reads as one beat.
+local function absorb(keep, count: number, from: Model?)
+	keep.count += count
+	if from then
+		fly(from, keep.id, keep.model:GetAttribute("DropColor"))
+	end
+	task.delay(from and STACK.flyTime or 0, function()
+		if drops[keep.id] ~= keep then
+			return
+		end
+		updateLabel(keep)
+		keep.model:SetAttribute("MergeSeq", (keep.model:GetAttribute("MergeSeq") or 0) + 1)
+	end)
 end
 
 -- ===================== LIFECYCLE =====================
@@ -257,20 +298,34 @@ function ItemDrops.spawn(opts: any): number?
 	local def = Items.getByToolName(toolName)
 	local now = os.clock()
 
-	-- thrown drops fly first and clump once they land (see mergeSettled); only still spawns merge instantly
-	for _, rec in pairs(typeof(opts.velocity) == "Vector3" and {} or drops) do
-		if rec.toolName == toolName and rec.custom == opts.custom and rec.count + count <= dropStackLimit(toolName) then
-			local at = rec.base or rec.body.Position
-			if (at - position).Magnitude <= MERGE_RADIUS then
-				rec.count += count
-				rec.spawnedAt = now
-				rec.ownerId = opts.ownerId
-				rec.ownerUntil = now + OWNER_DELAY
-				rec.pickupAt = now + PICKUP_DELAY
-				updateLabel(rec)
-				return rec.id
+	-- a new item never starts its own motion next to a matching stack: it flies straight into it (thrown ones too)
+	local limit = dropStackLimit(toolName)
+	local target, targetDist
+	for _, rec in pairs(drops) do
+		if rec.toolName == toolName and rec.custom == opts.custom and rec.count + count <= limit then
+			local d = ((rec.base or rec.body.Position) - position).Magnitude
+			if d <= STACK.spawnRadius and (not targetDist or d < targetDist) then
+				target, targetDist = rec, d
 			end
 		end
+	end
+	if target then
+		local ghost = buildModel(toolName, position)
+		target.spawnedAt = now
+		target.ownerId = opts.ownerId
+		target.ownerUntil = now + OWNER_DELAY
+		target.pickupAt = now + PICKUP_DELAY
+		if ghost then
+			ghost.Name = "Merge_" .. toolName
+			for _, part in ipairs(ghost:GetDescendants()) do
+				if part:IsA("BasePart") then
+					part.Anchored = true
+				end
+			end
+			ghost.Parent = folder
+		end
+		absorb(target, count, ghost)
+		return target.id
 	end
 
 	while total >= MAX_DROPS do
@@ -387,17 +442,22 @@ local function mergeSettled()
 					and a.toolName == b.toolName
 					and a.custom == b.custom
 					and a.count + b.count <= dropStackLimit(a.toolName)
-					and (a.base - b.base).Magnitude <= MERGE_RADIUS
+					and (a.base - b.base).Magnitude <= STACK.mergeRadius
 				then
 					local keep, gone = a, b
 					if b.count > a.count then
 						keep, gone = b, a
 					end
-					keep.count += gone.count
 					keep.pickupAt = math.max(keep.pickupAt, gone.pickupAt)
 					keep.spawnedAt = math.max(keep.spawnedAt, gone.spawnedAt)
-					remove(gone.id)
-					updateLabel(keep)
+					drops[gone.id] = nil
+					falling[gone.id] = nil
+					total -= 1
+					local gui = gone.body:FindFirstChild("CountLabel")
+					if gui then
+						gui:Destroy()
+					end
+					absorb(keep, gone.count, gone.model)
 					if gone == a then
 						break
 					end

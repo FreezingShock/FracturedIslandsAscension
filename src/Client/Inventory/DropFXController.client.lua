@@ -19,11 +19,14 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
 local TAG = "DropTooltip"
+local MERGE_TAG = "ItemDropMerge"
 
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local FXConfig = require(Modules:WaitForChild("Config"):WaitForChild("DropFXConfig")) :: any
 local EnemyConfig = require(Modules:WaitForChild("EnemyConfig")) :: any
 local Items = require(Modules:WaitForChild("Items")) :: any
+local STACK = require(Modules:WaitForChild("Config"):WaitForChild("DropStackConfig")) :: any
+local Debris = game:GetService("Debris")
 local TEX = EnemyConfig.textures
 local LIMITS = FXConfig.limits
 
@@ -129,6 +132,7 @@ local function buildRig()
 		flare = emitter("Flare", flareAt),
 		burst = emitter("Burst", mid),
 		burstFlare = emitter("BurstFlare", flareAt),
+		shock = emitter("Shock", ground),
 		lightK = 0,
 		phase = math.random() * math.pi * 2,
 	}
@@ -139,6 +143,7 @@ local function configure(rig: any, e: any)
 	local presets, color = e.presets, e.color
 	rig.entry = e
 	rig.closing = false
+	rig.flash = nil
 
 	local glow = presets.glow
 	rig.glow = glow
@@ -245,10 +250,85 @@ local function emitBurst(rig: any, spec: any, color: Color3)
 	end
 end
 
+local joinedAt = os.clock()
+
+--- The item pop at a world position (3D, so it fades with distance). Skipped past fxRange.
+local function playPop(at: Vector3, pitch: number)
+	local pop = FXConfig.sounds.pop
+	local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart") :: BasePart?
+	if pop.id == "" or not root or (at - root.Position).Magnitude > LIMITS.fxRange then
+		return
+	end
+	local a = Instance.new("Attachment")
+	a.WorldPosition = at
+	a.Parent = workspace.Terrain
+	local s = Instance.new("Sound")
+	s.SoundId = pop.id
+	s.Volume = pop.volume
+	s.PlaybackSpeed = pitch
+	s.RollOffMaxDistance = pop.range
+	s.Parent = a
+	s:Play()
+	Debris:AddItem(a, 2)
+end
+
+local function randomPitch(kind: string): number
+	local p = FXConfig.sounds[kind].pitch
+	return p[1] + math.random() * (p[2] - p[1])
+end
+
+--- An item landed in this stack: a burst that grows with the stack, a ground shock ring, a light flash and a pop sound
+--- that climbs in pitch as the stack fills. A full stack gets `full` on top.
+local function emitStack(e: any)
+	local count = e.inst:GetAttribute("Count") or 1
+	local pitch = FXConfig.sounds.stack.pitch
+	playPop(e.rest, pitch[1] + (pitch[2] - pitch[1]) * math.clamp(count / STACK.maxStack, 0, 1)) -- heard even without a rig
+	local rig, spec = e.rig, e.presets.stack
+	if not rig or not spec then
+		return
+	end
+	local full = count >= STACK.maxStack and spec.full or nil
+	local color = e.color
+	local burst = {
+		texture = spec.texture,
+		count = math.floor(math.min(spec.maxCount, spec.count + count * spec.perCount) * (full and full.countMult or 1)),
+		speed = spec.speed,
+		lifetime = spec.lifetime,
+		size = spec.size,
+		color = spec.color,
+		brighten = spec.brighten,
+		flareCount = full and full.flareCount or spec.flareCount,
+		flareSize = (full and full.flareSize or spec.flareSize) + count * spec.flareGrow,
+	}
+	emitBurst(rig, burst, color)
+	local ringSize = full and full.ringSize or spec.ringSize
+	if ringSize and ringSize > 0 then
+		local p = rig.shock
+		p.Texture = TEX.ring or ""
+		p.Lifetime = NumberRange.new(0.45)
+		p.Speed = NumberRange.new(0.05, 0.05)
+		p.EmissionDirection = Enum.NormalId.Top
+		p.Orientation = Enum.ParticleOrientation.VelocityPerpendicular
+		p.SpreadAngle = Vector2.zero
+		p.Size = seq({ 0.4, ringSize })
+		p.Transparency = seq({ 0.15, 1 })
+		p.Color = ColorSequence.new(brightColor(spec, color), baseColor(spec, color))
+		p.LightEmission = 1
+		p:Emit(1)
+	end
+	local flash = full and full.flash or spec.flash
+	if flash then
+		rig.light.Color = brightColor(spec, color)
+		rig.light.Range = math.max(rig.light.Range, 10)
+		rig.flash = { t0 = os.clock(), peak = flash.brightness, time = flash.time }
+	end
+end
+
 local function silence(rig: any)
 	rig.light.Enabled = false
 	rig.beam.Enabled = false
-	for _, p in ipairs({ rig.motes, rig.ring, rig.flare, rig.burst, rig.burstFlare }) do
+	rig.flash = nil
+	for _, p in ipairs({ rig.motes, rig.ring, rig.flare, rig.burst, rig.burstFlare, rig.shock }) do
 		p.Enabled = false
 		p.Rate = 0
 		p:Clear()
@@ -284,7 +364,8 @@ local function register(inst: Instance)
 		return
 	end
 	local rarity = inst:GetAttribute("Rarity") or 0
-	local e = {
+	local e
+	e = {
 		inst = inst,
 		rarity = rarity,
 		color = dropColorOf(inst, rarity),
@@ -294,6 +375,12 @@ local function register(inst: Instance)
 		dist = math.huge,
 	}
 	entries[inst] = e
+	if os.clock() - joinedAt > FXConfig.sounds.learnWindow then
+		playPop(e.rest, randomPitch("drop")) -- a drop appeared
+	end
+	e.stackConn = inst:GetAttributeChangedSignal("MergeSeq"):Connect(function()
+		emitStack(e)
+	end)
 end
 
 local function releaseRig(e: any)
@@ -330,7 +417,18 @@ local function unregister(inst: Instance)
 		return
 	end
 	entries[inst] = nil
+	if e.stackConn then
+		e.stackConn:Disconnect()
+	end
 	local rig = e.rig
+	if rig and inst:GetAttribute("MergeInto") then
+		-- it did not leave, it is flying into a stack: no goodbye burst
+		releaseRig(e)
+		return
+	end
+	if not inst:GetAttribute("MergeInto") then
+		playPop(e.rest, randomPitch("pickup")) -- picked up (or expired)
+	end
 	if rig then
 		-- picked up / expired: one last burst where it stood, the light fades, then the rig is recycled
 		e.rig = nil
@@ -352,6 +450,31 @@ for _, inst in ipairs(CollectionService:GetTagged(TAG)) do
 end
 CollectionService:GetInstanceAddedSignal(TAG):Connect(register)
 CollectionService:GetInstanceRemovedSignal(TAG):Connect(unregister)
+
+-- an item flying into a stack leaves a glowing trail in its colour
+local function trail(model: Instance)
+	local body = model:FindFirstChild("Body")
+	if not (body and body:IsA("BasePart")) then
+		return
+	end
+	local hex = model:GetAttribute("DropColor")
+	local ok, color = pcall(Color3.fromHex, type(hex) == "string" and hex or "FFFFFF")
+	color = (ok and color or WHITE):Lerp(WHITE, 0.35)
+	local a0 = attachment("TrailA", body, Vector3.new(0, 0.3, 0))
+	local a1 = attachment("TrailB", body, Vector3.new(0, -0.3, 0))
+	local t = Instance.new("Trail")
+	t.Attachment0, t.Attachment1 = a0, a1
+	t.Lifetime = 0.2
+	t.LightEmission = 1
+	t.Color = ColorSequence.new(color)
+	t.Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.1), NumberSequenceKeypoint.new(1, 1) })
+	t.WidthScale = NumberSequence.new({ NumberSequenceKeypoint.new(0, 1), NumberSequenceKeypoint.new(1, 0) })
+	t.Parent = body
+end
+for _, model in ipairs(CollectionService:GetTagged(MERGE_TAG)) do
+	trail(model)
+end
+CollectionService:GetInstanceAddedSignal(MERGE_TAG):Connect(trail)
 
 -- ===================== SCAN + UPDATE =====================
 local function fadeOf(dist: number): number
@@ -428,6 +551,16 @@ RunService.Heartbeat:Connect(function(dt)
 			rig.motes.Rate = rig.moteRate * emit
 			rig.ring.Rate = rig.ringRate * emit
 			rig.flare.Rate = rig.flareRate * emit
+			local flash = rig.flash
+			if flash then
+				local k = 1 - (now - flash.t0) / flash.time
+				if k > 0 then
+					rig.light.Brightness = (rig.light.Enabled and rig.light.Brightness or 0) + flash.peak * k * k
+					rig.light.Enabled = true
+				else
+					rig.flash = nil
+				end
+			end
 			rig.beam.Enabled = rig.pillar ~= nil and emit > 0.05
 			if rig.pillar then
 				rig.beam.Transparency = NumberSequence.new({
