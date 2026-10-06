@@ -23,6 +23,8 @@ local ProfileService = require(ServerScriptService:WaitForChild("ProfileService"
 
 local SkillsDataManager = {}
 
+local GainFeedService = require(ServerScriptService:WaitForChild("GainFeedService")) :: any
+
 -- ===================== CONFIG =====================
 -- Skills, level caps, the XP curve (Hypixel) and the Roman numerals live in SkillsConfig.
 local SkillsConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("SkillsConfig")) :: any
@@ -52,6 +54,9 @@ end
 -- Skill level rewards (SkillRewardService): claimed[skill] = highest level already paid out (a high-water mark),
 -- recipes / unlocks = ids recorded by the recipe / unlock reward types. Reconcile() backfills it for existing players.
 PROFILE_TEMPLATE._Rewards = { claimed = {}, recipes = {}, unlocks = {} }
+
+-- The purse: Coins, the real money (WalletService owns it; completely separate from the Statistics). Reconcile backfills it.
+PROFILE_TEMPLATE._Wallet = { coins = 0 }
 
 -- ── Inventory data (structurally isolated under one key) ──
 -- items         : array of { itemId = string, count = number }
@@ -414,6 +419,9 @@ function SkillsDataManager.AddXP(player, skillName, amount, source)
 	end
 
 	markDirty(player)
+	if gain > 0 then
+		GainFeedService.Push(player, "xp:" .. skillName, skillName .. " XP", gain, SkillsConfig.skills[skillName].color)
+	end
 	return gain, leveledUp
 end
 

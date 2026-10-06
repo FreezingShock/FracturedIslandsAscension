@@ -34,12 +34,16 @@ local SkillsDataManager = require(ServerScriptService:WaitForChild("SkillsDataMa
 local InventoryDataManager = require(ServerScriptService:WaitForChild("InventoryDataManager")) :: any
 local StatisticsDataManager = require(ServerScriptService:WaitForChild("StatisticsDataManager")) :: any
 local ChatService = require(ServerScriptService:WaitForChild("ChatService")) :: any
+local WalletService = require(ServerScriptService:WaitForChild("WalletService")) :: any
+local GainFeedService = require(ServerScriptService:WaitForChild("GainFeedService")) :: any
+local CoinsConfig = require(Modules:WaitForChild("Config"):WaitForChild("CoinsConfig")) :: any
 
 local OWNER_SECONDS = 15
 local LIFETIME = 90
 local PICKUP_RADIUS = 5
 local SCAN_EVERY = 0.2
 local SPREAD = 3 -- studs a drop lands from the kill point
+local COIN_MERGE_RADIUS = 4 -- coin drops this close (same owner) clump into one
 
 local LootService = {}
 
@@ -125,6 +129,22 @@ end
 
 function LootService.spawnDrop(position: Vector3, drop: any, ownerId: number?)
 	local offset = Vector3.new((math.random() - 0.5) * 2 * SPREAD, 0, (math.random() - 0.5) * 2 * SPREAD)
+	if drop.kind == "coins" then
+		-- coins that land close together become one bigger pile (the pop and the tag are the same drop)
+		for part, state in pairs(drops) do
+			if state.drop.kind == "coins" and state.ownerId == ownerId and (part.Position - (position + offset)).Magnitude <= COIN_MERGE_RADIUS then
+				state.drop.count += drop.count
+				part:SetAttribute("Count", state.drop.count)
+				state.expiresAt = os.clock() + LIFETIME
+				local label = part:FindFirstChildWhichIsA("BillboardGui")
+				local text = label and label:FindFirstChild("Label") :: TextLabel?
+				if text then
+					text.Text = ("%dx %s"):format(state.drop.count, drop.name)
+				end
+				return
+			end
+		end
+	end
 	local part = Instance.new("Part")
 	part.Name = "Drop"
 	part.Size = Vector3.new(0.9, 0.9, 0.9)
@@ -137,7 +157,7 @@ function LootService.spawnDrop(position: Vector3, drop: any, ownerId: number?)
 	part.Position = position + offset
 	part:SetAttribute("DropName", drop.name)
 	-- read-only description for DropTooltipController (client builds the card from these, sends nothing back)
-	part:SetAttribute("DropKind", drop.kind == "stat" and "stat" or "item")
+	part:SetAttribute("DropKind", (drop.kind == "stat" or drop.kind == "coins") and drop.kind or "item")
 	part:SetAttribute("ItemId", drop.id)
 	part:SetAttribute("Count", drop.count)
 	part:SetAttribute("Rarity", drop.rarity or 0)
@@ -198,12 +218,28 @@ function LootService.reward(model: Model, enemyType: string?)
 	for _, drop in ipairs(roll(enemyType, killer)) do
 		LootService.spawnDrop(base, drop, killer.UserId)
 	end
+	for _, coin in ipairs(CoinsConfig.roll(enemyType)) do -- Coins: physical pickups, rolled here on the server
+		LootService.spawnDrop(base, {
+			kind = "coins",
+			id = "coins",
+			name = "Coins",
+			color = Color3.fromHex(CoinsConfig.color),
+			count = coin.count,
+			rarity = 1,
+			pickupRadius = coin.pickupRadius,
+		}, killer.UserId)
+	end
 end
 
 local function collect(player: Player, state: Drop): boolean
 	local drop = state.drop
 	if drop.kind == "stat" then
 		if not StatisticsDataManager.GrantStat(player, drop.skill, drop.id, drop.count) then
+			return false
+		end
+		GainFeedService.Push(player, "stat:" .. tostring(drop.id), drop.name, drop.count, "#" .. drop.color:ToHex())
+	elseif drop.kind == "coins" then
+		if WalletService.add(player, drop.count, "Kill") <= 0 then
 			return false
 		end
 	else
@@ -239,7 +275,7 @@ RunService.Heartbeat:Connect(function(dt)
 				local root = character and character:FindFirstChild("HumanoidRootPart") :: BasePart?
 				local humanoid = character and character:FindFirstChildOfClass("Humanoid")
 				local allowed = not state.ownerId or player.UserId == state.ownerId or now >= state.ownerUntil
-				if allowed and root and humanoid and humanoid.Health > 0 and (root.Position - part.Position).Magnitude <= PICKUP_RADIUS then
+				if allowed and root and humanoid and humanoid.Health > 0 and (root.Position - part.Position).Magnitude <= (state.drop.pickupRadius or PICKUP_RADIUS) then
 					if collect(player, state) then
 						drops[part] = nil
 						part:Destroy()

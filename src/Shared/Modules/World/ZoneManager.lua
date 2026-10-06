@@ -162,6 +162,7 @@ local function onZoneEntry(player, zoneName)
 
 	zoneState.hasShownNotification = true
 	zoneState.isCurrentlyInside = true
+	player:SetAttribute("Zone", zoneName) -- read by the scoreboard (zone line + players in zone)
 
 	-- Get skill data from ZoneConfig.SKILLS index
 	local skillData = ZoneConfig.getSkillData(zoneConfig.skill)
@@ -196,6 +197,9 @@ local function onZoneExit(player, zoneName)
 
 	local zoneState = playerZoneStates[playerId][zoneName]
 	zoneState.isCurrentlyInside = false
+	if player:GetAttribute("Zone") == zoneName then
+		player:SetAttribute("Zone", nil)
+	end
 	zoneState.hasShownNotification = false -- Reset so it fires again on re-entry
 	zoneState.lastNotificationTime = os.clock()
 

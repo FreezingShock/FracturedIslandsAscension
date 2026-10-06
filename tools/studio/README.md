@@ -23,6 +23,7 @@ restyling) unless you set `local FORCE = true` at the top.
 | `build_view_rows.luau` | `ReplicatedStorage.GUI.ViewRow` (a copy of the `View.Cursor` label) + `ViewMenu.View.Scale` (UIScale) | `ViewMenuController` |
 | `build_collection_rewards.luau` | `GridTemplates.CollectionsMenu4` + `TemporaryMenus.TierTitle`, `RewardSlot`, `CollectionStatSlot` (reward page templates) | `CollectionsPageModule` |
 | `build_skills_menu.luau` | `SkillDescFrame`: slots `Level1..Level25`, `XpBar`, `WisdomLabel`, `NextReward`; hub button `CarpentrySkills` | `SkillsPageModule` |
+| `build_scoreboard.luau` | `StarterGui.FIAScoreboard` (Panel: Board > Lines, Template, Foldable > Chip / List / RowTemplate; tooltip look) | `ScoreboardController`, `GainFeedController` |
 
 Rule: whenever Claude generates anything (Studio GUI / template / marker / rig, a Blender model or animation, an
 icon), the script that generated it is saved in `tools/` in the same turn (`tools/studio`, `tools/blender`, ...) and

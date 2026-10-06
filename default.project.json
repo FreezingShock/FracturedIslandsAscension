@@ -19,6 +19,9 @@
       "ChatService": {
         "$path": "src/Server/Chat/ChatService.lua"
       },
+      "ClockService": {
+        "$path": "src/Server/World/ClockService.server.lua"
+      },
       "CollectionInit": {
         "$path": "src/Server/Stats/CollectionInit.server.lua"
       },
@@ -48,6 +51,9 @@
       },
       "EquipmentService": {
         "$path": "src/Server/Inventory/EquipmentService.lua"
+      },
+      "GainFeedService": {
+        "$path": "src/Server/Stats/GainFeedService.lua"
       },
       "InventoryDataManager": {
         "$path": "src/Server/Data/InventoryDataManager.lua"
@@ -102,6 +108,12 @@
       },
       "StatisticsDataManager": {
         "$path": "src/Server/Data/StatisticsDataManager.lua"
+      },
+      "WalletInit": {
+        "$path": "src/Server/Data/WalletInit.server.lua"
+      },
+      "WalletService": {
+        "$path": "src/Server/Data/WalletService.lua"
       },
       "WeaponInit": {
         "$path": "src/Server/Combat/WeaponInit.server.lua"
@@ -309,6 +321,9 @@
         "EnemyTelegraphController": {
           "$path": "src/Client/Combat/EnemyTelegraphController.client.lua"
         },
+        "GainFeedController": {
+          "$path": "src/Client/HUD/GainFeedController.client.lua"
+        },
         "HeldItemNameController": {
           "$path": "src/Client/HUD/HeldItemNameController.client.lua"
         },
@@ -323,6 +338,9 @@
         },
         "ResourceBarsController": {
           "$path": "src/Client/HUD/ResourceBarsController.client.lua"
+        },
+        "ScoreboardController": {
+          "$path": "src/Client/HUD/ScoreboardController.client.lua"
         },
         "SprintController": {
           "$path": "src/Client/World/SprintController.client.lua"

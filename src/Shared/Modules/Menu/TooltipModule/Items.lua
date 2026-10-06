@@ -169,6 +169,17 @@ function Items.fromDrop(info: any)
 		return { title = info.name, titleColor = color, stack = count > 1 and count or nil, icon = { color = color }, tags = tags }
 	end
 
+	if info.kind == "coins" then
+		local color = info.color or "#FFAA00"
+		return {
+			title = info.name,
+			titleColor = color,
+			stack = count > 1 and count or nil,
+			icon = { color = color },
+			tags = { { text = "CURRENCY", color = "#FFFFFF" }, { text = "PURSE", color = color } },
+		}
+	end
+
 	local reg = registry()
 	local def = reg and reg.get(info.itemId) or nil
 	local full = Items.fromTool({

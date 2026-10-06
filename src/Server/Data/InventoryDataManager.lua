@@ -41,6 +41,7 @@ local ItemDrops = require(ServerScriptService:WaitForChild("ItemDrops")) :: any
 local RateLimiter = require(ServerScriptService:WaitForChild("RateLimiter")) :: any
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local ItemRegistry = require(Modules:WaitForChild("Items")) :: any
+local GainFeedService = require(ServerScriptService:WaitForChild("GainFeedService")) :: any
 
 local InventoryDataManager = {}
 
@@ -551,6 +552,10 @@ function InventoryDataManager.AddItem(player, toolName: string, count: number): 
 
 	-- Update is fired by ChildAdded listener, but force one to be safe
 	InventoryDataManager.SendUpdate(player)
+	local def = ItemRegistry.getByToolName(toolName)
+	local rarity = def and ItemRegistry.getRarity(def.rarity)
+	local colorHex = rarity and rarity.color and ("#" .. rarity.color:ToHex()) or nil
+	GainFeedService.Push(player, "item:" .. toolName, def and (def.displayName or def.name) or toolName, canAdd, colorHex)
 	return canAdd
 end
 
