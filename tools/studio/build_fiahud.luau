@@ -2,7 +2,7 @@
 -- Builds the pixel HUD from the Figma file "FIA HUD - Health, Mana, XP, Hotbar" (all numbers and colours come from
 -- ReplicatedStorage.Modules.Config.HudTheme):
 --   StarterGui.FIAHUD (ScreenGui, ResetOnSpawn off)
---     Root (Frame 1088 x 276, bottom centre, UIScale)       ZIndex
+--     Root (Frame 1088 x 276, flush with the screen bottom, UIScale)   ZIndex
 --       Back     ribbons + HotbarTray (brown posts = the slot holders)                1
 --       Strip    CanvasGroup: Ledge, Left/Right (track + Segments > Segment1..8 > Fill)   2   (Stamina)
 --       (Strip, Wings, Stats, Badge and SelectorArrow are CanvasGroups: they fade out while a menu is open)
@@ -371,12 +371,14 @@ local function buildHud()
 	gui.Name = "FIAHUD"
 	gui.ResetOnSpawn = false
 	gui.IgnoreGuiInset = true
+	gui.ScreenInsets = Enum.ScreenInsets.DeviceSafeInsets -- keeps the HUD clear of phone notches and home bars
 	gui.DisplayOrder = 1
 	gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 
 	local root = frame(gui, "Root", 0, 0, H.size.X, H.size.Y, nil)
-	root.AnchorPoint = Vector2.new(0.5, 1)
-	root.Position = UDim2.new(0.5, 0, 1, -H.bottomMargin)
+	-- flush with the bottom of the screen at any UIScale: anchor on the tray's bottom edge, then sit that point at the bottom
+	root.AnchorPoint = Vector2.new(0.5, (TR.pos.Y + TR.size.Y) / H.size.Y)
+	root.Position = UDim2.new(0.5, 0, 1, 0)
 	local scale = Instance.new("UIScale")
 	scale.Name = "Scale"
 	scale.Parent = root

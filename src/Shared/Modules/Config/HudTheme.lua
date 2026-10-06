@@ -80,12 +80,15 @@ HudTheme.resourcePanel = {
 
 HudTheme.font = "rbxassetid://12187371840" -- the game's HUD font (Silkscreen is not a Roblox font)
 
--- FIAHUD.Root: a 1088 x 276 box anchored bottom centre. The controllers shrink its UIScale on narrow screens.
+-- FIAHUD.Root: a 1088 x 276 box anchored bottom centre, flush with the bottom edge (the tray's bottom edge is the
+-- screen's bottom edge). Its UIScale makes it fill widthFraction of the screen width (a quarter of the screen stays free
+-- on each side), but never taller than maxHeightFraction of the screen height (landscape phones).
 HudTheme.hud = {
 	size = Vector2.new(1088, 276),
-	bottomMargin = 12,
-	fullScaleWidth = 1280, -- viewport width at which the HUD is shown at 1:1
-	minScale = 0.5,
+	widthFraction = 0.5,
+	maxHeightFraction = 0.3,
+	minScale = 0.2,
+	maxScale = 2,
 	healthPos = Vector2.new(40, 16),
 	manaPos = Vector2.new(692, 16),
 }

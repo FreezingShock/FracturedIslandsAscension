@@ -15,8 +15,8 @@
 	  Badge            FIAHUD.Root.Badge.Level shows the Player attribute named by ResourceConfig.nexusLevelAttribute.
 
 	The fills ease toward the real value. Stats and Strip (CanvasGroups) fade out while the Nexus Menu or the inventory is
-	open (MenuBridge.isOpen) and fade back in when it closes, together with the Wings, Badge and SelectorArrow groups. Root carries a UIScale that shrinks the whole HUD on narrow
-	screens (HudTheme.hud).
+	open (MenuBridge.isOpen) and fade back in when it closes, together with the Wings, Badge and SelectorArrow groups. Root carries a UIScale that sizes the
+	whole HUD to half the screen width, with a quarter of the screen free on each side (HudTheme.hud).
 --]]
 
 local Players = game:GetService("Players")
@@ -123,12 +123,17 @@ local function applyFade(instant: boolean?)
 	end
 end
 
---- Scale the HUD down on narrow screens (1:1 from HudTheme.hud.fullScaleWidth up).
+--- Size the HUD for this screen: HudTheme.hud.widthFraction of the width (a quarter free on each side), capped by
+--- maxHeightFraction of the height so it never covers a short (landscape phone) screen.
 local function fitHud(root: Instance?)
 	local scale = root and root:FindFirstChildOfClass("UIScale")
 	local camera = workspace.CurrentCamera
 	if scale and camera then
-		scale.Scale = math.clamp(camera.ViewportSize.X / HudTheme.hud.fullScaleWidth, HudTheme.hud.minScale, 1)
+		local hud = HudTheme.hud
+		local view = camera.ViewportSize
+		local byWidth = view.X * hud.widthFraction / hud.size.X
+		local byHeight = view.Y * hud.maxHeightFraction / hud.size.Y
+		scale.Scale = math.clamp(math.min(byWidth, byHeight), hud.minScale, hud.maxScale)
 	end
 end
 
