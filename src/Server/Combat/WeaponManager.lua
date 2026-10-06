@@ -142,9 +142,10 @@ local function resetCombo(player)
 end
 
 --- A swing with the held weapon. `crash` = the queued landing swing of a click made in the air: it ignores the swing lock
---- (WeaponManager.Click checked it), uses CombatConfig.crash.step, never slows the walk, and hits as a Crash.
+--- (WeaponManager.Click checked it), uses CombatConfig.crash.step, never slows the walk, and hits as a Crash. `hitIn` =
+--- seconds until touchdown: the hit lands then (never later than the step's own hit frame).
 --- Returns (accepted, stepIndex).
-function WeaponManager.TrySwing(player, crash: boolean?): (boolean, number?)
+function WeaponManager.TrySwing(player, crash: boolean?, hitIn: number?): (boolean, number?)
 	local weapon = playerWeapons[player.UserId]
 	local typeConfig = weapon and CombatConfig.get(weapon.config.weaponType)
 	local character = player.Character
@@ -187,7 +188,11 @@ function WeaponManager.TrySwing(player, crash: boolean?): (boolean, number?)
 
 	SwordSwingEvent:FireAllClients(player, stepIndex, speed, weapon.config.weaponType, weapon.weaponId, crash == true)
 
-	task.delay(step.hitFrame / speed, function()
+	local hitDelay = step.hitFrame / speed
+	if crash and hitIn then
+		hitDelay = math.clamp(hitIn, 0.03, hitDelay)
+	end
+	task.delay(hitDelay, function()
 		local hook = (WeaponManager :: any).onSwingHit
 		if hook and c.ticket == ticket then
 			hook(player, stepIndex, weapon.weaponId, crash == true)
@@ -221,6 +226,46 @@ function WeaponManager.Click(player)
 	WeaponManager.TrySwing(player)
 end
 
+local landingParams = RaycastParams.new()
+landingParams.FilterType = Enum.RaycastFilterType.Exclude
+
+--- Seconds until the feet reach the ground below, from the fall speed and gravity; nil while rising or with no ground
+--- within reach (so a long fall does not start the swing early).
+local function timeToLanding(character: Model, humanoid: Humanoid): number?
+	local root = character:FindFirstChild("HumanoidRootPart") :: BasePart?
+	if not root then
+		return nil
+	end
+	local fallSpeed = -root.AssemblyLinearVelocity.Y
+	if fallSpeed <= 0 then
+		return nil
+	end
+	landingParams.FilterDescendantsInstances = { character }
+	local result = workspace:Raycast(root.Position, Vector3.new(0, -60, 0), landingParams)
+	if not result then
+		return nil
+	end
+	local height = result.Distance - (humanoid.HipHeight + root.Size.Y / 2)
+	if height <= 0 then
+		return 0
+	end
+	local g = workspace.Gravity
+	return (-fallSpeed + math.sqrt(fallSpeed * fallSpeed + 2 * g * height)) / g
+end
+
+--- How long before touchdown the crash swing has to start so its hit frame lands on the ground.
+local function crashLead(userId: number): number?
+	local weapon = playerWeapons[userId]
+	local typeConfig = weapon and CombatConfig.get(weapon.config.weaponType)
+	if not typeConfig then
+		return nil
+	end
+	local wanted = CombatConfig.crash.step
+	local count = #typeConfig.steps
+	local step = typeConfig.steps[math.clamp(wanted == "last" and count or tonumber(wanted) or count, 1, count)]
+	return step.hitFrame / math.max(0.5, weapon.stats.attackSpeed or 1)
+end
+
 RunService.Heartbeat:Connect(function()
 	local now = os.clock()
 	for userId, wait in pairs(queued) do
@@ -232,9 +277,19 @@ RunService.Heartbeat:Connect(function()
 		else
 			-- landed = on the ground for a few frames in a row (the replicated floor state flickers for a moment)
 			wait.grounded = humanoid.FloorMaterial ~= Enum.Material.Air and wait.grounded + 1 or 0
-			if wait.grounded >= LANDED_FRAMES and now >= getCombo(player).busyUntil - SWING_SLACK then
-				queued[userId] = nil
-				WeaponManager.TrySwing(player, true)
+			if now >= getCombo(player).busyUntil - SWING_SLACK then
+				if wait.grounded >= LANDED_FRAMES then
+					queued[userId] = nil
+					WeaponManager.TrySwing(player, true, 0)
+				else
+					-- still falling: start the swing early enough that its hit frame lands at touchdown
+					local untilLanding = timeToLanding(character, humanoid)
+					local lead = crashLead(userId)
+					if untilLanding and lead and untilLanding <= lead then
+						queued[userId] = nil
+						WeaponManager.TrySwing(player, true, untilLanding)
+					end
+				end
 			end
 		end
 	end
