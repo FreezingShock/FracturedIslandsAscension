@@ -16,7 +16,7 @@
 	  "derived" rewards (permanent buffs) are rebuilt from the saved claimedTier every time they change, so they can
 	  never double-count. "grant" rewards (items, recipes) are given exactly once because claimedTier is a high-water mark.
 
-	  ctx for describe = { skill = <collected skill>, key = <collected stat>, tier = n }.
+	  ctx for describe = { skill = <collected skill>, key = <collected stat>, tier = n }; the Skills system passes { skill = <skill>, level = n }.
 	  New reward type = one register() call. The reward page and the tooltips only call describe(), so they need no change.
 
 	  CollectionRewards.describe(reward, ctx) -> the table above (never nil)
@@ -140,6 +140,38 @@ CollectionRewards.register("recipe", {
 			name = "Recipe " .. tostring(reward.id),
 			icon = reward.icon or "",
 			color = "#FF55FF",
+		}
+	end,
+})
+
+CollectionRewards.register("statGrant", {
+	kind = "grant",
+	describe = function(reward, ctx)
+		local config = statInfo(reward.skill, reward.key)
+		local name = config and config.name or tostring(reward.key)
+		local color = config and config.color or "#FFFFFF"
+		local amount = tostring(reward.amount or 0)
+		return {
+			short = "+" .. amount,
+			text = string.format('<font color="#55FF55">+%s</font> <font color="%s">%s</font>', amount, color, name),
+			name = name,
+			icon = config and config.icon or "",
+			color = color,
+		}
+	end,
+})
+
+-- A feature or title the old UI promised: recorded in the profile (unlocks[id] = true), behaviour comes later.
+CollectionRewards.register("unlock", {
+	kind = "grant",
+	describe = function(reward, ctx)
+		local color = reward.color or "#FFD700"
+		return {
+			short = "Unlock",
+			text = string.format('<font color="%s">%s</font>', color, tostring(reward.label or reward.id)),
+			name = tostring(reward.label or reward.id),
+			icon = reward.icon or "",
+			color = color,
 		}
 	end,
 })

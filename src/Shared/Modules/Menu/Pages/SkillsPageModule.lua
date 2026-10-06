@@ -1,207 +1,81 @@
--- ============================================================
---  SkillsPageModule (ModuleScript)
---  Place inside: TemporaryMenus
---
---  Refactored: No more skill cards or ScrollingFrame.
---  Each SkillsGrid button opens directly to the skill breakdown.
---  Called by CentralizedMenuController via:
---    init(sharedRefs, skillsMenuFrame)
---    open(statKey) — shows breakdown for that skill immediately
---    close()       — called when navigating away (animated)
---    reset()       — called on menu hard-close (instant)
---    toggleRomanNumerals() — returns new useRomanNumerals state
--- ============================================================
+--[[
+	SkillsPageModule (ModuleScript)
+	Place inside: ReplicatedStorage > Modules
 
--- Debug logging is off by default (these ran in hot paths: every navigation / purchase / notification).
-local DEBUG = false
-local function dprint(...)
-	if DEBUG then
-		print(...)
-	end
-end
+	The Skills page of the Nexus menu: each SkillsGrid button opens the breakdown of one skill (SkillsMenu.SkillDescFrame).
+	Everything it shows comes from SkillsConfig (skills, caps, XP curve, rewards, Roman numerals) and the SkillUpdated payload
+	the server sends ({ level, xp, xpNeeded, roman, pct, cap, wisdom } per skill); rewards are granted by SkillRewardService.
+
+	SkillDescFrame (built by tools/studio/build_skills_menu.luau, looked up BY NAME):
+	  StatNameVal  StatName, StatValue (level), LineDivider.Line      Desc.DescLabel
+	  XpBar        Fill + Label ("xp / needed (pct)")                 WisdomLabel   NextReward
+	  SkillLevels  ScrollingFrame with reusable slots Level1..Level25 + PageToggle (page count = ceil(cap / 25))
+
+	Called by CentralizedMenuController:
+	  init(sharedRefs, skillsMenuFrame)
+	  open(statKey)            show the breakdown of one skill
+	  close() / reset()        navigating away (animated) / menu hard-closed (instant)
+	  showGridSkillTooltip(statKey, silent) / hideGridSkillTooltip()   hub + statistics tooltip
+--]]
 
 local TweenService = game:GetService("TweenService")
-local RunService = game:GetService("RunService")
-local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local player = Players.LocalPlayer
+local Modules = ReplicatedStorage:WaitForChild("Modules")
+local Config = require(Modules:WaitForChild("SkillsConfig")) :: any
+local CollectionRewards = require(Modules:WaitForChild("CollectionRewards")) :: any
+local StatisticLogModule = require(Modules:WaitForChild("StatisticLogModule")) :: any
+local Style = require(Modules:WaitForChild("TooltipModule"):WaitForChild("Style")) :: any
 
--- ===================== AUDIO =====================
-local UIClick = workspace:WaitForChild("UISounds"):WaitForChild("Click")
-local UIClick3 = workspace:WaitForChild("UISounds"):WaitForChild("Click3")
+local UISounds = workspace:WaitForChild("UISounds")
+local UIClick = UISounds:WaitForChild("Click")
+local UIClick3 = UISounds:WaitForChild("Click3")
 
--- ===================== MODULE STATE =====================
-local initialized = false
-local isOpen = false
-
-local shared = nil
-local TooltipModule = nil
-
--- Frame references (set by init)
-local skillsMenuFrame = nil
-local skillDescFrame = nil
-
--- ===================== ROMAN NUMERAL TABLE =====================
-local ROMAN_DISPLAY = {
-	[1] = "I",
-	[2] = "II",
-	[3] = "III",
-	[4] = "IV",
-	[5] = "V",
-	[6] = "VI",
-	[7] = "VII",
-	[8] = "VIII",
-	[9] = "IX",
-	[10] = "X",
-	[11] = "XI",
-	[12] = "XII",
-	[13] = "XIII",
-	[14] = "XIV",
-	[15] = "XV",
-	[16] = "XVI",
-	[17] = "XVII",
-	[18] = "XVIII",
-	[19] = "XIX",
-	[20] = "XX",
-	[21] = "XXI",
-	[22] = "XXII",
-	[23] = "XXIII",
-	[24] = "XXIV",
-	[25] = "XXV",
-	[26] = "XXVI",
-	[27] = "XXVII",
-	[28] = "XXVIII",
-	[29] = "XXIX",
-	[30] = "XXX",
-	[31] = "XXXI",
-	[32] = "XXXII",
-	[33] = "XXXIII",
-	[34] = "XXXIV",
-	[35] = "XXXV",
-	[36] = "XXXVI",
-	[37] = "XXXVII",
-	[38] = "XXXVIII",
-	[39] = "XXXIX",
-	[40] = "XL",
-	[41] = "XLI",
-	[42] = "XLII",
-	[43] = "XLIII",
-	[44] = "XLIV",
-	[45] = "XLV",
-	[46] = "XLVI",
-	[47] = "XLVII",
-	[48] = "XLVIII",
-	[49] = "XLIX",
-	[50] = "L",
-}
-
-local function toRoman(n)
-	return ROMAN_DISPLAY[math.clamp(n, 1, 50)] or tostring(n)
-end
+local PAGE_SIZE = Config.PAGE_SIZE
+local ORDER = Config.ORDER
+local SHADOW_DELAY = 0.5
+local TOAST_SECONDS = 4
+local COLORS = { completed = "#55FF55", inProgress = "#FFFF55", locked = "#FF5555" }
+local MILESTONE_COLOR = Color3.fromHex("FFD700")
 
 -- ===================== STATE =====================
+local initialized = false
+local isOpen = false
+local sharedRefs: any = nil
+local TooltipModule: any = nil
+
+local activeSkill: string? = nil
+local currentPage = 1
+local latestData: any = nil
 local useRomanNumerals = true
-local activeStatKey = nil
-local currentLevelPage = 1
-local latestSkillData = nil
-local activeTooltipSlot = nil
 
--- ===================== ROMAN / NUMBER TOGGLE HELPERS =====================
-local function displayLevel(n)
-	if useRomanNumerals then
-		return ROMAN_DISPLAY[math.clamp(n, 1, 50)] or tostring(n)
-	else
-		return tostring(n)
-	end
+-- Frame references (set by init)
+local skillDescFrame, statNameLabel, statUIStroke, statUnderline, descLabel, line, statValueLabel
+local skillLevelsFrame, levelScrollFrame, pageToggleButton, levelGradient
+local xpBar, xpFill, xpLabel, xpLeft, xpRight, xpMask, wisdomLabel, nextRewardLabel
+local DEFAULT_LEVELS_BG, DEFAULT_LEVELS_STROKE
+
+local slots: { any } = {} -- [i] = { button, label, stroke, thickness, level, status, milestone, text }
+local barShown = -1 -- last xp fraction drawn (so the tween only runs when it changes)
+local barValue = Instance.new("NumberValue") -- the tweened fill fraction, drawn through the mask gradient
+local barTween: Tween? = nil
+local hoveredSlot: number? = nil
+local gridTooltip: { active: boolean, skill: string? } = { active = false, skill = nil }
+
+-- ===================== HELPERS =====================
+local function roman(n: number): string
+	return Config.roman(n)
 end
 
-local function displayLevelAlt(n)
-	if useRomanNumerals then
-		return tostring(n)
-	else
-		return ROMAN_DISPLAY[math.clamp(n, 1, 50)] or tostring(n)
-	end
+local function displayLevel(n: number): string
+	return useRomanNumerals and roman(n) or tostring(n)
 end
 
-local function fmtLevelTitle(colorHex, skillName, level)
-	local primary = displayLevel(level)
-	local secondary = displayLevelAlt(level)
-	return string.format(
-		"<font color='%s'><b>%s</b> <b>%s</b></font>"
-			.. "<font family='rbxasset://11598121416' weight='400' color='#AAAAAA'> (%s)</font>",
-		colorHex,
-		skillName,
-		primary,
-		secondary
-	)
+local function displayLevelAlt(n: number): string
+	return useRomanNumerals and tostring(n) or roman(n)
 end
 
--- ===================== SKILL CONFIG (static data) =====================
-local SKILL_CONFIG = {
-	Farming = {
-		stat = "Farming",
-		description = "Farming skill increases your multipliers among all Farming buttons.",
-		color = Color3.fromHex("#FFAA00"),
-		hex = "#FFAA00",
-	},
-	Foraging = {
-		stat = "Foraging",
-		description = "Foraging skill increases your multipliers among all Foraging buttons.",
-		color = Color3.fromHex("#00AA00"),
-		hex = "#00AA00",
-	},
-	Fishing = {
-		stat = "Fishing",
-		description = "Fishing skill increases your multipliers among all Fishing buttons.",
-		color = Color3.fromHex("#00AAAA"),
-		hex = "#00AAAA",
-	},
-	Mining = {
-		stat = "Mining",
-		description = "Mining skill increases your multipliers among all Mining buttons.",
-		color = Color3.fromHex("#5555FF"),
-		hex = "#5555FF",
-	},
-	Combat = {
-		stat = "Combat",
-		description = "Combat skill increases your multipliers among all Combat buttons.",
-		color = Color3.fromHex("#FF5555"),
-		hex = "#FF5555",
-	},
-	Carpentry = {
-		stat = "Carpentry",
-		description = "Carpentry skill increases your multipliers when crafting Accessories, Armor, or other trinkets.",
-		color = Color3.fromHex("#55FF55"),
-		hex = "#55FF55",
-	},
-}
-
--- Ordered list for skill average calculation
-local SKILL_ORDER = { "Farming", "Foraging", "Fishing", "Mining", "Combat", "Carpentry" }
-
--- ===================== SKILL DATA =====================
-local DEFAULT_SKILL_DATA = {
-	Farming = { level = 1, xp = 0, xpNeeded = 50, roman = "I", pct = 0 },
-	Foraging = { level = 1, xp = 0, xpNeeded = 50, roman = "I", pct = 0 },
-	Fishing = { level = 1, xp = 0, xpNeeded = 50, roman = "I", pct = 0 },
-	Mining = { level = 1, xp = 0, xpNeeded = 50, roman = "I", pct = 0 },
-	Combat = { level = 1, xp = 0, xpNeeded = 50, roman = "I", pct = 0 },
-	Carpentry = { level = 1, xp = 0, xpNeeded = 50, roman = "I", pct = 0 },
-}
-
-local function getSkillEntry(statKey)
-	if latestSkillData then
-		local entry = latestSkillData[statKey]
-		if entry and type(entry) == "table" then
-			return entry
-		end
-	end
-	return DEFAULT_SKILL_DATA[statKey] or { level = 1, xp = 0, xpNeeded = 50, roman = "I", pct = 0 }
-end
-
--- ===================== SHORTHAND FORMATTER =====================
-local function shorthand(n)
+local function shorthand(n: number): string
 	if n >= 1000000 then
 		local v = n / 1000000
 		return (v == math.floor(v)) and (math.floor(v) .. "m") or (string.format("%.1f", v) .. "m")
@@ -209,341 +83,75 @@ local function shorthand(n)
 		local v = n / 1000
 		return (v == math.floor(v)) and (math.floor(v) .. "k") or (string.format("%.1f", v) .. "k")
 	end
-	return tostring(n)
+	return tostring(math.floor(n))
 end
 
--- ===================== REWARD SYSTEM =====================
-local GENERAL_REWARDS = {
-	Farming = {
-		{
-			name = "Farmhand",
-			color = "#FFFF55",
-			stat = "♣ Farming Fortune",
-			statColor = "#FFAA00",
-			base = 4,
-			desc = "\n		increases your chance for multiple crop \n		stats.",
-		},
-		{ label = { { text = "2 ", color = "#55FF55" }, { text = "♥ Health", color = "#FF5555" } } },
-		{ label = { { text = "200 ", color = "#FFAA00" }, { text = "Coins", color = "#AAAAAA" } } },
-		{ label = { { text = "5 ", color = "#FF55FF" }, { text = "Aetheric Nexus XP", color = "#FF55FF" } } },
-	},
-	Foraging = {
-		{
-			name = "Forager",
-			color = "#FFFF55",
-			stat = "♣ Foraging Fortune",
-			statColor = "#FFAA00",
-			base = 4,
-			desc = "\n		increases your chance for multiple \n		wood stats.",
-		},
-		{ label = { { text = "0.25 ", color = "#55FF55" }, { text = "☯ Critical Chance", color = "#5555FF" } } },
-		{ label = { { text = "200 ", color = "#FFAA00" }, { text = "Coins", color = "#AAAAAA" } } },
-		{ label = { { text = "5 ", color = "#FF55FF" }, { text = "Aetheric Nexus XP", color = "#FF55FF" } } },
-	},
-	Fishing = {
-		{
-			name = "Fisher",
-			color = "#FFFF55",
-			stat = "♣ Fishing Fortune",
-			statColor = "#FFAA00",
-			base = 4,
-			desc = "\n		increases your chance for multiple fish \n		stats.",
-		},
-		{ label = { { text = "0.01s ", color = "#FFFFFF" }, { text = "Reel Speed", color = "#00AAAA" } } },
-		{ label = { { text = "200 ", color = "#FFAA00" }, { text = "Coins", color = "#AAAAAA" } } },
-		{ label = { { text = "5 ", color = "#FF55FF" }, { text = "Aetheric Nexus XP", color = "#FF55FF" } } },
-	},
-	Mining = {
-		{
-			name = "Spelunker",
-			color = "#FFFF55",
-			stat = "♣ Mining Fortune",
-			statColor = "#FFAA00",
-			base = 4,
-			desc = "\n		increases your chance for multiple ore \n		stats.",
-		},
-		{ label = { { text = "0.01s ", color = "#FFFFFF" }, { text = "Mine Speed", color = "#5555FF" } } },
-		{ label = { { text = "200 ", color = "#FFAA00" }, { text = "Coins", color = "#AAAAAA" } } },
-		{ label = { { text = "5 ", color = "#FF55FF" }, { text = "Aetheric Nexus XP", color = "#FF55FF" } } },
-	},
-	Combat = {
-		{
-			name = "Warrior",
-			color = "#FFFF55",
-			stat = "☀ Combat Defense",
-			statColor = "#55FF55",
-			base = 1,
-			desc = "\n		which defends against combat button \n		attacks.",
-		},
-		{ label = { { text = "1 ", color = "#FFFFFF" }, { text = "Defense", color = "#55FF55" } } },
-		{ label = { { text = "200 ", color = "#FFAA00" }, { text = "Coins", color = "#AAAAAA" } } },
-		{ label = { { text = "5 ", color = "#FF55FF" }, { text = "Aetheric Nexus XP", color = "#FF55FF" } } },
-	},
-	Carpentry = {
-		{
-			name = "Artisan",
-			color = "#FFFF55",
-			stat = "Crafting Quality",
-			statColor = "#FFAA00",
-			base = 4,
-			desc = "\n		increases your quality of crafted items.",
-		},
-		{ label = { { text = "0.01 ", color = "#FFFFFF" }, { text = "Build Quality", color = "#55FF55" } } },
-		{ label = { { text = "200 ", color = "#FFAA00" }, { text = "Coins", color = "#AAAAAA" } } },
-		{ label = { { text = "5 ", color = "#FF55FF" }, { text = "Aetheric Nexus XP", color = "#FF55FF" } } },
-	},
-}
+local function fmtLevelTitle(colorHex: string, skillName: string, level: number): string
+	return string.format(
+		"<font color='%s'><b>%s</b> <b>%s</b></font><font family='rbxasset://11598121416' weight='400' color='#AAAAAA'> (%s)</font>",
+		colorHex,
+		skillName,
+		displayLevel(level),
+		displayLevelAlt(level)
+	)
+end
 
-local SPECIFIC_REWARDS = {
-	Farming = {
-		[5] = { { label = "Crop Storage +10", color = "#55FFFF", special = true } },
-		[10] = {
-			{ label = "Farming Buttons 2 Unlocked", color = "#FFAA00", special = true },
-			{ label = "+5% Crop Yield (Milestone)", color = "#55FF55", special = false },
-		},
-		[15] = { { label = "Auto-Harvest Ability Unlocked", color = "#FF55FF", special = true } },
-		[20] = {
-			{ label = "Farming Buttons 3 Unlocked", color = "#FFAA00", special = true },
-			{ label = "+10% Harvest Speed (Milestone)", color = "#FFAA00", special = false },
-		},
-		[25] = {
-			{ label = "Master Farmer Title", color = "#FFD700", special = true },
-			{ label = "Rare Seed Drop Chance +2%", color = "#FF55FF", special = false },
-		},
-		[30] = { { label = "Farming Buttons 4 Unlocked", color = "#FFAA00", special = true } },
-		[40] = {
-			{ label = "Farming Buttons 5 Unlocked", color = "#FFAA00", special = true },
-			{ label = "Legendary Seed Access", color = "#FFD700", special = true },
-		},
-		[50] = {
-			{ label = "MAX LEVEL — Grandmaster Farmer", color = "#FFD700", special = true },
-			{ label = "Exclusive Farm Pet Unlocked", color = "#FF55FF", special = true },
-			{ label = "+25% All Farming Stats", color = "#55FF55", special = false },
-		},
-	},
-	Foraging = {
-		[5] = { { label = "Forage Bag Slot +5", color = "#55FFFF", special = true } },
-		[10] = {
-			{ label = "Foraging Area 2 Unlocked", color = "#00AA00", special = true },
-			{ label = "+5% Rare Find Chance", color = "#55FF55", special = false },
-		},
-		[15] = { { label = "Night Foraging Unlocked", color = "#FF55FF", special = true } },
-		[20] = { { label = "Foraging Area 3 Unlocked", color = "#00AA00", special = true } },
-		[25] = {
-			{ label = "Master Forager Title", color = "#FFD700", special = true },
-			{ label = "Legendary Herb Chance +1%", color = "#FF55FF", special = false },
-		},
-		[50] = {
-			{ label = "MAX LEVEL — Grandmaster Forager", color = "#FFD700", special = true },
-			{ label = "+25% All Foraging Stats", color = "#55FF55", special = false },
-		},
-	},
-	Fishing = {
-		[5] = { { label = "Fishing Rod Upgrade Slot", color = "#55FFFF", special = true } },
-		[10] = {
-			{ label = "Deep Sea Fishing Unlocked", color = "#00AAAA", special = true },
-			{ label = "+5% Rare Fish Chance", color = "#55FF55", special = false },
-		},
-		[15] = { { label = "Night Fishing Unlocked", color = "#FF55FF", special = true } },
-		[20] = { { label = "Fishing Spot 3 Unlocked", color = "#00AAAA", special = true } },
-		[25] = {
-			{ label = "Master Angler Title", color = "#FFD700", special = true },
-			{ label = "Legendary Fish Chance +1%", color = "#FF55FF", special = false },
-		},
-		[50] = {
-			{ label = "MAX LEVEL — Grandmaster Angler", color = "#FFD700", special = true },
-			{ label = "+25% All Fishing Stats", color = "#55FF55", special = false },
-		},
-	},
-	Mining = {
-		[5] = { { label = "Ore Bag Slot +5", color = "#55FFFF", special = true } },
-		[10] = {
-			{ label = "Deep Mine Access Unlocked", color = "#5555FF", special = true },
-			{ label = "+5% Gem Find Chance", color = "#55FF55", special = false },
-		},
-		[15] = { { label = "Dynamite Ability Unlocked", color = "#FF5555", special = true } },
-		[20] = {
-			{ label = "Mine Level 3 Unlocked", color = "#5555FF", special = true },
-			{ label = "+10% Ore Yield (Milestone)", color = "#FFAA00", special = false },
-		},
-		[25] = {
-			{ label = "Master Miner Title", color = "#FFD700", special = true },
-			{ label = "Legendary Ore Chance +1%", color = "#FF55FF", special = false },
-		},
-		[50] = {
-			{ label = "MAX LEVEL — Grandmaster Miner", color = "#FFD700", special = true },
-			{ label = "Exclusive Mining Pet Unlocked", color = "#FF55FF", special = true },
-			{ label = "+25% All Mining Stats", color = "#55FF55", special = false },
-		},
-	},
-	Combat = {
-		[5] = { { label = "Combo Multiplier Unlocked", color = "#55FFFF", special = true } },
-		[10] = {
-			{ label = "Dual Wield Unlocked", color = "#FF5555", special = true },
-			{ label = "+5% Critical Damage", color = "#55FF55", special = false },
-		},
-		[15] = { { label = "Parry Ability Unlocked", color = "#FF55FF", special = true } },
-		[20] = {
-			{ label = "Combat Arena 3 Unlocked", color = "#FF5555", special = true },
-			{ label = "+10% All Damage (Milestone)", color = "#FFAA00", special = false },
-		},
-		[25] = {
-			{ label = "Master Combatant Title", color = "#FFD700", special = true },
-			{ label = "Berserker Passive Unlocked", color = "#FF55FF", special = false },
-		},
-		[50] = {
-			{ label = "MAX LEVEL — Grandmaster Warrior", color = "#FFD700", special = true },
-			{ label = "Exclusive Combat Pet Unlocked", color = "#FF55FF", special = true },
-			{ label = "+25% All Combat Stats", color = "#55FF55", special = false },
-		},
-	},
-	Carpentry = {
-		[5] = { { label = "Blueprint Slot +1", color = "#55FFFF", special = true } },
-		[10] = {
-			{ label = "Advanced Crafting Unlocked", color = "#55FF55", special = true },
-			{ label = "+5% Material Efficiency", color = "#55FF55", special = false },
-		},
-		[15] = { { label = "Auto-Craft Ability Unlocked", color = "#FF55FF", special = true } },
-		[20] = {
-			{ label = "Master Workbench Unlocked", color = "#55FF55", special = true },
-			{ label = "+10% Craft Speed (Milestone)", color = "#FFAA00", special = false },
-		},
-		[25] = {
-			{ label = "Master Carpenter Title", color = "#FFD700", special = true },
-			{ label = "Legendary Blueprint Access", color = "#FF55FF", special = false },
-		},
-		[50] = {
-			{ label = "MAX LEVEL — Grandmaster Crafter", color = "#FFD700", special = true },
-			{ label = "Exclusive Carpentry Pet", color = "#FF55FF", special = true },
-			{ label = "+25% All Carpentry Stats", color = "#55FF55", special = false },
-		},
-	},
-}
-
-local function fmtVal(base, level)
-	local v = base * level
-	if v == math.floor(v) then
-		return tostring(math.floor(v))
+local function entryOf(skill: string)
+	local entry = latestData and latestData[skill]
+	if type(entry) == "table" then
+		return entry
 	end
-	return string.format("%.2f", v)
+	return { level = 1, xp = 0, xpNeeded = Config.xpNeeded(skill, 1), pct = 0, cap = Config.cap(skill), wisdom = 0 }
 end
 
-local function renderLabel(r)
-	local prefix = "<font color='#AAAAAA'>\t+</font>"
-	if type(r.label) == "table" then
-		local parts = {}
-		for _, seg in ipairs(r.label) do
-			table.insert(parts, "<font color='" .. seg.color .. "'>" .. seg.text .. "</font>")
-		end
-		return prefix .. table.concat(parts)
-	else
-		return prefix .. "<font color='" .. r.color .. "'>" .. r.label .. "</font>"
+local function statusOf(level: number, playerLevel: number): string
+	if level <= playerLevel then
+		return "completed"
+	elseif level == playerLevel + 1 then
+		return "inProgress"
 	end
+	return "locked"
 end
 
-local function buildRewardText(skillName, level)
+--- Rich text lines of a level's rewards, straight from the registry (a new reward type needs no change here).
+local function rewardLines(skill: string, level: number): { string }
 	local lines = {}
-	local general = GENERAL_REWARDS[skillName]
-	if general then
-		for _, r in ipairs(general) do
-			if r.name then
-				table.insert(
-					lines,
-					"	<font color='" .. r.color .. "'><b>" .. r.name .. " " .. displayLevel(level) .. "</b></font>"
-				)
-				local currVal = "+" .. fmtVal(r.base, level)
-				local valStr
-				if level <= 1 then
-					valStr = "<font color='#55FF55'><b>" .. currVal .. "</b></font>"
-				else
-					local prevVal = "+" .. fmtVal(r.base, level - 1)
-					valStr = "<font color='#777777'>"
-						.. prevVal
-						.. "</font>"
-						.. "<font color='#AAAAAA'>→</font>"
-						.. "<font color='#55FF55'><b>"
-						.. currVal
-						.. "</b></font>"
-				end
-				local statPart = "<font color='" .. r.statColor .. "'><b>" .. r.stat .. "</b></font>"
-				local descPart = (r.desc and r.desc ~= "") and "<font color='#FFFFFF'>, " .. r.desc .. "</font>" or ""
-				table.insert(lines, "		<font color='#FFFFFF'>Grants </font>" .. valStr .. " " .. statPart .. descPart)
-			else
-				table.insert(lines, renderLabel(r))
-			end
-		end
+	for _, reward in ipairs(Config.getRewards(skill, level)) do
+		local info = CollectionRewards.describe(reward, { skill = skill, level = level })
+		local star = (reward.type == "unlock") and "<font color='#FFD700'>★ </font>" or ""
+		table.insert(lines, star .. info.text)
 	end
-	local specific = SPECIFIC_REWARDS[skillName] and SPECIFIC_REWARDS[skillName][level]
-	if specific and #specific > 0 then
-		if #lines > 0 then
-			table.insert(lines, "")
-		end
-		for _, r in ipairs(specific) do
-			local prefix = r.special and "<font color='#FFD700'>★ </font>" or "<font color='#AAAAAA'>‣ </font>"
-			table.insert(lines, prefix .. "<font color='" .. r.color .. "'>" .. r.label .. "</font>")
-		end
-	end
-	if #lines == 0 then
-		return "<font color='#AAAAAA'>No rewards defined for this level.</font>"
-	end
-	return table.concat(lines, "\n")
+	return lines
 end
 
--- ===================== DESC FRAME REFERENCES (set in init) =====================
-local statNameLabel = nil
-local statUIStroke = nil
-local statUnderline = nil
-local descLabel = nil
-local line = nil
-local statValueLabel = nil
-local skillLevelsFrame = nil
-local levelScrollFrame = nil
-local pageToggleButton = nil
-local levelGradient = nil
+local function progressBlock(entry: any, colorHex: string): any
+	local pct = entry.pct or 0
+	return {
+		pct = pct,
+		color = colorHex,
+		animate = true,
+		label = string.format(
+			"<font color='#FFFF55'>%s</font><font color='#FFAA00'>/</font><font color='#FFFF55'>%s</font> <font color='#AAAAAA'>(%d%%)</font>",
+			shorthand(entry.xp or 0),
+			shorthand(entry.xpNeeded or 0),
+			math.floor(pct * 100)
+		),
+	}
+end
 
-local DEFAULT_SKILLLEVELS_BG = nil
-local DEFAULT_SKILLLEVELS_STROKE = nil
+local function skillAverage(): number
+	local total = 0
+	for _, skill in ipairs(ORDER) do
+		total += entryOf(skill).level or 1
+	end
+	return total / #ORDER
+end
 
--- ===================== LEVEL BOX CONSTANTS =====================
-local SLOT_NAMES = {
-	"I",
-	"II",
-	"III",
-	"IV",
-	"V",
-	"VI",
-	"VII",
-	"VIII",
-	"IX",
-	"X",
-	"XI",
-	"XII",
-	"XIII",
-	"XIV",
-	"XV",
-	"XVI",
-	"XVII",
-	"XVIII",
-	"XIX",
-	"XX",
-	"XXI",
-	"XXII",
-	"XXIII",
-	"XXIV",
-	"XXV",
-}
-local COLOR_COMPLETE = Color3.fromHex("55FF55")
-local COLOR_CURRENT = Color3.fromHex("FFFF55")
-local COLOR_LOCKED = Color3.fromHex("FF5555")
-
--- ===================== SHADOW SYSTEM =====================
-local SHADOW_DELAY = 0.5
-local CANVAS_MAX_X = 251
-local BUFFER_PX = 35
-local shadowTimer = 0
+-- ===================== SCROLL SHADOW =====================
+-- A soft gradient over the level strip that shows after the pointer has been idle, hinting that it scrolls.
 local shadowActive = false
-local shadowTween = nil
-local lastCanvasX = 0
+local shadowTween: Tween? = nil
+local shadowToken = 0
 
 local GRAD_RIGHT = NumberSequence.new({
 	NumberSequenceKeypoint.new(0, 1),
@@ -562,22 +170,31 @@ local GRAD_BOTH = NumberSequence.new({
 	NumberSequenceKeypoint.new(1, 0),
 })
 
-local function getTargetGradient(canvasX)
-	if canvasX <= BUFFER_PX then
-		return GRAD_RIGHT
-	elseif canvasX >= CANVAS_MAX_X - BUFFER_PX then
-		return GRAD_LEFT
-	else
-		return GRAD_BOTH
+local function hideShadow()
+	if shadowTween then
+		shadowTween:Cancel()
+		shadowTween = nil
 	end
-end
-
-local function showShadow(canvasX)
-	if shadowActive then
+	if not shadowActive then
 		return
 	end
+	shadowActive = false
+	shadowTween = TweenService:Create(
+		levelScrollFrame,
+		TweenInfo.new(0.3, Enum.EasingStyle.Quint, Enum.EasingDirection.Out),
+		{ BackgroundTransparency = 1 }
+	)
+	shadowTween:Play()
+end
+
+local function showShadow()
+	local maxX = math.max(levelScrollFrame.AbsoluteCanvasSize.X - levelScrollFrame.AbsoluteSize.X, 0)
+	if maxX <= 1 then
+		return -- everything fits: nothing to hint at
+	end
+	local x = levelScrollFrame.CanvasPosition.X
+	levelGradient.Transparency = x <= 35 and GRAD_RIGHT or (x >= maxX - 35 and GRAD_LEFT or GRAD_BOTH)
 	shadowActive = true
-	levelGradient.Transparency = getTargetGradient(canvasX)
 	if shadowTween then
 		shadowTween:Cancel()
 	end
@@ -589,109 +206,245 @@ local function showShadow(canvasX)
 	shadowTween:Play()
 end
 
-local function hideShadow()
-	if not shadowActive then
-		return
-	end
-	shadowActive = false
-	shadowTimer = 0
-	if shadowTween then
-		shadowTween:Cancel()
-	end
-	shadowTween = TweenService:Create(
-		levelScrollFrame,
-		TweenInfo.new(0.3, Enum.EasingStyle.Quint, Enum.EasingDirection.Out),
-		{ BackgroundTransparency = 1 }
-	)
-	shadowTween:Play()
+--- Restart the idle timer (a debounce, so there is no per-frame loop while the page is closed or idle).
+local function scheduleShadow()
+	hideShadow()
+	shadowToken += 1
+	local token = shadowToken
+	task.delay(SHADOW_DELAY, function()
+		if token == shadowToken and isOpen then
+			showShadow()
+		end
+	end)
 end
 
 -- ===================== TYPEWRITER =====================
-local typewriterThreads = {}
-
-local function typewriteCore(label, text, speed, sound)
-	speed = speed or 0.03
-	if typewriterThreads[label] then
-		typewriterThreads[label] = false
-	end
-	local token = {}
-	typewriterThreads[label] = token
+local typewriterToken = 0
+local function typewrite(label: TextLabel, text: string, speed: number)
+	typewriterToken += 1
+	local token = typewriterToken
 	label.Text = text
 	label.MaxVisibleGraphemes = 0
 	local length = utf8.len(text) or #text
 	task.spawn(function()
 		for i = 1, length do
-			if typewriterThreads[label] ~= token then
+			if token ~= typewriterToken then
 				return
 			end
 			label.MaxVisibleGraphemes = i
-			if sound then
-				UIClick3:Play()
-			end
 			task.wait(speed)
 		end
-		label.MaxVisibleGraphemes = -1
-		if typewriterThreads[label] == token then
-			typewriterThreads[label] = nil
+		if token == typewriterToken then
+			label.MaxVisibleGraphemes = -1
 		end
 	end)
 end
 
-local function typewrite(label, text, speed)
-	typewriteCore(label, text, speed, false)
+-- ===================== SLOT PULSE =====================
+local pulseTween: Tween? = nil
+local pulsedButton: any = nil
+
+local function stopPulse()
+	if pulseTween then
+		pulseTween:Cancel()
+		pulseTween = nil
+	end
+	if pulsedButton and pulsedButton.Parent then
+		pulsedButton.BackgroundTransparency = 0.75
+	end
+	pulsedButton = nil
 end
 
--- ===================== TWEEN HELPER =====================
-local uiTweenInfo = TweenInfo.new(0.5, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
-local function _tween(object, properties)
-	TweenService:Create(object, uiTweenInfo, properties):Play()
-end
-
--- ===================== UPDATE SKILL LEVEL BOXES =====================
-local function updateSkillLevelBoxes(statKey)
-	if not statKey then
+--- The level being worked on breathes a little (BackgroundTransparency 0.75 <-> 0.5).
+local function startPulse(button: any)
+	if pulsedButton == button and pulseTween then
 		return
 	end
-	local skillData = getSkillEntry(statKey)
-	local playerLevel = skillData.level or 1
-	local pageOffset = (currentLevelPage - 1) * 25
+	stopPulse()
+	pulsedButton = button
+	button.BackgroundTransparency = 0.75
+	pulseTween = TweenService:Create(
+		button,
+		TweenInfo.new(0.9, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
+		{ BackgroundTransparency = 0.5 }
+	)
+	pulseTween:Play()
+end
 
-	for slotIndex, slotName in ipairs(SLOT_NAMES) do
-		local button = levelScrollFrame:FindFirstChild(slotName)
-		if not button then
-			continue
-		end
-		local label = button:FindFirstChild("Label")
-		local uiStroke = button:FindFirstChildOfClass("UIStroke")
-		local realLevel = pageOffset + slotIndex
-		local colour
-		if realLevel <= playerLevel then
-			colour = COLOR_COMPLETE
-		elseif realLevel == playerLevel + 1 then
-			colour = COLOR_CURRENT
-		else
-			colour = COLOR_LOCKED
-		end
-		button.BackgroundColor3 = colour
-		if uiStroke then
-			uiStroke.Color = colour
-		end
-		if label then
-			label.TextColor3 = colour
-			label.Text = displayLevel(realLevel)
-		end
+-- ===================== RENDER =====================
+local function pageOf(skill: string, level: number): number
+	return math.clamp(math.ceil(math.max(level, 1) / PAGE_SIZE), 1, Config.pageCount(skill))
+end
+
+-- ===================== XP BAR (the tooltip's progress bar) =====================
+--- The fill is revealed by a UIGradient transparency mask, exactly like TooltipModule's progress bar.
+local function maskSequence(p: number): NumberSequence
+	p = math.clamp(p, 0, 1)
+	if p <= 0 then
+		return NumberSequence.new(1)
+	elseif p >= 1 then
+		return NumberSequence.new(0)
 	end
+	p = math.min(p, 0.995)
+	return NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 0),
+		NumberSequenceKeypoint.new(p, 0),
+		NumberSequenceKeypoint.new(p + 0.004, 1),
+		NumberSequenceKeypoint.new(1, 1),
+	})
+end
 
-	local toggleLabel = pageToggleButton:FindFirstChild("Label")
-	if toggleLabel then
-		toggleLabel.Text = currentLevelPage == 1
-				and displayLevel(26) .. " – " .. displayLevel(50) .. " <font color='#FFFF55'>▶</font>"
-			or "<font color='#FFFF55'>◀</font> " .. displayLevel(1) .. " – " .. displayLevel(25)
+barValue.Changed:Connect(function(value)
+	if xpMask then
+		xpMask.Transparency = maskSequence(value)
+	end
+end)
+
+local function setBar(pct: number, colorHex: string, animate: boolean)
+	if barTween then
+		barTween:Cancel()
+		barTween = nil
+	end
+	xpMask.Color = ColorSequence.new(Style.color3(Style.light(colorHex)), Style.color3(Style.dark(colorHex)))
+	if animate then
+		barTween = TweenService:Create(
+			barValue,
+			TweenInfo.new(0.35, Enum.EasingStyle.Quint, Enum.EasingDirection.Out),
+			{ Value = pct }
+		)
+		barTween:Play()
+	else
+		barValue.Value = pct
+		xpMask.Transparency = maskSequence(pct) -- Changed does not fire when the value is unchanged
 	end
 end
 
--- ===================== STAT COLOR =====================
-local function applyStatColor(color)
+local function renderToggle(skill: string)
+	local pages = Config.pageCount(skill)
+	pageToggleButton.Visible = pages > 1
+	local label = pageToggleButton:FindFirstChild("Label")
+	if not label or pages <= 1 then
+		return
+	end
+	local nextPage = currentPage % pages + 1
+	local first = (nextPage - 1) * PAGE_SIZE + 1
+	local last = math.min(nextPage * PAGE_SIZE, Config.cap(skill))
+	local range = displayLevel(first) .. " – " .. displayLevel(last)
+	label.Text = nextPage > currentPage and ("Levels " .. range .. " <font color='#FFFF55'>▶</font>")
+		or ("<font color='#FFFF55'>◀</font> Levels " .. range)
+end
+
+--- Level slots: only a slot whose level, status or milestone flag changed is touched.
+local function renderSlots(force: boolean?)
+	local skill = activeSkill
+	if not skill then
+		return
+	end
+	local entry = entryOf(skill)
+	local playerLevel = entry.level or 1
+	local cap = Config.cap(skill)
+	local pulse: any = nil
+
+	for i, slot in ipairs(slots) do
+		local level = (currentPage - 1) * PAGE_SIZE + i
+		if level > cap then
+			if slot.button.Visible then
+				slot.button.Visible = false
+				slot.level = nil
+			end
+			continue
+		end
+		local status = statusOf(level, playerLevel)
+		local milestone = Config.isMilestone(skill, level)
+		local text = displayLevel(level)
+		if
+			force
+			or slot.level ~= level
+			or slot.status ~= status
+			or slot.milestone ~= milestone
+			or slot.text ~= text
+		then
+			slot.level, slot.status, slot.milestone, slot.text = level, status, milestone, text
+			local color = Color3.fromHex(COLORS[status]:sub(2))
+			slot.button.Visible = true
+			slot.button.BackgroundColor3 = color
+			if slot.stroke then
+				slot.stroke.Color = milestone and MILESTONE_COLOR or color
+				slot.stroke.Thickness = milestone and math.max(slot.thickness, 3) or slot.thickness
+			end
+			if slot.label then
+				slot.label.TextColor3 = color
+				slot.label.Text = text
+			end
+		end
+		if status == "inProgress" then
+			pulse = slot.button
+		end
+	end
+
+	if pulse then
+		startPulse(pulse)
+	else
+		stopPulse()
+	end
+	renderToggle(skill)
+end
+
+local function renderHeader(force: boolean?)
+	local skill = activeSkill
+	if not skill then
+		return
+	end
+	local config = Config.skills[skill]
+	local entry = entryOf(skill)
+	local level = entry.level or 1
+	local cap = Config.cap(skill)
+
+	statValueLabel.Text = displayLevel(level)
+
+	-- XP bar: current level on the left, next level (or MAX) on the right, the fill in the skill's color
+	if xpBar then
+		local atCap = level >= cap
+		local pct = atCap and 1 or (entry.pct or 0)
+		xpLabel.Text = atCap and "MAX LEVEL"
+			or string.format(
+				"%s / %s  (%d%%)",
+				shorthand(entry.xp or 0),
+				shorthand(entry.xpNeeded or 0),
+				math.floor(pct * 100)
+			)
+		xpLeft.Text = displayLevel(level)
+		xpRight.Text = atCap and "MAX" or displayLevel(level + 1)
+		if force or barShown ~= pct then
+			barShown = pct
+			setBar(pct, atCap and "#FFD700" or config.color, not force)
+		end
+	end
+
+	if wisdomLabel then
+		wisdomLabel.Text = string.format(
+			"<font color='%s'>%s Wisdom</font> <font color='#55FF55'>+%s%% XP</font>",
+			config.color,
+			config.name,
+			string.format("%g", math.floor((entry.wisdom or 0) * 100 + 0.5) / 100)
+		)
+	end
+
+	if nextRewardLabel then
+		if level >= cap then
+			nextRewardLabel.Text =
+				"<font color='#FFD700'>MAX LEVEL</font> <font color='#AAAAAA'>every reward of this skill is yours.</font>"
+		else
+			nextRewardLabel.Text = string.format(
+				"<font color='#AAAAAA'>Next reward (Level %s):</font>  %s",
+				displayLevel(level + 1),
+				table.concat(rewardLines(skill, level + 1), "  <font color='#555555'>|</font>  ")
+			)
+		end
+	end
+end
+
+local function applyStatColor(color: Color3)
 	statNameLabel.TextColor3 = color
 	statUIStroke.Color = color
 	statUnderline.BackgroundColor3 = color
@@ -703,166 +456,222 @@ local function applyStatColor(color)
 end
 
 local function revertStatColor()
-	skillLevelsFrame.BackgroundColor3 = DEFAULT_SKILLLEVELS_BG
-	skillLevelsFrame.UIStroke.Color = DEFAULT_SKILLLEVELS_STROKE
+	skillLevelsFrame.BackgroundColor3 = DEFAULT_LEVELS_BG
+	skillLevelsFrame.UIStroke.Color = DEFAULT_LEVELS_STROKE
 end
 
--- ===================== TOOLTIP: LEVEL BOXES =====================
+-- ===================== TOOLTIPS =====================
 local tooltipFromLevels = false
 
-local function showLevelTooltip(slotIndex)
-	if not activeStatKey then
+local function showLevelTooltip(slotIndex: number, silent: boolean?)
+	local skill = activeSkill
+	local slot = slots[slotIndex]
+	if not (skill and slot and slot.level) then
 		return
 	end
-	local config = SKILL_CONFIG[activeStatKey]
-	if not config then
-		return
+	local level = slot.level
+	local entry = entryOf(skill)
+	local status = statusOf(level, entry.level or 1)
+	local statusText = ({ completed = "Completed", inProgress = "In Progress", locked = "Locked" })[status]
+	local lines = rewardLines(skill, level)
+	if #lines == 0 then
+		lines = { "<font color='#AAAAAA'>No rewards for this level.</font>" }
 	end
-
-	activeTooltipSlot = slotIndex
-
-	local realLevel = (currentLevelPage - 1) * 25 + slotIndex
-	local skillData = getSkillEntry(activeStatKey)
-	local playerLevel = skillData.level or 1
-
-	local statusHex
-	if realLevel <= playerLevel then
-		statusHex = "#55FF55"
-	elseif realLevel == playerLevel + 1 then
-		statusHex = "#FFFF55"
-	else
-		statusHex = "#FF5555"
-	end
-
-	local tooltip = {
-		title = fmtLevelTitle(statusHex, config.stat, realLevel),
-		blocks = {
-			{ title = "Rewards", text = buildRewardText(config.stat, realLevel), align = "Left" },
-		},
+	local tooltip: any = {
+		title = fmtLevelTitle(COLORS[status], Config.skills[skill].name, level),
+		description = string.format(
+			"<font color='#AAAAAA'>Status: </font><font color='%s'><b>%s</b></font>",
+			COLORS[status],
+			statusText
+		) .. (slot.milestone and "  <font color='#FFD700'>★ Milestone</font>" or ""),
+		blocks = { { title = "Rewards", text = table.concat(lines, "\n"), align = "Left" } },
 	}
-
-	-- Progress bar only on the level the player is currently working toward
-	if realLevel == playerLevel + 1 then
-		local pct = skillData.pct or 0
-		tooltip.progress = {
-			pct = pct,
-			color = config.hex,
-			animate = true,
-			label = string.format(
-				'<font color="#FFFF55">%s</font><font color="#FFAA00">/</font><font color="#FFFF55">%s</font> <font color="#AAAAAA">(%d%%)</font>',
-				shorthand(skillData.xp or 0),
-				shorthand(skillData.xpNeeded or 50),
-				math.floor(pct * 100)
-			),
-		}
+	if status == "inProgress" then
+		tooltip.progress = progressBlock(entry, Config.skills[skill].color)
 	end
-
-	UIClick3:Play()
+	if not silent then
+		UIClick3:Play()
+	end
+	hoveredSlot = slotIndex
 	tooltipFromLevels = true
 	TooltipModule.show(tooltip, "skillLevels")
 end
 
 local function hideLevelTooltip()
+	hoveredSlot = nil
 	if not tooltipFromLevels then
 		return
 	end
 	TooltipModule.hide("skillLevels")
 	tooltipFromLevels = false
-	activeTooltipSlot = nil
 end
 
--- ===================== GRID-LEVEL SKILL TOOLTIPS =====================
-local gridTooltipActive = false
-local gridTooltipStatKey = nil
-
-local function showGridSkillTooltip(statKey, silent)
-	if not initialized then
-		return
-	end
-	local config = SKILL_CONFIG[statKey]
+local function buildGridTooltip(skill: string): any?
+	local config = Config.skills[skill]
 	if not config then
-		return
+		return nil
 	end
-
-	local skillData = getSkillEntry(statKey)
-	local level = skillData.level or 1
-	local isMax = level >= 50
-
-	local tooltip = {
-		title = fmtLevelTitle(config.hex, config.stat, level),
-		description = config.description,
+	local entry = entryOf(skill)
+	local level = entry.level or 1
+	local tooltip: any = {
+		title = fmtLevelTitle(config.color, config.name, level),
+		description = string.format(
+			"%s\n<font color='#AAAAAA'>Skill Average: </font><font color='#FFFF55'><b>%.1f</b></font>  <font color='#AAAAAA'>Wisdom: </font><font color='#55FF55'>+%g%% XP</font>",
+			config.description,
+			skillAverage(),
+			math.floor((entry.wisdom or 0) * 100 + 0.5) / 100
+		),
 		click = { text = "CLICK TO VIEW!", color = "#FFFF55" },
 	}
-
-	if isMax then
-		tooltip.blocks = {
-			{ title = "MAX LEVEL", text = "This skill has reached its maximum level.", color = "#FFD700" },
-		}
+	if level >= Config.cap(skill) then
+		tooltip.blocks =
+			{ { title = "MAX LEVEL", text = "This skill has reached its maximum level.", color = "#FFD700" } }
 	else
-		local nextLevel = level + 1
-		local pct = skillData.pct or 0
-		tooltip.progress = {
-			pct = pct,
-			color = config.hex,
-			label = string.format(
-				'<font color="#FFFF55">%s</font><font color="#FFAA00">/</font><font color="#FFFF55">%s</font> <font color="#AAAAAA">(%d%%)</font>',
-				shorthand(skillData.xp or 0),
-				shorthand(skillData.xpNeeded or 50),
-				math.floor(pct * 100)
-			),
-		}
+		tooltip.progress = progressBlock(entry, config.color)
 		tooltip.blocks = {
 			{
-				title = "Level " .. displayLevel(nextLevel) .. " Rewards",
-				text = buildRewardText(config.stat, nextLevel),
+				title = "Level " .. displayLevel(level + 1) .. " Rewards",
+				text = table.concat(rewardLines(skill, level + 1), "\n"),
 				align = "Left",
 			},
 		}
 	end
+	return tooltip
+end
 
+local function showGridSkillTooltip(statKey: string, silent: boolean?)
+	if not initialized then
+		return
+	end
+	local tooltip = buildGridTooltip(statKey)
+	if not tooltip then
+		return
+	end
 	if not silent then
 		UIClick3:Play()
 	end
-
-	gridTooltipActive = true
-	gridTooltipStatKey = statKey
+	gridTooltip.active = true
+	gridTooltip.skill = statKey
 	TooltipModule.show(tooltip, "skillGrid")
 end
 
 local function hideGridSkillTooltip()
-	if not gridTooltipActive then
+	if not gridTooltip.active then
 		return
 	end
 	TooltipModule.hide("skillGrid")
-	gridTooltipActive = false
-	gridTooltipStatKey = nil
+	gridTooltip.active = false
+	gridTooltip.skill = nil
 end
 
-local function refreshGridSkillTooltip(statKey)
-	if not gridTooltipActive then
+-- ===================== TOAST =====================
+local function onLevelUp(info: any)
+	if type(info) ~= "table" or type(info.skill) ~= "string" or type(info.level) ~= "number" then
 		return
 	end
-	if gridTooltipStatKey ~= statKey then
+	local config = Config.skills[info.skill]
+	if not config or info.level < 1 or info.level > config.cap then
 		return
 	end
-	showGridSkillTooltip(statKey, true)
+	local extra = (type(info.count) == "number" and info.count > 1)
+			and string.format(" <font color='#AAAAAA'>(+%d levels)</font>", info.count - 1)
+		or ""
+	StatisticLogModule.log(
+		string.format(
+			"<font color='%s'><b>%s</b></font> <font color='#FFFF55'>reached level <b>%s</b></font>%s  %s",
+			config.color,
+			config.name,
+			displayLevel(info.level),
+			extra,
+			table.concat(rewardLines(info.skill, info.level), "  ")
+		),
+		TOAST_SECONDS
+	)
+	UIClick3:Play()
 end
 
--- ===================== MODULE API =====================
+-- ===================== MODULE =====================
 local M = {}
 
-function M.init(sharedRefs, frame)
+--- Place Level1..Level25 along the snake path of SkillsConfig.SNAKE and size the scrolling canvas to fit it.
+local function layoutSnake()
+	local snake = Config.SNAKE
+	local grid = levelScrollFrame:FindFirstChildOfClass("UIGridLayout")
+	if grid then
+		grid.Enabled = false -- positions are set here now
+	end
+	local cells = Config.snakeCells(PAGE_SIZE)
+	local stepX, stepY = snake.cell + snake.gapX, snake.cell + snake.gapY
+	local maxCol = 0
+	for i, cell in ipairs(cells) do
+		local button = levelScrollFrame:FindFirstChild("Level" .. i)
+		if button then
+			button.AnchorPoint = Vector2.zero
+			button.Size = UDim2.fromOffset(snake.cell, snake.cell)
+			button.Position = UDim2.fromOffset(snake.pad + cell[1] * stepX, snake.pad + cell[2] * stepY)
+		end
+		maxCol = math.max(maxCol, cell[1])
+	end
+	levelScrollFrame.CanvasSize = UDim2.fromOffset(snake.pad * 2 + maxCol * stepX + snake.cell, 0)
+end
+
+--- The 25 level buttons. They are renamed Level1..Level25 here (one each, whatever the Studio names are), so a duplicate or
+--- missing name in the template can never leave a slot unplaced or without a tooltip.
+local function collectSlotButtons(): { TextButton }
+	local buttons = {}
+	for index, child in ipairs(levelScrollFrame:GetChildren()) do
+		if child:IsA("TextButton") then
+			table.insert(buttons, { button = child, key = tonumber(child.Name:match("%d+")) or 999, index = index })
+		end
+	end
+	table.sort(buttons, function(a, b)
+		if a.key ~= b.key then
+			return a.key < b.key
+		end
+		return a.index < b.index
+	end)
+	local list = {}
+	for i, entry in ipairs(buttons) do
+		if i <= PAGE_SIZE then
+			entry.button.Name = "Level" .. i
+			table.insert(list, entry.button)
+		else
+			entry.button.Visible = false -- an extra stray button
+		end
+	end
+	if #list < PAGE_SIZE then
+		warn("[SkillsPageModule] the level strip has only " .. #list .. " slots (needs " .. PAGE_SIZE .. ")")
+	end
+	return list
+end
+
+local function bindSlots()
+	local buttons = collectSlotButtons()
+	layoutSnake()
+	for i, button in ipairs(buttons) do
+		local stroke = button:FindFirstChildOfClass("UIStroke")
+		slots[i] = {
+			button = button,
+			label = button:FindFirstChild("Label"),
+			stroke = stroke,
+			thickness = stroke and stroke.Thickness or 1,
+		}
+		button.MouseEnter:Connect(function()
+			showLevelTooltip(i)
+		end)
+		button.MouseLeave:Connect(hideLevelTooltip)
+	end
+end
+
+function M.init(refs: any, frame: Instance)
 	if initialized then
 		return
 	end
 	initialized = true
+	sharedRefs = refs
+	TooltipModule = refs.TooltipModule
 
-	shared = sharedRefs
-	TooltipModule = sharedRefs.TooltipModule
-	skillsMenuFrame = frame
-
-	skillDescFrame = skillsMenuFrame:WaitForChild("SkillDescFrame")
-
+	skillDescFrame = frame:WaitForChild("SkillDescFrame")
 	statNameLabel = skillDescFrame.StatNameVal.StatName
 	statUIStroke = statNameLabel.UIStroke
 	statUnderline = statNameLabel.Underline
@@ -874,156 +683,135 @@ function M.init(sharedRefs, frame)
 	levelScrollFrame = skillLevelsFrame:WaitForChild("ScrollingFrame")
 	pageToggleButton = skillLevelsFrame:WaitForChild("PageToggle")
 	levelGradient = levelScrollFrame:WaitForChild("UIGradient")
+	DEFAULT_LEVELS_BG = skillLevelsFrame.BackgroundColor3
+	DEFAULT_LEVELS_STROKE = skillLevelsFrame.UIStroke.Color
 
-	DEFAULT_SKILLLEVELS_BG = skillLevelsFrame.BackgroundColor3
-	DEFAULT_SKILLLEVELS_STROKE = skillLevelsFrame.UIStroke.Color
+	-- the elements added by build_skills_menu.luau (the page still works without them)
+	-- XpBar = a clone of the tooltip's ProgressBar (inner ProgressBar > Progress + ProgressLabel) with the level numerals beside it
+	xpBar = skillDescFrame:FindFirstChild("XpBar")
+	local inner = xpBar and xpBar:FindFirstChild("ProgressBar")
+	xpFill = inner and inner:FindFirstChild("Progress")
+	xpLabel = inner and inner:FindFirstChild("ProgressLabel")
+	xpLeft = xpBar and xpBar:FindFirstChild("Left")
+	xpRight = xpBar and xpBar:FindFirstChild("Right")
+	if xpFill then
+		for _, child in ipairs(xpFill:GetChildren()) do
+			if child:IsA("UIGradient") then
+				if not xpMask then
+					xpMask = child
+				else
+					child.Enabled = false -- the template's extra gradient would fight the mask
+				end
+			end
+		end
+	end
+	if not (xpMask and xpLabel and xpLeft and xpRight) then
+		xpBar = nil
+	end
+	wisdomLabel = skillDescFrame:FindFirstChild("WisdomLabel")
+	nextRewardLabel = skillDescFrame:FindFirstChild("NextReward")
+	if not (xpBar and wisdomLabel and nextRewardLabel) then
+		warn("[SkillsPageModule] XpBar / WisdomLabel / NextReward missing: run tools/studio/build_skills_menu.luau")
+	end
 
-	-- Position: breakdown is the only view now
 	skillDescFrame.Position = UDim2.new(0, 0, 0, 0)
+	bindSlots()
 
-	-- ===================== WIRE LEVEL BOX TOOLTIPS (ONCE) =====================
-	for slotIndex, slotName in ipairs(SLOT_NAMES) do
-		local button = levelScrollFrame:WaitForChild(slotName)
-		local capturedIndex = slotIndex
-		button.MouseEnter:Connect(function()
-			showLevelTooltip(capturedIndex)
-		end)
-		button.MouseLeave:Connect(function()
-			hideLevelTooltip()
-		end)
-	end
-
-	-- ===================== PAGE TOGGLE BUTTON =====================
 	pageToggleButton.MouseButton1Click:Connect(function()
-		currentLevelPage = (currentLevelPage == 1) and 2 or 1
+		if not activeSkill then
+			return
+		end
+		currentPage = currentPage % Config.pageCount(activeSkill) + 1
 		UIClick:Play()
-		updateSkillLevelBoxes(activeStatKey)
+		levelScrollFrame.CanvasPosition = Vector2.zero
+		renderSlots(true)
+		scheduleShadow()
 	end)
 
-	-- ===================== SHADOW SYSTEM: CANVAS SCROLL =====================
 	levelScrollFrame:GetPropertyChangedSignal("CanvasPosition"):Connect(function()
-		local newX = levelScrollFrame.CanvasPosition.X
-		if math.abs(newX - lastCanvasX) > 0.5 then
-			lastCanvasX = newX
-			shadowTimer = 0
-			hideShadow()
+		if isOpen then
+			scheduleShadow()
 		end
 	end)
 
-	-- ===================== HEARTBEAT: STAT VALUE + SHADOW =====================
-	local lastDisplayedLevel = nil
-	local lastDisplayedKey = nil
-
-	RunService.Heartbeat:Connect(function(dt)
-		if isOpen and activeStatKey then
-			local skillData = getSkillEntry(activeStatKey)
-			local level = skillData.level or 1
-			if level ~= lastDisplayedLevel or activeStatKey ~= lastDisplayedKey then
-				lastDisplayedLevel = level
-				lastDisplayedKey = activeStatKey
-				statValueLabel.Text = displayLevel(level)
-			end
-		end
-
-		if not isOpen or not activeStatKey then
-			if shadowActive then
-				hideShadow()
-			end
-			shadowTimer = 0
-			return
-		end
-		shadowTimer = shadowTimer + dt
-		if shadowTimer >= SHADOW_DELAY and not shadowActive then
-			showShadow(levelScrollFrame.CanvasPosition.X)
-		end
-	end)
-
-	-- ===================== SERVER SKILL SYNC =====================
 	local SkillUpdated = ReplicatedStorage:WaitForChild("SkillUpdated", 10)
-
-	local function sanitizeSkillData(data)
-		if type(data) ~= "table" then
-			return
-		end
-		for _, skillData in pairs(data) do
-			if type(skillData) == "table" then
-				skillData.level = tonumber(skillData.level) or 1
-				skillData.xp = tonumber(skillData.xp) or 0
-				skillData.xpNeeded = tonumber(skillData.xpNeeded) or 50
-				skillData.roman = tostring(skillData.roman or "I")
-				skillData.pct = tonumber(skillData.pct) or 0
-			end
-		end
-	end
-
 	if SkillUpdated then
 		SkillUpdated.OnClientEvent:Connect(function(data)
-			sanitizeSkillData(data)
-			latestSkillData = data
-			if activeStatKey then
-				updateSkillLevelBoxes(activeStatKey)
+			if type(data) ~= "table" then
+				return
 			end
-			for statKey in pairs(data) do
-				refreshGridSkillTooltip(statKey)
+			latestData = data
+			if isOpen and activeSkill then
+				renderHeader()
+				renderSlots()
+				if hoveredSlot then
+					showLevelTooltip(hoveredSlot, true) -- the in-progress bar moves while hovered
+				end
+			end
+			if gridTooltip.active and gridTooltip.skill then
+				showGridSkillTooltip(gridTooltip.skill, true)
 			end
 		end)
 	end
 
-	dprint("SkillsPageModule: Initialized ✓")
+	local LevelUp = ReplicatedStorage:WaitForChild("SkillLevelUp", 10)
+	if LevelUp then
+		LevelUp.OnClientEvent:Connect(onLevelUp)
+	end
 end
 
---- Called when user clicks a skill on the SkillsGrid.
---- statKey is passed via buttonConfig.openArg from the controller.
-function M.open(statKey)
-	isOpen = true
-	activeStatKey = statKey
-	currentLevelPage = 1
-
-	local config = SKILL_CONFIG[statKey]
+function M.open(statKey: string)
+	local config = Config.skills[statKey]
 	if not config then
-		warn("[SkillsPageModule] Unknown statKey: " .. tostring(statKey))
+		warn("[SkillsPageModule] Unknown skill: " .. tostring(statKey))
 		return
 	end
+	isOpen = true
+	activeSkill = statKey
+	currentPage = pageOf(statKey, math.min((entryOf(statKey).level or 1) + 1, Config.cap(statKey)))
+	barShown = -1
 
 	skillDescFrame.Position = UDim2.new(0, 0, 0, 0)
-	applyStatColor(config.color)
-	updateSkillLevelBoxes(statKey)
-	statNameLabel.Text = config.stat
+	applyStatColor(Color3.fromHex(config.color:sub(2)))
+	statNameLabel.Text = config.name
 	descLabel.Text = ""
 	descLabel.MaxVisibleGraphemes = -1
+	levelScrollFrame.CanvasPosition = Vector2.zero
 
-	local skillData = getSkillEntry(statKey)
-	statValueLabel.Text = displayLevel(skillData.level or 1)
+	renderHeader(true)
+	renderSlots(true)
+	scheduleShadow()
 
 	task.delay(0.25, function()
-		if activeStatKey == statKey then
+		if activeSkill == statKey then
 			typewrite(descLabel, config.description, 0.025)
 		end
 	end)
 end
 
-function M.close()
+local function closePage()
 	isOpen = false
+	typewriterToken += 1
 	hideLevelTooltip()
+	stopPulse()
+	hideShadow()
 	revertStatColor()
-	activeStatKey = nil
-	currentLevelPage = 1
+	activeSkill = nil
+	currentPage = 1
+end
+
+function M.close()
+	closePage()
 end
 
 function M.reset()
-	isOpen = false
-	hideLevelTooltip()
-	revertStatColor()
-	activeStatKey = nil
-	currentLevelPage = 1
+	closePage()
 	descLabel.Text = ""
 	descLabel.MaxVisibleGraphemes = -1
 	skillDescFrame.Position = UDim2.new(0, 0, 0, 0)
 end
 
-function M.navigateBack()
-	-- No internal navigation — controller handles grid return
-end
+function M.navigateBack() end
 
 M.showGridSkillTooltip = showGridSkillTooltip
 M.hideGridSkillTooltip = hideGridSkillTooltip

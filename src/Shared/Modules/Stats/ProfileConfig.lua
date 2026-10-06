@@ -56,7 +56,13 @@ ProfileConfig.BASE_STATS = {
 	JumpHeight = 0, -- Roblox default; overridden by Humanoid.JumpHeight (7.2 studs base)
 	MagicFind = 0,
 	PetLuck = 0,
-	Wisdom = 0,
+	Wisdom = 0, -- global: adds to every skill's wisdom
+	FarmingWisdom = 0, -- skill wisdom: +1 = +1% XP in that skill (SkillsDataManager.AddXP)
+	ForagingWisdom = 0,
+	FishingWisdom = 0,
+	MiningWisdom = 0,
+	CombatWisdom = 0,
+	CarpentryWisdom = 0,
 	BreakingPower = 0,
 
 	-- General skills
@@ -271,7 +277,49 @@ ProfileConfig.ATTRIBUTE_CATEGORIES = {
 			name = "Wisdom",
 			color = "#00AAAA",
 			icon = { 2, 2 }, -- Swirl
-			description = "Boosts rare drop chance for pet items.",
+			description = "Increases the XP you gain in every skill.",
+		},
+		{
+			key = "FarmingWisdom",
+			name = "Farming Wisdom",
+			color = "#FFAA00",
+			icon = { 2, 2 }, -- placeholder until the wisdom icons exist
+			description = "Increases the Farming XP you gain.",
+		},
+		{
+			key = "ForagingWisdom",
+			name = "Foraging Wisdom",
+			color = "#00AA00",
+			icon = { 2, 2 }, -- placeholder until the wisdom icons exist
+			description = "Increases the Foraging XP you gain.",
+		},
+		{
+			key = "FishingWisdom",
+			name = "Fishing Wisdom",
+			color = "#00AAAA",
+			icon = { 2, 2 }, -- placeholder until the wisdom icons exist
+			description = "Increases the Fishing XP you gain.",
+		},
+		{
+			key = "MiningWisdom",
+			name = "Mining Wisdom",
+			color = "#5555FF",
+			icon = { 2, 2 }, -- placeholder until the wisdom icons exist
+			description = "Increases the Mining XP you gain.",
+		},
+		{
+			key = "CombatWisdom",
+			name = "Combat Wisdom",
+			color = "#FF5555",
+			icon = { 2, 2 }, -- placeholder until the wisdom icons exist
+			description = "Increases the Combat XP you gain.",
+		},
+		{
+			key = "CarpentryWisdom",
+			name = "Carpentry Wisdom",
+			color = "#55FF55",
+			icon = { 2, 2 }, -- placeholder until the wisdom icons exist
+			description = "Increases the Carpentry XP you gain.",
 		},
 		{
 			key = "BreakingPower",
@@ -375,8 +423,14 @@ ProfileConfig.ATTRIBUTE_CATEGORIES = {
 -- Buttons in ProfileMenu1 that show/accept equipped armor + accessories.
 -- Names match Modules/Items/Slots ids; ArmorAccessoriesController drives them.
 ProfileConfig.EQUIPMENT_BUTTONS = {
-	"Helmet", "Chestplate", "Leggings", "Boots", -- armor column
-	"Cloak", "Gloves", "Necklace", "Belt", -- accessory column
+	"Helmet",
+	"Chestplate",
+	"Leggings",
+	"Boots", -- armor column
+	"Cloak",
+	"Gloves",
+	"Necklace",
+	"Belt", -- accessory column
 }
 
 -- ===================== ATTRIBUTE BONUSES (PLACEHOLDER) =====================

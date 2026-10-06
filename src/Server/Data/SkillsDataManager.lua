@@ -3,8 +3,8 @@
 	Place inside: ServerScriptService
 
 	Handles:
-	  - Skill XP thresholds (levels I -> L)
-	  - Adding XP to skills
+	  - Skill XP and levels (SkillsConfig: Hypixel curve, per-skill caps, wisdom)
+	  - Adding XP to skills (AddXP is the only entry)
 	  - Saving via ProfileService (slots into existing DataManager pattern)
 	  - _G.ChangeSkill(player, skillName, level) for manual level setting
 	  - Firing SkillUpdated RemoteEvent to clients
@@ -23,149 +23,23 @@ local ProfileService = require(ServerScriptService:WaitForChild("ProfileService"
 
 local SkillsDataManager = {}
 
--- ===================== ROMAN NUMERALS =====================
-local ROMAN = {
-	"I",
-	"II",
-	"III",
-	"IV",
-	"V",
-	"VI",
-	"VII",
-	"VIII",
-	"IX",
-	"X",
-	"XI",
-	"XII",
-	"XIII",
-	"XIV",
-	"XV",
-	"XVI",
-	"XVII",
-	"XVIII",
-	"XIX",
-	"XX",
-	"XXI",
-	"XXII",
-	"XXIII",
-	"XXIV",
-	"XXV",
-	"XXVI",
-	"XXVII",
-	"XXVIII",
-	"XXIX",
-	"XXX",
-	"XXXI",
-	"XXXII",
-	"XXXIII",
-	"XXXIV",
-	"XXXV",
-	"XXXVI",
-	"XXXVII",
-	"XXXVIII",
-	"XXXIX",
-	"XL",
-	"XLI",
-	"XLII",
-	"XLIII",
-	"XLIV",
-	"XLV",
-	"XLVI",
-	"XLVII",
-	"XLVIII",
-	"XLIX",
-	"L",
-}
+-- ===================== CONFIG =====================
+-- Skills, level caps, the XP curve (Hypixel) and the Roman numerals live in SkillsConfig.
+local SkillsConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("SkillsConfig")) :: any
+local SKILL_NAMES = SkillsConfig.ORDER
 
 function SkillsDataManager.ToRoman(n)
-	return ROMAN[math.clamp(n, 1, 50)] or tostring(n)
+	return SkillsConfig.roman(n)
 end
 
--- ===================== XP THRESHOLDS =====================
--- XP required to go FROM level N to level N+1
--- Levels 1->50 (so index 1 = XP needed to go from Lv1 to Lv2, etc.)
--- Fully customizable — just edit the values below.
--- Max level is 50 (Level L). At max level XP is locked.
-
-local XP_THRESHOLDS = {
-	-- Lv1->2    Lv2->3    Lv3->4    Lv4->5    Lv5->6
-	50,
-	150,
-	300,
-	500,
-	750,
-	-- Lv6->7    Lv7->8    Lv8->9    Lv9->10
-	1050,
-	1400,
-	1800,
-	2250,
-	3300,
-	-- Lv10->11 ... Lv19->20
-	4100,
-	5000,
-	6000,
-	7100,
-	8300,
-	9600,
-	11000,
-	12500,
-	14100,
-	15800,
-	-- Lv20->21 ... Lv29->30
-	17600,
-	19500,
-	21500,
-	23600,
-	25800,
-	28100,
-	30500,
-	33000,
-	35600,
-	38300,
-	-- Lv30->31 ... Lv39->40
-	41100,
-	44000,
-	47000,
-	50100,
-	53300,
-	56600,
-	60000,
-	63500,
-	67100,
-	70800,
-	-- Lv40->41 ... Lv49->50
-	74600,
-	78500,
-	82500,
-	86600,
-	90800,
-	95100,
-	99500,
-	104000,
-	108600,
-	113300,
-}
--- Index 50 is intentionally absent — max level has no "next threshold"
--- (49 thresholds cover transitions 1->2 through 49->50)
-
-local MAX_LEVEL = 50
-
-function SkillsDataManager.GetXPNeeded(level)
-	if level >= MAX_LEVEL then
-		return 0
-	end -- already max
-	return XP_THRESHOLDS[level] or 999999
+--- XP needed to go from `level` to the next one in `skillName` (0 at the cap).
+function SkillsDataManager.GetXPNeeded(skillName, level)
+	return SkillsConfig.xpNeeded(skillName, level)
 end
 
--- ===================== SKILL NAMES =====================
-local SKILL_NAMES = {
-	"Farming",
-	"Foraging",
-	"Fishing",
-	"Mining",
-	"Combat",
-	"Carpentry",
-}
+function SkillsDataManager.GetCap(skillName)
+	return SkillsConfig.cap(skillName)
+end
 
 -- ===================== PROFILE STORE =====================
 -- Unified template: skills at top level, inventory under _Inventory.
@@ -174,6 +48,10 @@ local PROFILE_TEMPLATE = {}
 for _, skillName in ipairs(SKILL_NAMES) do
 	PROFILE_TEMPLATE[skillName] = { level = 1, xp = 0 }
 end
+
+-- Skill level rewards (SkillRewardService): claimed[skill] = highest level already paid out (a high-water mark),
+-- recipes / unlocks = ids recorded by the recipe / unlock reward types. Reconcile() backfills it for existing players.
+PROFILE_TEMPLATE._Rewards = { claimed = {}, recipes = {}, unlocks = {} }
 
 -- ── Inventory data (structurally isolated under one key) ──
 -- items         : array of { itemId = string, count = number }
@@ -253,8 +131,20 @@ local function sanitizeSkillData(data)
 		if type(data[skillName]) ~= "table" then
 			data[skillName] = { level = 1, xp = 0 }
 		else
-			data[skillName].level = math.clamp(tonumber(data[skillName].level) or 1, 1, MAX_LEVEL)
-			data[skillName].xp = math.max(tonumber(data[skillName].xp) or 0, 0)
+			local skill = data[skillName]
+			-- a saved level above the (new) cap or XP above the (new) curve is clamped; levels are never lowered otherwise
+			skill.level = math.clamp(math.floor(tonumber(skill.level) or 1), 1, SkillsConfig.cap(skillName))
+			local needed = SkillsConfig.xpNeeded(skillName, skill.level)
+			skill.xp = needed > 0 and math.clamp(tonumber(skill.xp) or 0, 0, needed - 1) or 0
+		end
+	end
+
+	if type(data._Rewards) ~= "table" then
+		data._Rewards = { claimed = {}, recipes = {}, unlocks = {} }
+	end
+	for _, key in ipairs({ "claimed", "recipes", "unlocks" }) do
+		if type(data._Rewards[key]) ~= "table" then
+			data._Rewards[key] = {}
 		end
 	end
 
@@ -304,21 +194,51 @@ local function sanitizeSkillData(data)
 	end
 end
 
+-- ===================== WISDOM =====================
+-- XP gain = floor(base * (1 + (skill wisdom + global Wisdom) / 100)). AttributeStatManager is required lazily
+-- (it may require this module), and wisdom counts as 0 until the attribute profile is loaded.
+local AttributeStatManager: any = nil
+local function attributes()
+	if AttributeStatManager == nil then
+		AttributeStatManager = false
+		local module = ServerScriptService:FindFirstChild("AttributeStatManager")
+		if module then
+			local ok, result = pcall(require, module)
+			AttributeStatManager = ok and result or false
+		end
+	end
+	return AttributeStatManager or nil
+end
+
+--- Total wisdom of a skill in percent (skill wisdom + global Wisdom).
+function SkillsDataManager.GetWisdom(player, skillName): number
+	local config = SkillsConfig.skills[skillName]
+	local manager = attributes()
+	if not (config and manager and manager.IsLoaded(player)) then
+		return 0
+	end
+	local total = (tonumber(manager.GetFinalValue(player, config.wisdom)) or 0)
+		+ (tonumber(manager.GetFinalValue(player, "Wisdom")) or 0)
+	return math.max(total, 0)
+end
+
 -- ===================== BUILD CLIENT PAYLOAD =====================
--- Sends level, xp, xpNeeded per skill so the GUI can display everything
-local function buildClientData(data)
+-- level, xp, xpNeeded, roman, pct per skill, plus cap and wisdom (percent) so the GUI can show everything
+local function buildClientData(player, data)
 	local payload = {}
 	for _, skillName in ipairs(SKILL_NAMES) do
 		local skillData = data[skillName]
 		local level = skillData.level
 		local xp = skillData.xp
-		local xpNeeded = SkillsDataManager.GetXPNeeded(level)
+		local xpNeeded = SkillsDataManager.GetXPNeeded(skillName, level)
 		payload[skillName] = {
 			level = level,
 			xp = xp,
 			xpNeeded = xpNeeded,
 			roman = SkillsDataManager.ToRoman(level),
 			pct = (xpNeeded > 0) and math.clamp(xp / xpNeeded, 0, 1) or 1,
+			cap = SkillsConfig.cap(skillName),
+			wisdom = SkillsDataManager.GetWisdom(player, skillName),
 		}
 	end
 	return payload
@@ -329,7 +249,48 @@ local function fireUpdate(player)
 	if not profile then
 		return
 	end
-	SkillUpdated:FireClient(player, buildClientData(profile.Data))
+	SkillUpdated:FireClient(player, buildClientData(player, profile.Data))
+end
+
+-- Many XP grants in a burst (a button held down) collapse into one update: at most 10 per second per player.
+local UPDATE_INTERVAL = 0.1
+local dirty: { [Player]: boolean } = {}
+local changedListeners: { (Player) -> () } = {}
+
+--- Register fn(player), called after every flushed change (and after a profile loads).
+function SkillsDataManager.OnChanged(fn: (Player) -> ())
+	table.insert(changedListeners, fn)
+end
+
+local function markDirty(player)
+	dirty[player] = true
+end
+SkillsDataManager.MarkDirty = markDirty
+
+local function flush(player)
+	dirty[player] = nil
+	fireUpdate(player)
+	for _, fn in ipairs(changedListeners) do
+		task.spawn(fn, player)
+	end
+end
+
+do
+	local elapsed = 0
+	game:GetService("RunService").Heartbeat:Connect(function(dt)
+		elapsed += dt
+		if elapsed < UPDATE_INTERVAL then
+			return
+		end
+		elapsed = 0
+		for player in pairs(dirty) do
+			if player.Parent and skillProfiles[player.UserId] then
+				flush(player)
+			else
+				dirty[player] = nil
+			end
+		end
+	end)
 end
 
 -- ===================== LOAD / RELEASE =====================
@@ -355,8 +316,8 @@ function SkillsDataManager.LoadData(player)
 	sanitizeSkillData(profile.Data)
 	skillProfiles[player.UserId] = profile
 
-	-- Send initial data to client
-	fireUpdate(player)
+	-- Send initial data to client (and let the reward service catch the player up)
+	flush(player)
 
 	return profile.Data
 end
@@ -414,51 +375,50 @@ function SkillsDataManager.IsLoaded(player): boolean
 end
 
 -- ===================== ADD XP =====================
--- Returns true if leveled up
-function SkillsDataManager.AddXP(player, skillName, amount)
+--- The ONLY way skill XP is gained. `amount` is the base XP before wisdom; `source` is a free label (button id, ...).
+--- Returns the XP actually gained and whether a level was gained.
+function SkillsDataManager.AddXP(player, skillName, amount, source)
 	local data = SkillsDataManager.GetData(player)
 	if not data then
 		warn("[SkillsDataManager] No data for " .. player.Name)
-		return false
+		return 0, false
 	end
 
-	local skill = data[skillName]
-	if type(skill) ~= "table" or type(amount) ~= "number" or amount ~= amount or amount < 0 then
+	local skill = type(skillName) == "string" and SkillsConfig.skills[skillName] and data[skillName]
+	if type(skill) ~= "table" or type(amount) ~= "number" or amount ~= amount or amount < 0 or amount == math.huge then
 		warn("[SkillsDataManager] Bad AddXP call: " .. tostring(skillName) .. " " .. tostring(amount))
-		return false
+		return 0, false
 	end
 
-	if skill.level >= MAX_LEVEL then
-		fireUpdate(player)
-		return false
+	local cap = SkillsConfig.cap(skillName)
+	if skill.level >= cap then
+		return 0, false -- max level: XP is locked
 	end
 
-	local leveledUp = false
-	skill.xp = skill.xp + amount
+	local gain = math.floor(amount * (100 + SkillsDataManager.GetWisdom(player, skillName)) / 100 + 1e-9)
+	skill.xp += gain
 
 	-- Handle level-ups (loop in case of large XP grants)
-	while skill.level < MAX_LEVEL do
-		local needed = SkillsDataManager.GetXPNeeded(skill.level)
-		if skill.xp >= needed then
-			skill.xp = skill.xp - needed
-			skill.level = skill.level + 1
-			leveledUp = true
-		else
+	local leveledUp = false
+	while skill.level < cap do
+		local needed = SkillsDataManager.GetXPNeeded(skillName, skill.level)
+		if skill.xp < needed then
 			break
 		end
+		skill.xp -= needed
+		skill.level += 1
+		leveledUp = true
 	end
-
-	-- Cap XP at max level
-	if skill.level >= MAX_LEVEL then
+	if skill.level >= cap then
 		skill.xp = 0
 	end
 
-	fireUpdate(player)
-	return leveledUp
+	markDirty(player)
+	return gain, leveledUp
 end
 
 -- ===================== SET LEVEL DIRECTLY =====================
--- Used by _G.ChangeSkill and any admin tools
+-- Used by _G.ChangeSkill and any admin tools. Never lowers a reward already paid (claimed levels are a high-water mark).
 function SkillsDataManager.SetLevel(player, skillName, level)
 	local data = SkillsDataManager.GetData(player)
 	if not data then
@@ -466,16 +426,16 @@ function SkillsDataManager.SetLevel(player, skillName, level)
 		return
 	end
 
-	local skill = data[skillName]
+	local skill = type(skillName) == "string" and SkillsConfig.skills[skillName] and data[skillName]
 	if type(skill) ~= "table" then
 		warn("[SkillsDataManager] Unknown skill: " .. tostring(skillName))
 		return
 	end
 
-	skill.level = math.clamp(tonumber(level) or 1, 1, MAX_LEVEL)
+	skill.level = math.clamp(math.floor(tonumber(level) or 1), 1, SkillsConfig.cap(skillName))
 	skill.xp = 0 -- reset XP to 0 when manually set
 
-	fireUpdate(player)
+	markDirty(player)
 	print(
 		string.format(
 			"[SkillsDataManager] %s's %s set to Level %d (%s)",

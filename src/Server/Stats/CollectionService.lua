@@ -10,8 +10,8 @@
 	     reached tier once. Tiers crossed offline or in one jump are all granted, in order.
 	  3. The permanent buffs ("derived" rewards) are NOT added step by step: they are rebuilt from the whole claimedTier
 	     table every time it changes (and on join), so an admin restore, a lifetime clamp or a rejoin can never double them.
-	       statGain / crossStatGain -> StatisticsDataManager.SetCollectionBonus (read by GetMultiplier)
-	       gameStat                 -> AttributeStatManager.ApplyCollection (source type "collection" in the breakdown)
+	       statGain / crossStatGain -> StatisticsDataManager.SetGainBonus (read by GetMultiplier)
+	       gameStat                 -> AttributeStatManager.ApplySource (source type "collection" in the breakdown)
 	  4. CollectionTierUnlocked (RemoteEvent, server -> client) carries { skill, key, tier, count } for the toast.
 
 	New reward type: CollectionRewards.register(...) in the shared module and, for behaviour, derive/apply below.
@@ -20,7 +20,6 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
-local ServerStorage = game:GetService("ServerStorage")
 
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local Config = require(Modules:WaitForChild("CollectionsConfig")) :: any
@@ -28,6 +27,7 @@ local CollectionMath = require(Modules:WaitForChild("CollectionMath")) :: any
 local CollectionRewards = require(Modules:WaitForChild("CollectionRewards")) :: any
 local StatisticsDataManager = require(ServerScriptService:WaitForChild("StatisticsDataManager")) :: any
 local AttributeStatManager = require(ServerScriptService:WaitForChild("AttributeStatManager")) :: any
+require(ServerScriptService:WaitForChild("RewardBehaviors")) -- registers derive/apply on the shared reward types
 
 local CollectionService = {}
 
@@ -40,91 +40,6 @@ if not TierUnlocked then
 	TierUnlocked.Name = "CollectionTierUnlocked"
 	TierUnlocked.Parent = ReplicatedStorage
 end
-
--- ===================== REWARD BEHAVIOUR =====================
-local function finitePct(value: any): number?
-	if type(value) == "number" and value == value and value > -1e6 and value < 1e6 then
-		return value
-	end
-	return nil
-end
-
-local function gainDerive(reward, ctx, acc)
-	local spec = CollectionRewards.get(reward.type)
-	local skill, key = spec.target(reward, ctx)
-	local pct = finitePct(reward.pct)
-	if not (pct and skill and key and Config.statConfigLookup[skill] and Config.statConfigLookup[skill][key]) then
-		warn(
-			"[CollectionService] bad "
-				.. reward.type
-				.. " reward on "
-				.. ctx.skill
-				.. "."
-				.. ctx.key
-				.. " tier "
-				.. ctx.tier
-		)
-		return
-	end
-	acc.gain[skill] = acc.gain[skill] or {}
-	acc.gain[skill][key] = (acc.gain[skill][key] or 0) + pct
-end
-
-CollectionRewards.register("statGain", { derive = gainDerive })
-CollectionRewards.register("crossStatGain", { derive = gainDerive })
-
-CollectionRewards.register("gameStat", {
-	derive = function(reward, ctx, acc)
-		local statConfig = Config.statConfigLookup[ctx.skill][ctx.key]
-		local entry = {
-			id = string.format("%s.%s.%d.%d", ctx.skill, ctx.key, ctx.tier, ctx.index),
-			label = string.format(
-				"%s collection %s",
-				statConfig and statConfig.name or ctx.key,
-				Config.ROMAN_NUMERALS[ctx.tier]
-			),
-			color = "#55FFFF",
-			attr = reward.attr,
-		}
-		if finitePct(reward.flat) then
-			entry.flat = reward.flat
-		elseif finitePct(reward.pct) then
-			entry.mult = 1 + reward.pct / 100
-		else
-			warn("[CollectionService] gameStat reward needs flat or pct (" .. ctx.skill .. "." .. ctx.key .. ")")
-			return
-		end
-		table.insert(acc.attr, entry)
-	end,
-})
-
-local warnedTools: { [string]: boolean } = {}
-CollectionRewards.register("item", {
-	apply = function(reward, ctx)
-		local tool = reward.tool
-		if type(tool) ~= "string" or not ServerStorage:FindFirstChild(tool) then
-			if not warnedTools[tostring(tool)] then
-				warnedTools[tostring(tool)] = true
-				warn(
-					"[CollectionService] item reward stub: no tool '"
-						.. tostring(tool)
-						.. "' in ServerStorage (not granted)"
-				)
-			end
-			return
-		end
-		local InventoryDataManager = require(ServerScriptService:WaitForChild("InventoryDataManager")) :: any
-		InventoryDataManager.AddItem(ctx.player, tool, math.clamp(math.floor(tonumber(reward.count) or 1), 1, 100))
-	end,
-})
-
-CollectionRewards.register("recipe", {
-	apply = function(reward, ctx)
-		if type(reward.id) == "string" then
-			ctx.collections.recipes[reward.id] = true
-		end
-	end,
-})
 
 -- ===================== STATE =====================
 local building: { [Player]: boolean } = {} -- sync is running for this player
@@ -140,6 +55,7 @@ local function collectionsOf(data)
 	end
 	collections.claimed = collections.claimed or {}
 	collections.recipes = collections.recipes or {}
+	collections.unlocks = collections.unlocks or {}
 	return collections
 end
 
@@ -147,7 +63,7 @@ local function applyAttributes(player: Player, entries)
 	pendingAttr[player] = entries
 	if AttributeStatManager.IsLoaded(player) then
 		pendingAttr[player] = nil
-		AttributeStatManager.ApplyCollection(player, entries)
+		AttributeStatManager.ApplySource(player, "collection:", entries, "collection")
 		return
 	end
 	task.spawn(function()
@@ -155,7 +71,7 @@ local function applyAttributes(player: Player, entries)
 		while player.Parent and waited < ATTRIBUTE_WAIT and pendingAttr[player] == entries do
 			if AttributeStatManager.IsLoaded(player) then
 				pendingAttr[player] = nil
-				AttributeStatManager.ApplyCollection(player, entries)
+				AttributeStatManager.ApplySource(player, "collection:", entries, "collection")
 				return
 			end
 			waited += task.wait(0.5)
@@ -173,14 +89,23 @@ local function rebuild(player: Player, collections)
 					for index, reward in ipairs(Config.getRewards(skill, key, tier)) do
 						local spec = CollectionRewards.get(reward.type)
 						if spec and spec.derive then
-							spec.derive(reward, { skill = skill, key = key, tier = tier, index = index }, acc)
+							local statConfig = Config.statConfigLookup[skill][key]
+							spec.derive(reward, {
+								skill = skill,
+								key = key,
+								tier = tier,
+								index = index,
+								where = string.format("%s.%s tier %d", skill, key, tier),
+								id = string.format("%s.%s.%d", skill, key, tier),
+								label = string.format("%s collection %s", statConfig.name, Config.ROMAN_NUMERALS[tier]),
+							}, acc)
 						end
 					end
 				end
 			end
 		end
 	end
-	StatisticsDataManager.SetCollectionBonus(player, acc.gain)
+	StatisticsDataManager.SetGainBonus(player, "collection", acc.gain)
 	applyAttributes(player, acc.attr)
 	derivedFor[player] = true
 end
@@ -200,11 +125,13 @@ local function grantTiers(player: Player, data, collections, skill: string, key:
 				local ok, err = pcall(spec.apply, reward, {
 					player = player,
 					data = data,
-					collections = collections,
+					recipes = collections.recipes,
+					unlocks = collections.unlocks,
 					skill = skill,
 					key = key,
 					tier = tier,
 					index = index,
+					where = string.format("%s.%s tier %d", skill, key, tier),
 				})
 				if not ok then
 					warn("[CollectionService] reward failed: " .. tostring(err))

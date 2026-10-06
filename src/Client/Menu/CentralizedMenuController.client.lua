@@ -727,6 +727,13 @@ local SKILLS_BUTTONS = {
 		menuChild = "SkillsMenu",
 		openArg = "Combat",
 	},
+	CarpentrySkills = {
+		action = "page",
+		module = SkillsPageModule,
+		menuTitle = "Carpentry Skill",
+		menuChild = "SkillsMenu",
+		openArg = "Carpentry",
+	},
 	BackButton = {
 		tooltipData = {
 			title = '<font color="#55FF55"><b>Go back</b></font>',
@@ -952,11 +959,14 @@ local STATISTICS_BLANK_GROUPS = {
 	{ layoutOrder = 8, count = 16 },
 	{ layoutOrder = 11, count = 4 },
 }
+-- Same arrangement as the Collections hub: five skills in a row, the sixth centred below, Back / Close in the footer.
 local SKILL_BLANK_GROUPS = {
 	{ layoutOrder = 0, count = 20 },
-	{ layoutOrder = 6, count = 23 },
-	{ layoutOrder = 10, count = 4 },
+	{ layoutOrder = 6, count = 6 },
+	{ layoutOrder = 8, count = 16 },
+	{ layoutOrder = 11, count = 4 },
 }
+local SKILL_ITEM_ORDERS = { CarpentrySkills = 7, BackButton = 9, CloseSlot = 10 }
 local SETTINGS_BLANK_GROUPS = {
 	{ layoutOrder = 0, count = 10 },
 	{ layoutOrder = 2, count = 1 },
@@ -1482,7 +1492,7 @@ GridMenuModule.registerPooledGrid("SettingsGrid", GridTemplates:WaitForChild("Se
 GridMenuModule.registerPooledGrid("SkillsGrid", GridTemplates:WaitForChild("SkillsMenu1"), SKILLS_BUTTONS, {
 	title = "Skills",
 	blankGroups = SKILL_BLANK_GROUPS,
-	itemOrders = {},
+	itemOrders = SKILL_ITEM_ORDERS,
 	onWireTooltips = function(clonedButtons)
 		local conns = {}
 		local hovers = {}
@@ -1492,6 +1502,7 @@ GridMenuModule.registerPooledGrid("SkillsGrid", GridTemplates:WaitForChild("Skil
 			FishingSkills = "Fishing",
 			MiningSkills = "Mining",
 			CombatSkills = "Combat",
+			CarpentrySkills = "Carpentry",
 		}
 		for buttonName, statKey in pairs(SKILLGRID_STAT_MAP) do
 			local btn = clonedButtons[buttonName]

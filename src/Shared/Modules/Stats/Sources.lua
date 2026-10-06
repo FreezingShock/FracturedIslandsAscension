@@ -88,6 +88,13 @@ Sources.register("collection", {
 	description = "A permanent reward for completing a collection tier.",
 })
 
+Sources.register("skill", {
+	rank = 21,
+	label = "Skill",
+	color = "#FFFF55",
+	description = "A permanent reward for reaching a skill level.",
+})
+
 Sources.register("admin", {
 	rank = 90,
 	label = "Admin",

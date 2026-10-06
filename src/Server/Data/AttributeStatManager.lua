@@ -473,20 +473,21 @@ function AttributeStatManager.ApplyEquipment(player, entries)
 	return true
 end
 
--- ===================== COLLECTION BOOSTS =====================
--- Permanent collection tier rewards (CollectionService). Same idea as the equipment boosts: tagged with an id prefix and
--- rebuilt from scratch every time, so a boost saved by a previous session is replaced and can never stack.
-local COLLECTION_PREFIX = "collection:"
+-- ===================== REWARD SOURCE BOOSTS =====================
+-- Permanent rewards (collection tiers, skill levels). Same idea as the equipment boosts: every boost of a source is tagged
+-- with an id prefix and the whole set is rebuilt from scratch, so a boost saved by a previous session is replaced and
+-- can never stack.
 
 --- entries: array of { id, label, color?, attr, flat? = n, mult? = m } (mult is a multiplier, 1.05 = +5%).
-function AttributeStatManager.ApplyCollection(player, entries)
+--- prefix: "collection:" | "skill:"; sourceType: the Sources type shown in the breakdown.
+function AttributeStatManager.ApplySource(player, prefix, entries, sourceType)
 	local data = getAttributeData(player)
 	if not data then
 		return false
 	end
 
 	local function keep(boost)
-		return not (type(boost.id) == "string" and boost.id:sub(1, #COLLECTION_PREFIX) == COLLECTION_PREFIX)
+		return not (type(boost.id) == "string" and boost.id:sub(1, #prefix) == prefix)
 	end
 
 	for _, entry in pairs(data) do
@@ -510,10 +511,10 @@ function AttributeStatManager.ApplyCollection(player, entries)
 		local target = data[item.attr]
 		if target then
 			local boost = {
-				id = COLLECTION_PREFIX .. item.id,
+				id = prefix .. item.id,
 				label = item.label,
 				color = item.color,
-				sourceType = "collection",
+				sourceType = sourceType,
 			}
 			if item.flat then
 				boost.value = item.flat
@@ -523,7 +524,7 @@ function AttributeStatManager.ApplyCollection(player, entries)
 				table.insert(target.multipliers, boost)
 			end
 		else
-			warn("[AttributeStatManager] collection reward has no attribute: " .. tostring(item.attr))
+			warn("[AttributeStatManager] reward has no attribute: " .. tostring(item.attr))
 		end
 	end
 

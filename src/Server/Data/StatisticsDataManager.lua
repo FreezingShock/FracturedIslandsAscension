@@ -64,7 +64,8 @@ local profiles = {} -- [userId] = profile
 local sessionData = {} -- [userId] = { [skill] = { [key] = gained this session } }
 local dirty = {} -- [Player] = true when a snapshot is owed
 local adminSnapshot = {} -- [userId] = { [skill] = { [key] = { count, lifetime } } } (admin panel undo)
--- Permanent gain bonuses derived by CollectionService from the claimed tiers: [profile.Data] = { [skill] = { [key] = pct } }.
+-- Permanent gain bonuses derived from claimed tiers / levels: [profile.Data] = { [source] = { [skill] = { [key] = pct } } }
+-- (source = "collection" or "skill").
 -- Never saved and never added into the owned counts, so a restore or clamp cannot make them stack.
 local collectionBonus = setmetatable({}, { __mode = "k" })
 local flushListeners = {} -- fn(player), called after every snapshot flush (CollectionService re-derives from it)
@@ -139,21 +140,42 @@ function StatisticsDataManager.GetMultiplier(data, skill, statKey)
 			total += getStatCount(data, boost.sourceSkill, boost.sourceKey) * boost.pct / 100
 		end
 	end
-	local bonus = collectionBonus[data]
-	local pct = bonus and bonus[skill] and bonus[skill][statKey]
-	if pct then
-		total += pct / 100
+	local sources = collectionBonus[data]
+	if sources then
+		for _, bonus in pairs(sources) do
+			local pct = bonus[skill] and bonus[skill][statKey]
+			if pct then
+				total += pct / 100
+			end
+		end
 	end
 	return 1 + finite(total)
 end
 
---- CollectionService: replace the derived collection gain bonuses ({ [skill] = { [key] = pct } }).
-function StatisticsDataManager.SetCollectionBonus(player, bonus)
+--- Replace one source's derived gain bonuses ({ [skill] = { [key] = pct } }): "collection" (CollectionService) or
+--- "skill" (SkillRewardService). Rebuilt from the saved high-water marks, never saved themselves.
+function StatisticsDataManager.SetGainBonus(player, source, bonus)
 	local data = getPlayerData(player)
 	if data then
-		collectionBonus[data] = bonus
+		local sources = collectionBonus[data]
+		if not sources then
+			sources = {}
+			collectionBonus[data] = sources
+		end
+		sources[source] = bonus
 		dirty[player] = true
 	end
+end
+
+--- Give a flat amount of a statistic (a reward: not multiplied, counts toward lifetime like any gain).
+function StatisticsDataManager.GrantStat(player, skill, statKey, amount)
+	local data = getPlayerData(player)
+	if not (data and statConfigLookup[skill] and statConfigLookup[skill][statKey]) then
+		return false
+	end
+	addStat(player.UserId, data, skill, statKey, amount)
+	dirty[player] = true
+	return true
 end
 
 --- Register fn(player), called after each snapshot flush (and when a profile finishes loading).

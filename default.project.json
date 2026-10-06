@@ -76,8 +76,17 @@
       "ResourceService": {
         "$path": "src/Server/Stats/ResourceService.lua"
       },
+      "RewardBehaviors": {
+        "$path": "src/Server/Stats/RewardBehaviors.lua"
+      },
       "ServerInfoInit": {
         "$path": "src/Server/World/ServerInfoInit.server.lua"
+      },
+      "SkillRewardInit": {
+        "$path": "src/Server/Stats/SkillRewardInit.server.lua"
+      },
+      "SkillRewardService": {
+        "$path": "src/Server/Stats/SkillRewardService.lua"
       },
       "SkillsDataManager": {
         "$path": "src/Server/Data/SkillsDataManager.lua"
@@ -197,6 +206,9 @@
         },
         "SettingsPageModule": {
           "$path": "src/Shared/Modules/Menu/Pages/SettingsPageModule.lua"
+        },
+        "SkillsConfig": {
+          "$path": "src/Shared/Modules/Stats/SkillsConfig.lua"
         },
         "SkillsPageModule": {
           "$path": "src/Shared/Modules/Menu/Pages/SkillsPageModule.lua"
