@@ -152,7 +152,8 @@ HudTheme.badge = {
 	wingLeftX = 436,
 	wingRightX = 588,
 	wingY = 76,
-	arrowPos = Vector2.new(520, 152),
+	arrowSize = Vector2.new(48, 28),
+	arrowPos = Vector2.new(520, 152), -- slot 5's position (under the badge tip); InventoryController slides the x with the selector
 }
 
 -- Held-item name (typewriter label group, auto-sized): top-centre anchor point, above the panels and the badge

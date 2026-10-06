@@ -105,6 +105,7 @@ local hotbarFrame = hudRoot:WaitForChild("Hotbar")
 local hotbarBB = hotbarFrame:WaitForChild("HotbarBB")
 local hotbarFrames = hotbarBB:WaitForChild("HotbarFrames")
 local selectorFrame = hudRoot:WaitForChild("Selector")
+local arrowFrame = hudRoot:WaitForChild("SelectorArrow")
 local slotTemplate = ReplicatedStorage:WaitForChild("SlotTemplate")
 
 -- ===================== GUI REFERENCES — INVENTORY (inside CentralizedMenu) =====================
@@ -701,9 +702,11 @@ local selectorInfo = TweenInfo.new(
 )
 local selectorShown = nil -- the slot the ring is on (or moving to)
 local selectorTween: Tween? = nil
+local arrowTween: Tween? = nil
 local rootScale = hudRoot:FindFirstChildOfClass("UIScale")
 
---- Put the ring around the selected slot: a smooth slide when the selection changed, a snap when the layout moved.
+--- Put the ring around the selected slot and the arrow above it (they slide together): a smooth slide when the
+--- selection changed, a snap when the layout moved.
 local moveSelector
 moveSelector = function(snap)
 	local slotData = hotbarSlots[currentSelected]
@@ -718,18 +721,30 @@ moveSelector = function(snap)
 	local rel = (slot.AbsolutePosition - hudRoot.AbsolutePosition) / scale
 	local pad = SelectorConf.pad
 	local target = UDim2.fromOffset(rel.X - pad, rel.Y - pad)
+	local arrowSize = HudTheme.badge.arrowSize
+	local arrowTarget = UDim2.fromOffset(rel.X + HudTheme.slot.size / 2 - arrowSize.X / 2, HudTheme.badge.arrowPos.Y)
 	if snap or selectorShown == nil then
 		if selectorTween then
 			selectorTween:Cancel()
 			selectorTween = nil
 		end
+		if arrowTween then
+			arrowTween:Cancel()
+			arrowTween = nil
+		end
 		selectorFrame.Position = target
+		arrowFrame.Position = arrowTarget
 	elseif selectorShown ~= currentSelected then
 		if selectorTween then
 			selectorTween:Cancel()
 		end
+		if arrowTween then
+			arrowTween:Cancel()
+		end
 		selectorTween = TweenService:Create(selectorFrame, selectorInfo, { Position = target })
+		arrowTween = TweenService:Create(arrowFrame, selectorInfo, { Position = arrowTarget })
 		selectorTween:Play()
+		arrowTween:Play()
 	end -- same selection as before: a slide in progress keeps going
 	selectorShown = currentSelected
 end

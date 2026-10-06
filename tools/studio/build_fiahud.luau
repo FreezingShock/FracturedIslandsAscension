@@ -10,8 +10,8 @@
 --       Stats    CanvasGroup: Health / Mana panels (Bar.Fill, Value, ValueShadow, Icon) 4
 --       Badge    hexagon + Level (Nexus Level)                                        5
 --       Hotbar   HotbarBB > HotbarFrames (UIListLayout; InventoryController fills it)  6
---       Selector lavender ring that InventoryController slides between slots          7
---       SelectorArrow  green V under the badge tip                                    8
+--       Selector lavender ring that InventoryController slides between slots          11 (above the vines)
+--       SelectorArrow  green V above the selected slot; slides with the Selector      12 (above the vines)
 --       Name     the held-item name group, moved from StatsMenu if it is still there  9
 --       (Vines is added by build_fiahud_vines.luau)                                   10
 --   ReplicatedStorage.SlotTemplate: the pixel item slot (the previous template is kept as SlotTemplate_Legacy).
@@ -461,7 +461,7 @@ local function buildHud()
 	-- Selector ring
 	local ring = SL.size + 2 * SL.selector.pad
 	local t = SL.selector.thickness
-	local selector = z(frame(root, "Selector", SL.hotbarPos.X - SL.selector.pad, SL.hotbarPos.Y - SL.selector.pad, ring, ring, nil), 7)
+	local selector = z(frame(root, "Selector", SL.hotbarPos.X - SL.selector.pad, SL.hotbarPos.Y - SL.selector.pad, ring, ring, nil), 11)
 	local rc = C[SL.selector.colorKey]
 	frame(selector, "Top", t, 0, ring - 2 * t, t, rc)
 	frame(selector, "Bottom", t, ring - t, ring - 2 * t, t, rc)
@@ -469,7 +469,7 @@ local function buildHud()
 	frame(selector, "Right", ring - t, t, t, ring - 2 * t, rc)
 
 	-- Selector arrow (under the badge tip)
-	local arrow = group(root, "SelectorArrow", BD.arrowPos.X, BD.arrowPos.Y, 48, 28, 8)
+	local arrow = group(root, "SelectorArrow", BD.arrowPos.X, BD.arrowPos.Y, BD.arrowSize.X, BD.arrowSize.Y, 12)
 	local rows = { { 0, 48 }, { 4, 40 }, { 8, 32 }, { 12, 24 }, { 16, 16 }, { 20, 8 } }
 	for i, r in ipairs(rows) do
 		frame(arrow, "O" .. i, r[1] - 4, (i - 1) * 4, r[2] + 8, 4, C.leafDark)
