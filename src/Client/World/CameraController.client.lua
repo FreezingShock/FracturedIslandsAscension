@@ -35,6 +35,7 @@ local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 local MenuBridge = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("MenuBridge")) :: any
 local MovementConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("MovementConfig")) :: any
+local ViewMenuConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Config"):WaitForChild("ViewMenuConfig")) :: any
 local UserGameSettings = UserSettings():GetService("UserGameSettings")
 
 -- ===================== CONFIG =====================
@@ -56,20 +57,20 @@ local HEAD_TO_CHEST = Vector3.new(0, 1.6, 0) -- third person focus above the roo
 local SKIP_FRAMES_AFTER_LOCK = 2 -- ignore the mouse jump when the cursor locks again
 
 -- view labels: rich text for the POV label per phase (the label's own TextColor3 is the main colour and eases between them;
--- the gray brackets and coloured keyword are rich-text spans) and the two states of the Cursor label
+-- the gray dash and the coloured keyword are rich-text spans from ViewMenuConfig.format: WORD — value) and the two states of the Cursor label
 local POV_STYLE = {
 	{ text = "FIRST PERSON", color = Color3.fromRGB(85, 85, 255) },
 	{
-		text = 'THIRD PERSON <font color="#AAAAAA">(</font><font color="#FFAA00">OTS</font><font color="#AAAAAA">)</font>',
+		text = ViewMenuConfig.format("THIRD PERSON", nil, "OTS", "#FFAA00"),
 		color = Color3.fromRGB(255, 85, 255),
 	},
 	{
-		text = 'THIRD PERSON <font color="#AAAAAA">(</font><font color="#55FF55">FREE</font><font color="#AAAAAA">)</font>',
+		text = ViewMenuConfig.format("THIRD PERSON", nil, "FREE", "#55FF55"),
 		color = Color3.fromRGB(170, 0, 170),
 	},
 }
-local CURSOR_LOCKED = '<font color="#55FF55">CURSOR LOCKED</font> (<font color="#FFFF55">T</font>)'
-local CURSOR_UNLOCKED = '<font color="#55FFFF">CURSOR UNLOCKED</font> (<font color="#FFFF55">T</font>)'
+local CURSOR_LOCKED = ViewMenuConfig.format("CURSOR LOCKED", "#55FF55", "T", "#FFFF55")
+local CURSOR_UNLOCKED = ViewMenuConfig.format("CURSOR UNLOCKED", "#55FFFF", "T", "#FFFF55")
 local COLOR_EASE = TweenInfo.new(0.35, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
 local FADE = TweenInfo.new(0.25, Enum.EasingStyle.Quad)
 

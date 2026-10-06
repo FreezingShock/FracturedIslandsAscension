@@ -9,7 +9,8 @@
 	  order     the enabled rows, BOTTOM TO TOP above Cursor: edit this list per update
 	  overrides id -> partial definition merged over the library entry (e.g. a different colour for one build)
 
-	Row text format (same as the Cursor label): <font color=word>WORD</font> (<font color=value>value</font>)
+	Row text format, shared with the hand-made POV / Cursor labels (CameraController uses ViewMenuConfig.format too):
+	<font color=word>WORD</font> <font color=gray>—</font> <font color=value>value</font>   e.g.  FPS — 60
 
 	Definition fields
 	  word         the coloured word
@@ -29,6 +30,9 @@
 local RED, GREEN, YELLOW, AQUA, GOLD, PURPLE, WHITE = "#FF5555", "#55FF55", "#FFFF55", "#55FFFF", "#FFAA00", "#FF55FF", "#FFFFFF"
 
 local ViewMenuConfig = {}
+
+-- the dash between a word and its value (a long dash, gray)
+ViewMenuConfig.separator = { text = "\u{2014}", color = "#AAAAAA" }
 
 ViewMenuConfig.toggleKey = Enum.KeyCode.U -- shows / hides every info row (session only); POV and Cursor are not affected
 ViewMenuConfig.rowHeight = 24 -- px at scale 1: the pitch of POV / Cursor in the hand-made group
@@ -104,6 +108,16 @@ ViewMenuConfig.library = {
 ViewMenuConfig.order = { "DPS", "FPS", "PING", "SERVER", "UP", "VERSION" }
 
 ViewMenuConfig.overrides = {}
+
+--- "WORD — value" with Minecraft colours. A nil wordColor leaves the word in the label's own colour (POV eases it).
+function ViewMenuConfig.format(word: string, wordColor: string?, value: string?, valueColor: string?): string
+	local head = wordColor and string.format('<font color="%s">%s</font>', wordColor, word) or word
+	if value == nil then
+		return head
+	end
+	local sep = ViewMenuConfig.separator
+	return string.format('%s <font color="%s">%s</font> <font color="%s">%s</font>', head, sep.color, sep.text, valueColor or "#FFFF55", value)
+end
 
 --- The merged definition of a row (library entry + override), or nil when the id is unknown.
 function ViewMenuConfig.get(id: string): any?

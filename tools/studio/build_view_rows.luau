@@ -66,13 +66,7 @@ for index, id in ipairs(C.order) do
 		label.Name = id
 		label.RichText = true
 		label.TextTransparency = 0
-		label.Text = string.format(
-			'<font color="%s">%s</font> (<font color="%s">%s</font>)',
-			def.wordColor,
-			def.word,
-			def.valueColor or "#FFFF55",
-			def.sample or ""
-		)
+		label.Text = C.format(def.word, def.wordColor, def.sample or "", def.valueColor)
 		label.Parent = view
 		made += 1
 	end

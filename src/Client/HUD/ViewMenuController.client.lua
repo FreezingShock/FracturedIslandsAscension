@@ -6,7 +6,7 @@
 	VERSION ... as listed in ViewMenuConfig.order, stacked UPWARD above the Cursor / POV labels that CameraController
 	drives. Every row is a TextLabel named by its row id inside View (placeholders built by tools/studio/build_view_rows.luau
 	as copies of the Cursor label, so the layout shows in Studio and can be restyled by hand); a missing one is cloned from
-	ReplicatedStorage.GUI.ViewRow. Same format as Cursor: <font color=word>WORD</font> (<font color=value>value</font>).
+	ReplicatedStorage.GUI.ViewRow. Same format as Cursor and POV: WORD — value, the dash gray (ViewMenuConfig.format).
 
 	  U (ViewMenuConfig.toggleKey)  shows / hides all info rows (session only; POV and Cursor stay)
 	  idleFade rows (DPS)           leave while their number is 0 and come back on the next non-zero
@@ -126,13 +126,7 @@ end
 local function refreshRow(row: any, now: number)
 	local def = row.def
 	local text, number = PROVIDERS[def.provider](row)
-	local line = string.format(
-		'<font color="%s">%s</font> (<font color="%s">%s</font>)',
-		def.wordColor,
-		def.word,
-		colorFor(def, number),
-		text
-	)
+	local line = Config.format(def.word, def.wordColor, text, colorFor(def, number))
 	if line ~= row.text then
 		row.text = line
 		row.label.Text = line
