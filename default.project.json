@@ -22,6 +22,9 @@
       "DamageService": {
         "$path": "src/Server/Combat/DamageService.lua"
       },
+      "DamageTracker": {
+        "$path": "src/Server/Combat/DamageTracker.lua"
+      },
       "DummyInit": {
         "$path": "src/Server/Combat/DummyInit.server.lua"
       },
@@ -66,6 +69,9 @@
       },
       "ResourceService": {
         "$path": "src/Server/Stats/ResourceService.lua"
+      },
+      "ServerInfoInit": {
+        "$path": "src/Server/World/ServerInfoInit.server.lua"
       },
       "SkillsDataManager": {
         "$path": "src/Server/Data/SkillsDataManager.lua"
@@ -272,6 +278,9 @@
         },
         "UIPlaceholderCleanup": {
           "$path": "src/Client/HUD/UIPlaceholderCleanup.client.lua"
+        },
+        "ViewMenuController": {
+          "$path": "src/Client/HUD/ViewMenuController.client.lua"
         },
         "WeaponController": {
           "$path": "src/Client/Combat/WeaponController.client.lua"

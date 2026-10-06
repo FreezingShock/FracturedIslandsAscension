@@ -7,6 +7,8 @@ description: Wrap up a work session - commit with the repo's version-title conve
 
 1. **Preflight:** `git status --short`, `python tools/gen_project.py --check`. Never commit `Blender/` renders or
    secrets; leave unrelated untracked files alone. Do not ship if the last `/fia-verify` was FAIL.
+2. **Version file:** before committing, set `version` in `src/Shared/Modules/Config/GameVersion.lua` to the version of the commit
+   title you are about to use (e.g. `"3.54.0"`); the ViewMenu VERSION row shows it. Include that file in the commit.
 2. **Commit** in logical groups (not one giant commit). Title format: `3.xx.x - short description`
    (bump the last commit's version: patch for fixes, minor for features; check `git log -1 --oneline`).
    Body optional. End with the attribution line your system reminder specifies.

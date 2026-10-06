@@ -34,6 +34,7 @@ local Modules = ReplicatedStorage:WaitForChild("Modules")
 local CombatConfig = require(Modules:WaitForChild("CombatConfig")) :: any
 local Items = require(Modules:WaitForChild("Items")) :: any
 local AttributeStatManager = require(ServerScriptService:WaitForChild("AttributeStatManager")) :: any
+local DamageTracker = require(ServerScriptService:WaitForChild("DamageTracker")) :: any
 
 local DamageService = {}
 DamageService.TAG = "Damageable"
@@ -166,6 +167,7 @@ local function applyHits(player: Player, hits: { any }, hitInfo: any, facing: Ve
 		local hit = hits[i]
 		local amount, isCrit = DamageService.compute(player, weaponStats, weaponId, hitInfo)
 		hit.humanoid:TakeDamage(amount)
+		DamageTracker.record(player, amount)
 		hit.model:SetAttribute("LastHit", os.clock())
 		hit.model:SetAttribute("LastAttacker", player.UserId)
 
