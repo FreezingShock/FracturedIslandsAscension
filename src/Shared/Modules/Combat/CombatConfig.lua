@@ -105,6 +105,18 @@ CombatConfig.crash = {
 	aoeKnockbackMult = 0.5,
 }
 
+-- SWING TIMING (Minecraft-style charge): the time since your previous swing picks a tier. `upTo` is seconds at attack speed 1
+-- (divided by the weapon's attackSpeed); the last tier has no upTo. `mult` multiplies the damage of the swing and ONLY
+-- the swing (Crit, Crash and Full are separate flags with their own multipliers); `full = true` marks a Full hit (bar
+-- full); `color` tints the HUD bar. A swing after a long rest is Full.
+CombatConfig.timing = {
+	tiers = {
+		{ upTo = 0.6, mult = 0.8, color = "#AAAAAA" },
+		{ upTo = 1.2, mult = 1.0, color = "#FFFF55" },
+		{ mult = 1.2, full = true, color = "#FFAA00" },
+	},
+}
+
 CombatConfig.hit = {
 	flashColor = Color3.fromRGB(255, 255, 255), -- Highlight fill on the target
 	flashTime = 0.18,
@@ -123,6 +135,17 @@ CombatConfig.hit = {
 		color = "#FF5555", stroke = "#AA0000", scale = 1.45, prefix = "Crash",
 		badge = { color = "#AA0000", transparency = 0.45 },
 	},
+	-- full: a hit with the charge bar full (independent of crit / crash): gold number with a star; when it is also a
+	-- crit or crash the stronger style keeps its colour and gets the star in front (`star`)
+	full = { color = "#FFD700", stroke = "#AA5500", scale = 1.15 },
+	star = "★",
+	-- taken: damage a player takes, floating over them
+	taken = { color = "#FF5555", stroke = "#550000", scale = 1.25 },
+	aoeScale = 0.75, -- AoE hits (Crash splash) are drawn smaller
+	stackOffset = 0.9, -- studs each number made on the same target within stackWindow is lifted, so they never overlap
+	stackWindow = 0.45,
+	popFrom = 0.55, -- a number pops in from this scale (of its final size) with a small overshoot
+	popTime = 0.16,
 }
 
 CombatConfig.dummy = {
@@ -370,6 +393,26 @@ function CombatConfig.libraryKeysFor(weaponType: string): { string }
 		end
 	end
 	return out
+end
+
+--- The timing tier for a swing made `sinceLast` seconds after the previous one: { mult, full, color, index }.
+function CombatConfig.timingTier(sinceLast: number, attackSpeed: number?): any
+	local speed = math.max(0.5, attackSpeed or 1)
+	local tiers = CombatConfig.timing.tiers
+	for i, tier in ipairs(tiers) do
+		if not tier.upTo or sinceLast < tier.upTo / speed then
+			return { mult = tier.mult, full = tier.full == true, color = tier.color, index = i }
+		end
+	end
+	local last = tiers[#tiers]
+	return { mult = last.mult, full = last.full == true, color = last.color, index = #tiers }
+end
+
+--- Seconds of rest at `attackSpeed` for the charge bar to be full (where the last tier starts).
+function CombatConfig.chargeTime(attackSpeed: number?): number
+	local tiers = CombatConfig.timing.tiers
+	local boundary = tiers[math.max(1, #tiers - 1)].upTo or 0
+	return boundary / math.max(0.5, attackSpeed or 1)
 end
 
 return CombatConfig

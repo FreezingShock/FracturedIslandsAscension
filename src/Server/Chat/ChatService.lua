@@ -29,7 +29,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TextChatService = game:GetService("TextChatService")
 
 local Modules = ReplicatedStorage:WaitForChild("Modules")
-local ChatConfig = require(Modules:WaitForChild("ChatConfig"))
+local ChatConfig = require(Modules:WaitForChild("Config"):WaitForChild("ChatConfig"))
 
 local ChatService = {}
 

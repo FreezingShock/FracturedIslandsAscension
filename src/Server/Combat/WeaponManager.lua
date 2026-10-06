@@ -65,12 +65,12 @@ local LANDED_FRAMES = 3 -- frames on the ground in a row that count as having la
 
 --- Called at each accepted swing's hit frame: the hit is only resolved if the same weapon is still held (a weapon
 --- switch or reset in between cancels it). Replace `WeaponManager.onSwingHit` to change what a swing does.
-WeaponManager.onSwingHit = function(player, stepIndex, weaponId, crash)
+WeaponManager.onSwingHit = function(player, stepIndex, weaponId, crash, tier)
 	local state = playerWeapons[player.UserId]
 	if not state or state.weaponId ~= weaponId then
 		return
 	end
-	DamageService.swing(player, stepIndex, weaponId, state.stats, crash)
+	DamageService.swing(player, stepIndex, weaponId, state.stats, crash, tier)
 end
 
 -- ===================== HELPERS =====================
@@ -173,6 +173,12 @@ function WeaponManager.TrySwing(player, crash: boolean?, hitIn: number?): (boole
 	local speed = math.max(0.5, weapon.stats.attackSpeed or 1)
 	local swingTime = CombatConfig.swingTime(step, speed)
 
+	-- swing timing: the rest since the previous swing picks the damage tier (CombatConfig.timing); clients draw the charge
+	-- bar from the LastSwing / ChargeTime attributes
+	local tier = CombatConfig.timingTier(c.lastSwingAt and (now - c.lastSwingAt) or math.huge, speed)
+	c.lastSwingAt = now
+	player:SetAttribute("LastSwing", workspace:GetServerTimeNow())
+
 	c.ticket += 1
 	local ticket = c.ticket
 	c.step = stepIndex
@@ -195,7 +201,7 @@ function WeaponManager.TrySwing(player, crash: boolean?, hitIn: number?): (boole
 	task.delay(hitDelay, function()
 		local hook = (WeaponManager :: any).onSwingHit
 		if hook and c.ticket == ticket then
-			hook(player, stepIndex, weapon.weaponId, crash == true)
+			hook(player, stepIndex, weapon.weaponId, crash == true, tier)
 		end
 	end)
 	task.delay(swingTime, function()
@@ -356,6 +362,14 @@ function WeaponManager.EquipWeapon(player, weaponId: string): boolean
 	-- Apply stat bonuses
 	applyWeaponStats(player, stats)
 
+	-- the swing-timing bar (AttackBarController): a fresh weapon starts fully charged
+	local equippedCombo = getCombo(player)
+	equippedCombo.lastSwingAt = nil
+	if CombatConfig.get(weaponConfig.weaponType) then
+		player:SetAttribute("ChargeTime", CombatConfig.chargeTime(stats.attackSpeed))
+		player:SetAttribute("LastSwing", workspace:GetServerTimeNow() - 60)
+	end
+
 	-- Fire events
 	EquipWeaponEvent:FireClient(player, { weaponId = weaponId, stats = stats })
 	UpdateWeaponStatsEvent:FireClient(player, stats)
@@ -385,6 +399,7 @@ function WeaponManager.UnequipWeapon(player): boolean
 	-- Clear state
 	playerWeapons[player.UserId] = nil
 	resetCombo(player)
+	player:SetAttribute("ChargeTime", nil)
 
 	-- Fire events
 	UnequipWeaponEvent:FireClient(player)

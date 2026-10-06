@@ -18,13 +18,14 @@
 	stat of that name (weapon stats are not applied to the chain yet).
 
 	Each hit is broadcast on the WeaponHit remote so every client can show the impact (flash, number, effects, sound):
-	{ target, crash (landing-swing Crash hit, primary or AoE), step (combo step, swings only), first (nearest target), position (number spot), point (contact on the body), dir (spray direction), enemyType, damage, isCrit,
+	{ target, full (charge bar full), tierMult, aoe (splash), taken (a player was hurt), crash (landing-swing Crash hit, primary or AoE), step (combo step, swings only), first (nearest target), position (number spot), point (contact on the body), dir (spray direction), enemyType, damage, isCrit,
 	killed, attacker, weaponType, weaponId }. EnemyType is a model attribute (EnemyConfig key).
 
 	  DamageService.swing(player, stepIndex, weaponId, weaponStats, crash?)  a combo step (cone from CombatConfig)
 	  DamageService.strike(player, ability, weaponId, weaponStats) -> n    an ability hit (circle / cone / line, AbilityConfig)
 	  DamageService.query(character, origin, facing, shape) -> hits        the shared target query
-	  DamageService.compute(player, weaponStats, weaponId, step, forceCrit?, crash?) -> amount, isCrit
+	  DamageService.compute(player, weaponStats, weaponId, step, forceCrit?, crash?, tier?) -> amount, isCrit
+	  DamageService.hurtPlayer(player, amount, source?) -> damage dealt     an enemy hits a player (Defense applies)
 	  DamageService.TAG
 --]]
 
@@ -64,10 +65,11 @@ local function stat(player: Player, weaponId: string, key: string): number
 	return (tonumber(AttributeStatManager.GetFinalValue(player, key)) or 0) + weaponStat(weaponId, key)
 end
 
-function DamageService.compute(player: Player, weaponStats: any, weaponId: string, step: any, forceCrit: boolean?, crash: boolean?): (number, boolean)
+function DamageService.compute(player: Player, weaponStats: any, weaponId: string, step: any, forceCrit: boolean?, crash: boolean?, tier: any?): (number, boolean)
 	local base = ((weaponStats.baseDamage or 0) + DAMAGE.flatBase)
 		* (1 + stat(player, weaponId, "Strength") * DAMAGE.strengthScale)
 		* (step.damageMult or 1)
+		* (tier and tier.mult or 1) -- the swing-timing tier: the only place the timing multiplier applies
 
 	local critChance = math.clamp(stat(player, weaponId, "CritChance"), 0, DAMAGE.critChanceCap)
 	local isCrit
@@ -186,11 +188,11 @@ end
 
 --- Damage, knock back and broadcast every target of `hits` (from query). `hitInfo` = { damageMult, knockback, maxTargets }.
 --- `from` = where the blow comes from (the swinger, or an ability's fixed origin): effects spray back toward it.
-local function applyHits(player: Player, hits: { any }, hitInfo: any, facing: Vector3, weaponId: string, weaponStats: any, from: Vector3, stepIndex: number?, crash: boolean?): number
+local function applyHits(player: Player, hits: { any }, hitInfo: any, facing: Vector3, weaponId: string, weaponStats: any, from: Vector3, stepIndex: number?, crash: boolean?, tier: any?, aoe: boolean?): number
 	local count = math.min(#hits, hitInfo.maxTargets or 1)
 	for i = 1, count do
 		local hit = hits[i]
-		local amount, isCrit = DamageService.compute(player, weaponStats, weaponId, hitInfo, nil, crash)
+		local amount, isCrit = DamageService.compute(player, weaponStats, weaponId, hitInfo, nil, crash, tier)
 		hit.humanoid:TakeDamage(amount)
 		DamageTracker.record(player, amount)
 		hit.model:SetAttribute("LastHit", os.clock())
@@ -212,6 +214,9 @@ local function applyHits(player: Player, hits: { any }, hitInfo: any, facing: Ve
 			dir = dir, -- unit vector the effects spray along
 			step = stepIndex, -- combo step for a swing (the client plays that step's attack sound once, on the first target)
 			first = i == 1,
+			full = tier ~= nil and tier.full == true, -- the swing-timing bar was full (independent of crit / crash)
+			tierMult = tier and tier.mult or 1,
+			aoe = aoe == true, -- a splash hit (drawn smaller)
 			crash = crash == true, -- a falling-swing Crash hit (red style; damage already x CombatConfig.crash.damageMult)
 			enemyType = hit.model:GetAttribute("EnemyType"), -- EnemyConfig key (nil = default)
 			damage = amount,
@@ -225,7 +230,30 @@ local function applyHits(player: Player, hits: { any }, hitInfo: any, facing: Ve
 	return count
 end
 
-function DamageService.swing(player: Player, stepIndex: number, weaponId: string, weaponStats: any, crash: boolean?)
+--- An enemy hurting a player: `amount` is the base damage, reduced by the player's Defense (amount x 100 / (100 + Defense)),
+--- applied through the Humanoid and broadcast as a red number over the player. Returns the damage dealt.
+function DamageService.hurtPlayer(player: Player, amount: number, source: Instance?): number
+	local character = player.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	local root = character and character:FindFirstChild("HumanoidRootPart") :: BasePart?
+	if not (humanoid and root) or humanoid.Health <= 0 then
+		return 0
+	end
+	local defense = math.max(tonumber(AttributeStatManager.GetFinalValue(player, "Defense")) or 0, 0)
+	local dealt = math.max(1, math.floor(amount * 100 / (100 + defense) + 0.5))
+	humanoid:TakeDamage(dealt)
+	local head = character:FindFirstChild("Head") :: BasePart?
+	WeaponHitEvent:FireAllClients({
+		taken = true, -- a player took this: only a red number, no impact effects
+		target = character,
+		position = (head and head.Position or root.Position) + Vector3.new(0, 1, 0),
+		damage = dealt,
+		source = source,
+	})
+	return dealt
+end
+
+function DamageService.swing(player: Player, stepIndex: number, weaponId: string, weaponStats: any, crash: boolean?, tier: any?)
 	local typeConfig = CombatConfig.get(weaponStats and weaponStats.weaponType)
 	local step = typeConfig and typeConfig.steps[stepIndex]
 	local character, origin, facing = casterFrame(player)
@@ -234,7 +262,7 @@ function DamageService.swing(player: Player, stepIndex: number, weaponId: string
 	end
 	local hits = DamageService.query(character, origin, facing, { kind = "cone", reach = step.reach, arc = step.arc })
 	if not crash then
-		applyHits(player, hits, step, facing, weaponId, weaponStats, origin, stepIndex)
+		applyHits(player, hits, step, facing, weaponId, weaponStats, origin, stepIndex, nil, tier)
 		return
 	end
 
@@ -245,7 +273,7 @@ function DamageService.swing(player: Player, stepIndex: number, weaponId: string
 		return
 	end
 	local config = CombatConfig.crash
-	applyHits(player, { primary }, step, facing, weaponId, weaponStats, origin, stepIndex, true)
+	applyHits(player, { primary }, step, facing, weaponId, weaponStats, origin, stepIndex, true, tier)
 	local center = primary.root.Position
 	local around = {}
 	for _, other in ipairs(DamageService.query(character, center, facing, { kind = "circle", radius = config.aoeRadius, lineOfSight = false })) do
@@ -259,7 +287,7 @@ function DamageService.swing(player: Player, stepIndex: number, weaponId: string
 			knockback = (step.knockback or 0) * config.aoeKnockbackMult,
 			maxTargets = config.aoeMaxTargets,
 		}
-		applyHits(player, around, aoeInfo, facing, weaponId, weaponStats, center, nil, true) -- no step: no second attack sound
+		applyHits(player, around, aoeInfo, facing, weaponId, weaponStats, center, nil, true, tier, true) -- no step: no second attack sound
 	end
 end
 

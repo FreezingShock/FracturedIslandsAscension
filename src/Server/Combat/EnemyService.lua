@@ -5,12 +5,19 @@
 	Basic mobs. One mob stands on every Part in Workspace.EnemySpawns (move, add or delete markers in Studio); the part's
 	attribute EnemyType picks the EnemyConfig entry (default "placeholder_mob"). A mob is cloned from
 	ServerStorage[mob.template] when that model exists (drop your own rig there), else a tinted plain R6 rig is built.
-	It is tagged "Damageable" (DamageService hits it) and "Enemy" (nameplate), carries the model attribute EnemyType
-	(its hit effects and sounds, EnemyConfig) and respawns mob.respawnSeconds after dying.
+	It is tagged "Damageable" (DamageService hits it) and "Enemy" (nameplate, telegraph), carries the model attribute
+	EnemyType (its hit effects and sounds, EnemyConfig) and respawns mob.respawnSeconds after dying.
 
-	Behaviour (numbers in EnemyConfig.enemies[type].mob): chase the nearest player inside aggroRange, or whoever hit it
-	in the last hitAggroSeconds, stop at stopDistance (no attacks yet); past leashRange from home it walks back; with
-	nobody around it strolls inside wanderRadius. No loot, aggro tables or attacks: those are later slices.
+	Behaviour (numbers in EnemyConfig.enemies[type].mob): chase the nearest player inside aggroRange, or whoever hit it in
+	the last hitAggroSeconds; past leashRange from home it walks back; with nobody around it strolls inside wanderRadius.
+
+	Attacks (EnemyConfig.enemies[type].attacks -> EnemyConfig.attacks): in range of its target and off cooldown the mob
+	picks an attack by weight, stops, faces the target and sets the model attribute Telegraph = windup seconds (the client
+	flashes its body red, EnemyTelegraphController); when the windup ends a "melee" attack hurts the target if it is still
+	in range and in front (DamageService.hurtPlayer: Defense applies). The next attack comes after the entry's cooldown
+	{ min, max } seconds, counted from the start of the previous one.
+
+	Death: LootService.reward gives the killer the enemy's skill XP and drops.
 --]]
 
 local CollectionService = game:GetService("CollectionService")
@@ -21,6 +28,7 @@ local ServerStorage = game:GetService("ServerStorage")
 
 local EnemyConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("EnemyConfig")) :: any
 local DamageService = require(ServerScriptService:WaitForChild("DamageService")) :: any
+local LootService = require(ServerScriptService:WaitForChild("LootService")) :: any
 
 local STEP = 0.3
 local DEFAULT_TYPE = "placeholder_mob"
@@ -28,8 +36,23 @@ local KNOCKBACK_PAUSE = 0.35 -- seconds after a hit the mob does not steer, so t
 
 local EnemyService = {}
 
-type Mob = { model: Model, humanoid: Humanoid, root: BasePart, home: Vector3, cfg: any, nextWander: number }
+type Mob = {
+	model: Model,
+	humanoid: Humanoid,
+	root: BasePart,
+	home: Vector3,
+	cfg: any,
+	entry: any,
+	enemyType: string,
+	nextWander: number,
+	nextAttack: number,
+	attacking: boolean,
+}
 local mobs: { [Model]: Mob } = {}
+
+local function between(range: any): number
+	return range[1] + math.random() * ((range[2] or range[1]) - range[1])
+end
 
 local function rigFor(cfg: any): Model?
 	local made = ServerStorage:FindFirstChild(cfg.template)
@@ -84,9 +107,25 @@ local function spawnMob(marker: BasePart)
 	CollectionService:AddTag(model, "Enemy")
 	root:SetNetworkOwner(nil) -- the server owns the physics, so knockback is the same for everyone
 
-	mobs[model] = { model = model, humanoid = humanoid, root = root, home = marker.Position, cfg = cfg, nextWander = 0 }
+	local first = entry.attacks and entry.attacks[1]
+	mobs[model] = {
+		model = model,
+		humanoid = humanoid,
+		root = root,
+		home = marker.Position,
+		cfg = cfg,
+		entry = entry,
+		enemyType = enemyType,
+		nextWander = 0,
+		nextAttack = os.clock() + (first and between(first.cooldown or { 3, 5 }) or math.huge),
+		attacking = false,
+	}
 	humanoid.Died:Once(function()
 		mobs[model] = nil
+		local ok, err = pcall(LootService.reward, model, enemyType)
+		if not ok then
+			warn("[EnemyService] reward failed: " .. tostring(err))
+		end
 		task.delay(cfg.respawnSeconds, function()
 			model:Destroy()
 			if marker.Parent then
@@ -110,10 +149,74 @@ local function playerRoot(player: Player?): BasePart?
 	return nil
 end
 
+-- ===================== ATTACKS =====================
+--- An attack that is off cooldown and in range of the target, picked by weight (nil when none).
+local function pickAttack(mob: Mob, distance: number, now: number): (any?, any?)
+	if now < mob.nextAttack then
+		return nil, nil
+	end
+	local choices, total = {}, 0
+	for _, option in ipairs(mob.entry.attacks or {}) do
+		local attack = EnemyConfig.attacks[option.attack]
+		if attack and distance <= attack.range then
+			table.insert(choices, { option = option, attack = attack, weight = option.weight or 1 })
+			total += option.weight or 1
+		end
+	end
+	if #choices == 0 then
+		return nil, nil
+	end
+	local pick = math.random() * total
+	for _, choice in ipairs(choices) do
+		pick -= choice.weight
+		if pick <= 0 then
+			return choice.option, choice.attack
+		end
+	end
+	return choices[1].option, choices[1].attack
+end
+
+local function runAttack(mob: Mob, option: any, attack: any, targetPlayer: Player)
+	mob.attacking = true
+	mob.nextAttack = os.clock() + between(option.cooldown or { 3, 5 })
+	local model, humanoid, root = mob.model, mob.humanoid, mob.root
+
+	humanoid:MoveTo(root.Position) -- stop and face the target for the windup
+	local targetRoot = playerRoot(targetPlayer)
+	if targetRoot then
+		local aim = Vector3.new(targetRoot.Position.X, root.Position.Y, targetRoot.Position.Z)
+		root.CFrame = CFrame.lookAt(root.Position, aim)
+	end
+	model:SetAttribute("Telegraph", attack.windup) -- the client flashes the body red for this long
+
+	task.delay(attack.windup, function()
+		model:SetAttribute("Telegraph", nil)
+		if mob.humanoid.Health > 0 and model.Parent and attack.kind == "melee" then
+			local victim = playerRoot(targetPlayer)
+			if victim then
+				local delta = Vector3.new(victim.Position.X - root.Position.X, 0, victim.Position.Z - root.Position.Z)
+				local look = Vector3.new(root.CFrame.LookVector.X, 0, root.CFrame.LookVector.Z)
+				local inFront = delta.Magnitude < 0.5
+					or look.Magnitude < 1e-3
+					or math.acos(math.clamp(look.Unit:Dot(delta.Unit), -1, 1)) <= math.rad((attack.arc or 360) / 2)
+				if delta.Magnitude <= attack.range + (attack.leeway or 0) and inFront then
+					DamageService.hurtPlayer(targetPlayer, attack.damage, model)
+				end
+			end
+		end
+		task.delay(attack.recover or 0.4, function()
+			mob.attacking = false
+		end)
+	end)
+end
+
 local function think(mob: Mob, now: number)
 	local cfg = mob.cfg
 	local model = mob.model
 	local position = mob.root.Position
+	if mob.attacking then
+		return
+	end
 	local lastHit = model:GetAttribute("LastHit") or -1e9
 	if now - lastHit < KNOCKBACK_PAUSE then
 		return
@@ -121,23 +224,29 @@ local function think(mob: Mob, now: number)
 
 	-- who to chase: the nearest player in range, else whoever hit it recently
 	local target: BasePart? = nil
+	local targetPlayer: Player? = nil
 	local best = cfg.aggroRange
 	for _, player in ipairs(Players:GetPlayers()) do
 		local root = playerRoot(player)
 		local distance = root and flatDistance(position, root.Position)
 		if root and distance and distance <= best then
-			best, target = distance, root
+			best, target, targetPlayer = distance, root, player
 		end
 	end
 	if not target and now - lastHit < cfg.hitAggroSeconds then
-		target = playerRoot(Players:GetPlayerByUserId(model:GetAttribute("LastAttacker") or 0))
+		targetPlayer = Players:GetPlayerByUserId(model:GetAttribute("LastAttacker") or 0)
+		target = playerRoot(targetPlayer)
 	end
 
 	local humanoid = mob.humanoid
 	local fromHome = flatDistance(position, mob.home)
-	if target and fromHome <= cfg.leashRange then
+	if target and targetPlayer and fromHome <= cfg.leashRange then
 		humanoid.WalkSpeed = cfg.chaseSpeed
-		if flatDistance(position, target.Position) > cfg.stopDistance then
+		local distance = flatDistance(position, target.Position)
+		local option, attack = pickAttack(mob, distance, now)
+		if option and attack then
+			runAttack(mob, option, attack, targetPlayer)
+		elseif distance > cfg.stopDistance then
 			humanoid:MoveTo(target.Position)
 		else
 			humanoid:MoveTo(position) -- arrived: stand still

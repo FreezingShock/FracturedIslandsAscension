@@ -7,7 +7,7 @@
 	  * the weapon's `impact` slot sound at the hit point (CombatConfig; silent until an id is set)
 	  * the enemy's hit / crit / death effects and sounds at the contact point (EnemyFX, styled by EnemyConfig)
 	  * a floating damage number cloned from the hand-made template ReplicatedStorage.GUI.DamageNumber
-	    (BillboardGui > Label + UIStroke; restyle it in Studio). Crits use CombatConfig.hit.crit colours and size.
+	    (BillboardGui > Label + UIStroke; restyle it in Studio). Styles (normal / crit / crash / full / taken), sizes, pop-in and stacking are CombatConfig.hit.
 	No UI is built here: the script only clones the template and sets its text, colours and motion.
 --]]
 
@@ -25,11 +25,24 @@ local template = ReplicatedStorage:WaitForChild("GUI"):WaitForChild("DamageNumbe
 
 local HIT = CombatConfig.hit
 
-local function withCommas(n: number): string
-	local text = tostring(math.floor(n + 0.5))
-	local formatted = text:reverse():gsub("(%d%d%d)", "%1,"):reverse()
-	return (formatted:gsub("^,", ""))
+local SUFFIXES = { "K", "M", "B", "T", "Qa", "Qi" }
+
+--- 1,234 stays whole below 10,000 (with commas); from there 12.3K, 1.2M ... so a big number never overflows its box.
+local function formatAmount(n: number): string
+	n = math.floor(n + 0.5)
+	if n < 10000 then
+		local formatted = tostring(n):reverse():gsub("(%d%d%d)", "%1,"):reverse()
+		return (formatted:gsub("^,", ""))
+	end
+	local index = math.min(math.floor(math.log(n, 1000)), #SUFFIXES)
+	local scaled = n / 1000 ^ index
+	local text = scaled < 100 and ("%.1f"):format(scaled) or ("%d"):format(scaled)
+	return (text:gsub("%.0$", "")) .. SUFFIXES[index]
 end
+
+-- [target Instance] = { at = os.clock() of the last number, n = how many in the current burst }: numbers made on the same
+-- target within HIT.stackWindow rise one HIT.stackOffset higher each, so they never sit on top of each other
+local stacks: { [Instance]: { at: number, n: number } } = setmetatable({}, { __mode = "k" })
 
 local function flash(model: Model)
 	local highlight = model:FindFirstChild("HitFlash") :: Highlight?
@@ -55,8 +68,26 @@ local function flash(model: Model)
 	end)
 end
 
-local function spawnNumber(position: Vector3, amount: number, isCrit: boolean, isCrash: boolean)
-	local style = isCrash and HIT.crash or isCrit and HIT.crit or HIT.normal
+--- kind: "normal" | "crit" | "crash" | "full" | "taken"; flags: { full, aoe, target }
+local function spawnNumber(position: Vector3, amount: number, kind: string, flags: any)
+	local style = HIT[kind] or HIT.normal
+	local scale = style.scale * (flags.aoe and HIT.aoeScale or 1)
+
+	-- lift this number above the ones just made on the same target
+	local lift = 0
+	if flags.target then
+		local stack = stacks[flags.target]
+		local now = os.clock()
+		if stack and now - stack.at < HIT.stackWindow then
+			stack.n += 1
+		else
+			stack = { at = now, n = 0 }
+			stacks[flags.target] = stack
+		end
+		stack.at = now
+		lift = stack.n * HIT.stackOffset
+	end
+
 	local spread = HIT.numberSpread
 	local anchor = Instance.new("Part")
 	anchor.Name = "DamageNumberAnchor"
@@ -66,33 +97,47 @@ local function spawnNumber(position: Vector3, amount: number, isCrit: boolean, i
 	anchor.CanTouch = false
 	anchor.Transparency = 1
 	anchor.Size = Vector3.one * 0.2
-	anchor.Position = position + Vector3.new((math.random() - 0.5) * 2 * spread, 0, (math.random() - 0.5) * 2 * spread)
+	anchor.Position = position + Vector3.new((math.random() - 0.5) * 2 * spread, lift, (math.random() - 0.5) * 2 * spread)
 	anchor.Parent = workspace.CurrentCamera
 
 	local gui = template:Clone()
 	gui.Adornee = anchor
-	gui.Size = UDim2.fromOffset(template.Size.X.Offset * style.scale, template.Size.Y.Offset * style.scale)
+	gui.Size = UDim2.fromOffset(template.Size.X.Offset * scale, template.Size.Y.Offset * scale)
 	local label = gui:FindFirstChild("Label") :: TextLabel
 	local stroke = label and label:FindFirstChildOfClass("UIStroke")
+	local finalTextSize = 0
 	if label then
-		label.Text = (style.prefix and (style.prefix .. " ") or "") .. withCommas(amount)
+		-- the star marks a Full hit; a Full hit that is also a crit / crash keeps that style's colours and gains the star
+		local star = flags.full and kind ~= "full" and (HIT.star .. " ") or ""
+		label.Text = star .. (style.prefix and (style.prefix .. " ") or "") .. formatAmount(amount)
 		label.TextColor3 = Color3.fromHex(style.color)
-		label.TextSize = math.round(label.TextSize * style.scale)
+		finalTextSize = math.round(label.TextSize * scale)
+		label.TextSize = math.max(1, math.round(finalTextSize * HIT.popFrom)) -- pops in to its size
 		if stroke then
 			stroke.Color = Color3.fromHex(style.stroke)
 		end
 	end
-	-- crits show the hand-made CritBadge (template child) behind the number; normal hits hide it
+	-- crits and crashes show the hand-made CritBadge (template child) behind the number; the others hide it
 	local badge = gui:FindFirstChild("CritBadge") :: ImageLabel?
+	local badgeSize: UDim2? = nil
 	if badge then
 		badge.Visible = style.badge ~= nil
 		if style.badge then
 			badge.ImageColor3 = Color3.fromHex(style.badge.color)
 			badge.ImageTransparency = style.badge.transparency
-			badge.Size = UDim2.fromOffset(badge.Size.X.Offset * style.scale, badge.Size.Y.Offset * style.scale)
+			badgeSize = UDim2.fromOffset(badge.Size.X.Offset * scale, badge.Size.Y.Offset * scale)
+			badge.Size = UDim2.fromOffset(badgeSize.X.Offset * HIT.popFrom, badgeSize.Y.Offset * HIT.popFrom)
 		end
 	end
 	gui.Parent = anchor
+
+	local pop = TweenInfo.new(HIT.popTime, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+	if label then
+		TweenService:Create(label, pop, { TextSize = finalTextSize }):Play()
+	end
+	if badge and badgeSize then
+		TweenService:Create(badge, pop, { Size = badgeSize }):Play()
+	end
 
 	local life = HIT.numberTime
 	TweenService:Create(anchor, TweenInfo.new(life, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
@@ -115,9 +160,17 @@ WeaponHit.OnClientEvent:Connect(function(data)
 	if type(data) ~= "table" or typeof(data.position) ~= "Vector3" or type(data.damage) ~= "number" then
 		return
 	end
-	spawnNumber(data.position, data.damage, data.isCrit == true, data.crash == true)
-	if typeof(data.target) == "Instance" and data.target:IsA("Model") then
-		flash(data.target)
+	local target = typeof(data.target) == "Instance" and data.target or nil
+	if data.taken == true then
+		-- a player took damage: a red number over them, nothing else
+		spawnNumber(data.position, data.damage, "taken", { target = target })
+		return
+	end
+	-- the number's style: Crash beats Crit beats Full beats a normal hit (Full also adds a star to the other styles)
+	local kind = data.crash == true and "crash" or data.isCrit == true and "crit" or data.full == true and "full" or "normal"
+	spawnNumber(data.position, data.damage, kind, { full = data.full == true, aoe = data.aoe == true, target = target })
+	if target and target:IsA("Model") then
+		flash(target)
 	end
 	CombatFX.impact(data.position, data.weaponType, data.weaponId)
 	-- the swing's attack sound: only when it hit, once per swing (the nearest target), crit variant on a crit

@@ -308,6 +308,9 @@ end
 
 --- A WeaponHit payload: the hit effect (normal or crit), its sound, and the death effect on a kill.
 function EnemyFX.hit(data: any)
+	if data.taken == true then
+		return -- a player took damage: just the red number
+	end
 	local point = typeof(data.point) == "Vector3" and data.point or data.position
 	local dir = typeof(data.dir) == "Vector3" and data.dir or Vector3.yAxis
 	local enemyType = type(data.enemyType) == "string" and data.enemyType or nil
@@ -326,6 +329,10 @@ function EnemyFX.hit(data: any)
 	end
 
 	EnemyFX.play(isCrash and "hit_crash" or isCrit and "hit_crit" or "hit_normal", enemyType, weaponType, weaponId, point, dir, (isCrit or isCrash) and "high" or "low")
+	-- Full hit (bar full): a gold edge on top of whichever style is playing
+	if data.full == true then
+		EnemyFX.play("hit_full", enemyType, weaponType, weaponId, point, dir, "low")
+	end
 	-- a Crash plays its own slot (the crit step sound still plays from the swing); empty = the crit / hit slot
 	local entry = (isCrash and EnemyConfig.sound(enemyType, weaponType, weaponId, "crash"))
 		or EnemyConfig.sound(enemyType, weaponType, weaponId, isCrit and "crit" or "hit")

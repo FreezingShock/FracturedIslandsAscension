@@ -53,7 +53,7 @@ end
 -- ── Internal: build a payload from a template key + tokens ────
 local function buildLocalPayload(templateKey, tokens)
 	local ReplicatedStorage = game:GetService("ReplicatedStorage")
-	local ChatConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("ChatConfig"))
+	local ChatConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Config"):WaitForChild("ChatConfig"))
 
 	local template = ChatConfig.Templates[templateKey]
 	if not template then

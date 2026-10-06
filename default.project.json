@@ -61,6 +61,9 @@
       "ItemTools": {
         "$path": "src/Server/Inventory/ItemTools.lua"
       },
+      "LootService": {
+        "$path": "src/Server/Combat/LootService.lua"
+      },
       "Main": {
         "$path": "src/Server/Main.server.lua"
       },
@@ -267,6 +270,9 @@
         "AdminCommandsClient": {
           "$path": "src/Client/Admin/AdminCommandsClient.client.lua"
         },
+        "AttackBarController": {
+          "$path": "src/Client/Combat/AttackBarController.client.lua"
+        },
         "Button": {
           "$path": "src/Client/Buttons/Button"
         },
@@ -293,6 +299,9 @@
         },
         "EnemyNameplateController": {
           "$path": "src/Client/Combat/EnemyNameplateController.client.lua"
+        },
+        "EnemyTelegraphController": {
+          "$path": "src/Client/Combat/EnemyTelegraphController.client.lua"
         },
         "HeldItemNameController": {
           "$path": "src/Client/HUD/HeldItemNameController.client.lua"

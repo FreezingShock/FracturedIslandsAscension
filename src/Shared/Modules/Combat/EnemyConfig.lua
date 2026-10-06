@@ -12,7 +12,21 @@
 	Sound slots (hit / crit / crash / death) name an entry of EnemyConfig.sounds; enemies[type].sounds picks the entries and
 	enemies[type].weapons[...].sounds overrides them per weapon. An empty id is skipped silently: set the ids later.
 
+	ENEMY BEHAVIOUR AND REWARDS (EnemyService / LootService read these)
+	  enemies[type].attacks = { { attack = "<id>", weight = 1, cooldown = { 3, 5 } }, ... }   ids are EnemyConfig.attacks
+	  enemies[type].xp      = { skill = "Combat", amount = 40 }     granted to the killer (SkillsDataManager.AddXP, wisdom applies)
+	  enemies[type].drops   = list of: { table = "<dropTables key>" }, a drop entry, or a pool (see DROPS below)
+
+	DROPS: a drop entry is { kind = "item" | "armor" | "stat", id, count = { min, max }, chance = 0..1 }. item / armor ids
+	are Items ids (armor is the same as an item, the kind only documents intent); stat entries are
+	{ kind = "stat", skill = "Combat", id = "<StatisticsConfig key>", name, color = "#hex", count, chance }. Each entry rolls on its
+	own; the killer's MagicFind multiplies the chance (capped at 1). A pool is { kind = "pool", chance, rolls = { 1, 1 },
+	entries = { { ...drop entry..., weight } } }: it rolls `rolls` times, each picking one entry by weight.
+
 	RECIPES
+	  New attack:       add EnemyConfig.attacks.<id> = { kind = "melee", range, windup, damage, arc, recover, telegraph }.
+	  New mob attack:   add the id to enemies.<key>.attacks (several entries = the mob picks by weight).
+	  New drop table:   add EnemyConfig.dropTables.<name> = { entries... } and reference it with { table = "<name>" }.
 	  New enemy type:   add enemies.<key> = { name, nameplate, sounds, [fx], [mob] }; spawn it with a model attribute
 	                    EnemyType = "<key>" (EnemyService does that for a marker in Workspace.EnemySpawns).
 	  Recolour a hit:   enemies.<key>.fx.hit_normal = { sparks = { color = { ... } } }  (only the fields you change)
@@ -29,6 +43,7 @@
 	  EnemyConfig.resolve(enemyType, weaponType, weaponId, preset) -> merged preset table (cached, identical table per combo)
 	  EnemyConfig.sound(enemyType, weaponType, weaponId, slot)     -> sound entry or nil
 	  EnemyConfig.get(enemyType)                                   -> the enemy's entry (falls back to "default")
+	  EnemyConfig.dropsFor(enemyType)                              -> flat list of drop entries / pools
 --]]
 
 local EnemyConfig = {}
@@ -109,6 +124,13 @@ EnemyConfig.fx = {
 		light = { color = CRIMSON, brightness = 3, range = 12, time = 0.2 },
 	},
 
+	-- a Full hit (swing-timing bar full): a gold edge played over the hit / crit / crash style
+	hit_full = {
+		flash = { count = 1, color = { WHITE, Color3.fromRGB(255, 215, 80) }, size = { 2, 3.5 }, life = 0.12, transparency = 0.2 },
+		sparks = { count = 8, color = { WHITE, Color3.fromRGB(255, 240, 150), Color3.fromRGB(255, 190, 40) }, speed = { 22, 50 }, spread = 45, life = { 0.14, 0.32 }, size = { 1.4, 0.5 }, drag = 4, gravity = 40 },
+		motes = { count = 6, color = { Color3.fromRGB(255, 240, 150), Color3.fromRGB(255, 190, 40) }, speed = { 2, 8 }, spread = 180, life = { 0.5, 0.9 }, size = { 0.45, 0.05 }, drag = 2, rise = 3 },
+	},
+
 	-- a kill: a big warm burst at the body's centre, a ground shockwave, smoke, then the body dissolves
 	death = {
 		burst = { count = 1, color = { WHITE, WARM, GOLD, EMBER }, size = { 5, 9 }, life = 0.35 },
@@ -131,6 +153,31 @@ EnemyConfig.sounds = {
 	enemy_crit = { id = "", volume = 0.9, pitch = { 0.95, 1.05 }, minDistance = 14, maxDistance = 100 },
 	enemy_crash = { id = "", volume = 1.0, pitch = { 0.9, 1.0 }, minDistance = 16, maxDistance = 110 },
 	enemy_death = { id = "", volume = 0.9, pitch = { 0.92, 1.05 }, minDistance = 16, maxDistance = 110 },
+}
+
+-- ===================== 1c. LIBRARY: ATTACKS =====================
+-- kind "melee": after `windup` seconds (the mob stops, faces the target and its body flashes red) a hit lands on the target
+-- if it is still within range + leeway studs and inside the `arc` degrees in front of the mob; then `recover` seconds.
+-- damage is the base before the player's Defense (DamageService.hurtPlayer).
+EnemyConfig.attacks = {
+	melee_swing = { kind = "melee", range = 5, leeway = 1.5, windup = 0.6, damage = 10, arc = 120, recover = 0.5 },
+}
+
+-- ===================== 1d. LIBRARY: DROP TABLES =====================
+-- Reference one from an enemy with { table = "<name>" }. Stats go straight to the killer's statistics when picked up.
+EnemyConfig.dropTables = {
+	mob_basic = {
+		{ kind = "stat", skill = "Combat", id = "RottenFlesh", name = "Rotten Flesh", color = "#8B6D3F", count = { 1, 3 }, chance = 0.8 },
+		{ kind = "stat", skill = "Combat", id = "Bone", name = "Bone", color = "#FFFFFF", count = { 1, 2 }, chance = 0.4 },
+		{ kind = "stat", skill = "Combat", id = "String", name = "String", color = "#D9CDB8", count = { 1, 2 }, chance = 0.3 },
+		{ kind = "pool", chance = 0.12, rolls = { 1, 1 }, entries = {
+			{ kind = "armor", id = "iron_helmet", weight = 3 },
+			{ kind = "armor", id = "iron_chestplate", weight = 2 },
+			{ kind = "armor", id = "iron_leggings", weight = 3 },
+			{ kind = "armor", id = "iron_boots", weight = 3 },
+		} },
+		{ kind = "item", id = "gold_terrafruit", count = { 1, 1 }, chance = 0.05 },
+	},
 }
 
 -- ===================== 2. ENEMY TYPES =====================
@@ -157,6 +204,9 @@ EnemyConfig.enemies = {
 		name = "Placeholder Mob",
 		nameplate = true,
 		sounds = { hit = "enemy_hit", crit = "enemy_crit", crash = "enemy_crash", death = "enemy_death" },
+		attacks = { { attack = "melee_swing", weight = 1, cooldown = { 3, 5 } } },
+		xp = { skill = "Combat", amount = 40 },
+		drops = { { table = "mob_basic" } },
 		mob = {
 			template = "PlaceholderMob", -- ServerStorage model to clone; a tinted plain R6 rig when it does not exist
 			bodyColor = Color3.fromRGB(176, 70, 70),
@@ -165,7 +215,7 @@ EnemyConfig.enemies = {
 			chaseSpeed = 14,
 			aggroRange = 28, -- studs: a player this close is chased
 			leashRange = 60, -- studs from home: past it the mob gives up and walks back
-			stopDistance = 4, -- studs: it stops this close to its target (no attack yet)
+			stopDistance = 4, -- studs: it stops this close to its target (inside its attack range)
 			hitAggroSeconds = 6, -- whoever last hit it is chased this long even outside aggroRange
 			wanderRadius = 14, -- studs around home it strolls when idle
 			wanderEvery = { 3, 7 }, -- seconds between strolls
@@ -193,6 +243,21 @@ local function merge(base: any, over: any): any
 end
 
 local resolved: { [string]: any } = {}
+
+--- The flat drop list of an enemy: its `drops` with every { table = "<name>" } expanded from EnemyConfig.dropTables.
+function EnemyConfig.dropsFor(enemyType: string?): { any }
+	local out = {}
+	for _, entry in ipairs(EnemyConfig.get(enemyType).drops or {}) do
+		if entry.table then
+			for _, dropped in ipairs(EnemyConfig.dropTables[entry.table] or {}) do
+				table.insert(out, dropped)
+			end
+		else
+			table.insert(out, entry)
+		end
+	end
+	return out
+end
 
 function EnemyConfig.get(enemyType: string?): any
 	return EnemyConfig.enemies[enemyType or "default"] or EnemyConfig.enemies.default
