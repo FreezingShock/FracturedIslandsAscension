@@ -92,18 +92,4 @@ function M.requestInventoryRefresh()
 	end
 end
 
--- Drag override: called by InventoryController when a drag starts/ends
--- Forces all 8 slots visible during drag regardless of preference.
-M._onHotbarVisibilityChanged = nil -- set by InventoryController
-M._dragOverrideActive = false
-
--- FIND in MenuBridge (wherever the public API exports live):
--- (add these at the bottom of MenuBridge's module table)
-
-M.setHotbarShowAll = function(showAll)
-	if M._onHotbarVisibilityChanged then
-		M._onHotbarVisibilityChanged(showAll)
-	end
-end
-
 return M

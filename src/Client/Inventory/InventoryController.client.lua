@@ -12,7 +12,7 @@
 --  - Blank slots cannot be dragged
 --  - Auto-condense: overflow auto-fills empty grid slots server-side
 --
---  Hotbar stays in CustomInventory ScreenGui (unchanged).
+--  The hotbar lives in StarterGui.FIAHUD.Root.Hotbar (the pixel HUD); CustomInventory only keeps Transfer + the drag ghost.
 --  Slot 9 is a permanent "Menu" button.
 --  E key toggles inventory-only mode.
 --  Drag works cross-ScreenGui via AbsolutePosition hit testing.
@@ -34,7 +34,8 @@ local ItemRegistry = require(Modules:WaitForChild("ItemRegistry")) :: any
 local ItemIcons = require(Modules:WaitForChild("ItemIcons")) :: any
 ItemIcons.preload()
 local MenuBridge = require(Modules:WaitForChild("MenuBridge")) :: any
-local LiquidGlassHandler = require(Modules:WaitForChild("LiquidGlassHandler")) :: any
+local SlotLook = require(Modules:WaitForChild("SlotLook")) :: any
+local HudTheme = require(Modules:WaitForChild("Config"):WaitForChild("HudTheme")) :: any
 
 -- ===================== ENSURE MENUBRIDGE CALLBACKS REGISTERED =====================
 -- CentralizedMenuController registers these callbacks.
@@ -97,11 +98,13 @@ local RequestInventoryEvent = ReplicatedStorage:WaitForChild("RequestInventory")
 local TrashItemFunc = ReplicatedStorage:WaitForChild("TrashItem")
 local RestoreTrashFunc = ReplicatedStorage:WaitForChild("RestoreTrash")
 
--- ===================== GUI REFERENCES — HOTBAR (CustomInventory) =====================
-local hotbarGui = playerGui:WaitForChild("CustomInventory")
-local hotbarFrame = hotbarGui:WaitForChild("Hotbar")
+-- ===================== GUI REFERENCES — HOTBAR (FIAHUD) + TRANSFER/GHOST (CustomInventory) =====================
+local hotbarGui = playerGui:WaitForChild("CustomInventory") -- Transfer frame and the drag ghost
+local hudRoot = playerGui:WaitForChild("FIAHUD"):WaitForChild("Root")
+local hotbarFrame = hudRoot:WaitForChild("Hotbar")
 local hotbarBB = hotbarFrame:WaitForChild("HotbarBB")
 local hotbarFrames = hotbarBB:WaitForChild("HotbarFrames")
+local selectorFrame = hudRoot:WaitForChild("Selector")
 local slotTemplate = ReplicatedStorage:WaitForChild("SlotTemplate")
 
 -- ===================== GUI REFERENCES — INVENTORY (inside CentralizedMenu) =====================
@@ -150,14 +153,9 @@ local transferHovered = false
 local transferSlideTween = nil
 
 -- ===================== COLOR CONFIG =====================
-local DARKEN_FACTOR = 0.7
-local LIGHTEN_FACTOR = 0.7
-local BLACK = Color3.new(0, 0, 0)
 local WHITE = Color3.new(1, 1, 1)
 
 -- ===================== BLANK SLOT CONFIG =====================
-local BLANK_TRANSPARENCY = 0.6
-local BLANK_RARITY = ItemRegistry.getRarity(0) -- Common gray
 
 -- ===================== TRANSFER FRAME FUNCTIONS =====================
 local function _setTransferColors(frameColor, textColor, instant)
@@ -339,18 +337,14 @@ local function stackText(toolInfo)
 	return toolInfo.unstackable and "" or (tostring(toolInfo.count) .. "x")
 end
 
+--- Paint a slot (hotbar slot or grid slot) from its item: stack text, rarity bar, face colour.
 local function updateSlotVisual(slotFrame, toolInfo, isEquipped, isHovered)
-	slotFrame.BackgroundTransparency = 0.3
 	setSlotIcon(slotFrame, toolInfo)
 	if not toolInfo then
 		slotFrame.ToolName.Text = ""
 		slotFrame.StackNum.Text = ""
 		slotFrame.RarityLabel.Text = ""
-		slotFrame.UIStroke.Color = ItemRegistry.getRarity(0).color
-		slotFrame.BackgroundColor3 = ItemRegistry.getRarity(0).bgColor
-		if isEquipped then
-			slotFrame.BackgroundColor3 = slotFrame.BackgroundColor3:Lerp(BLACK, DARKEN_FACTOR)
-		end
+		SlotLook.paint(slotFrame, nil, { selected = isEquipped, blank = true })
 		return
 	end
 
@@ -359,16 +353,7 @@ local function updateSlotVisual(slotFrame, toolInfo, isEquipped, isHovered)
 	slotFrame.StackNum.Text = stackText(toolInfo)
 	slotFrame.RarityLabel.Text = rarityConf.display
 	slotFrame.RarityLabel.TextColor3 = rarityConf.color
-	slotFrame.UIStroke.Color = rarityConf.color
-
-	local baseColor = rarityConf.bgColor
-	if isEquipped then
-		baseColor = baseColor:Lerp(BLACK, DARKEN_FACTOR)
-	end
-	if isHovered then
-		baseColor = baseColor:Lerp(WHITE, LIGHTEN_FACTOR)
-	end
-	slotFrame.BackgroundColor3 = baseColor
+	SlotLook.paint(slotFrame, rarityConf, { selected = isEquipped, hovered = isHovered })
 end
 
 --- Render a grid slot as blank (empty placeholder).
@@ -377,9 +362,7 @@ local function renderSlotBlank(slotFrame)
 	slotFrame.ToolName.Text = ""
 	slotFrame.StackNum.Text = ""
 	slotFrame.RarityLabel.Text = ""
-	slotFrame.UIStroke.Color = BLANK_RARITY.color
-	slotFrame.BackgroundColor3 = BLANK_RARITY.bgColor
-	slotFrame.BackgroundTransparency = BLANK_TRANSPARENCY
+	SlotLook.paint(slotFrame, nil, { blank = true })
 	slotFrame.Visible = true
 	slotFrame.Swap.Visible = false
 end
@@ -392,9 +375,7 @@ local function renderSlotFilled(slotFrame, toolInfo, isHovered)
 	slotFrame.StackNum.Text = stackText(toolInfo)
 	slotFrame.RarityLabel.Text = rarityConf.display
 	slotFrame.RarityLabel.TextColor3 = rarityConf.color
-	slotFrame.UIStroke.Color = rarityConf.color
-	slotFrame.BackgroundColor3 = isHovered and rarityConf.bgColor:Lerp(WHITE, LIGHTEN_FACTOR) or rarityConf.bgColor
-	slotFrame.BackgroundTransparency = 0.3
+	SlotLook.paint(slotFrame, rarityConf, { hovered = isHovered })
 	slotFrame.Visible = true
 	slotFrame.Swap.Visible = false
 end
@@ -421,14 +402,6 @@ local function createHotbarSlots()
 				showItemTooltip(slotData.toolInfo)
 			end
 		end)
-		LiquidGlassHandler.apply(newSlot, {
-			SeparatedBorderOutline = {
-				enabled = true,
-				offset = 4,
-				thickness = 2,
-				color = Color3.fromRGB(255, 255, 255),
-			},
-		})
 		-- every slot is a normal item slot; slot 9 simply holds the pinned Nexus Star
 		newSlot.MouseEnter:Connect(function()
 			slotData.hovered = true
@@ -444,33 +417,6 @@ local function createHotbarSlots()
 			hideItemTooltip()
 		end)
 	end
-end
-
--- ===================== DROPSHADOW TWEEN =====================
-local dropShadow = hotbarBB:FindFirstChild("DropShadow")
-if dropShadow then
-	local dropShadowTween = nil
-
-	local function tweenDropShadow()
-		local s = hotbarBB.AbsoluteSize
-		if dropShadowTween then
-			dropShadowTween:Cancel()
-		end
-		dropShadowTween = TweenService:Create(
-			dropShadow,
-			TweenInfo.new(0.3, Enum.EasingStyle.Quint, Enum.EasingDirection.Out),
-			{ Size = UDim2.fromOffset(s.X, s.Y) }
-		)
-		dropShadowTween:Play()
-	end
-
-	-- Snap on first frame, then tween all future changes
-	task.defer(function()
-		local s = hotbarBB.AbsoluteSize
-		dropShadow.Size = UDim2.fromOffset(s.X, s.Y)
-	end)
-
-	hotbarBB:GetPropertyChangedSignal("AbsoluteSize"):Connect(tweenDropShadow)
 end
 
 -- ===================== GRID SLOT CREATION (27 slots, once at init) =====================
@@ -496,17 +442,6 @@ local function createGridSlots()
 			end
 		end)
 
-		-- GlassVisible = false: only the hover outline + stroke; the 3D glass parts are never built for these slots
-		LiquidGlassHandler.apply(newSlot, {
-			GlassVisible = false,
-			SeparatedBorderOutline = {
-				enabled = true,
-				offset = 4,
-				thickness = 2,
-				color = Color3.fromRGB(255, 255, 255),
-			},
-		})
-
 		-- Start as blank
 		renderSlotBlank(newSlot)
 
@@ -515,7 +450,7 @@ local function createGridSlots()
 			slotData.hovered = true
 			if slotData.toolInfo then
 				local rarityConf = ItemRegistry.getRarity(slotData.toolInfo.rarity or 0)
-				newSlot.BackgroundColor3 = rarityConf.bgColor:Lerp(WHITE, LIGHTEN_FACTOR)
+				SlotLook.paint(newSlot, rarityConf, { hovered = true })
 				showItemTooltip(slotData.toolInfo)
 			end
 			-- Blank slots: no hover visual change, no tooltip
@@ -525,7 +460,7 @@ local function createGridSlots()
 			slotData.hovered = false
 			if slotData.toolInfo then
 				local rarityConf = ItemRegistry.getRarity(slotData.toolInfo.rarity or 0)
-				newSlot.BackgroundColor3 = rarityConf.bgColor
+				SlotLook.paint(newSlot, rarityConf, {})
 			end
 			hideItemTooltip()
 		end)
@@ -559,21 +494,11 @@ local function getOrCreateOverflowSlot(index)
 		end
 	end)
 
-	LiquidGlassHandler.apply(newSlot, {
-		GlassVisible = false,
-		SeparatedBorderOutline = {
-			enabled = true,
-			offset = 4,
-			thickness = 2,
-			color = Color3.fromRGB(255, 255, 255),
-		},
-	})
-
 	newSlot.MouseEnter:Connect(function()
 		slotData.hovered = true
 		if slotData.toolInfo then
 			local rarityConf = ItemRegistry.getRarity(slotData.toolInfo.rarity or 0)
-			newSlot.BackgroundColor3 = rarityConf.bgColor:Lerp(WHITE, LIGHTEN_FACTOR)
+			SlotLook.paint(newSlot, rarityConf, { hovered = true })
 			showItemTooltip(slotData.toolInfo)
 		end
 	end)
@@ -582,7 +507,7 @@ local function getOrCreateOverflowSlot(index)
 		slotData.hovered = false
 		if slotData.toolInfo then
 			local rarityConf = ItemRegistry.getRarity(slotData.toolInfo.rarity or 0)
-			newSlot.BackgroundColor3 = rarityConf.bgColor
+			SlotLook.paint(newSlot, rarityConf, {})
 		end
 		hideItemTooltip()
 	end)
@@ -590,25 +515,16 @@ local function getOrCreateOverflowSlot(index)
 	return slotData
 end
 
-local hotbarShowAllPref = false -- mirrors server-saved preference
--- Applies the current visibility preference (or drag override).
--- dragOverride=true forces all slots visible (drag in progress).
-local function applyHotbarVisibility(dragOverride)
-	local showAll = dragOverride or hotbarShowAllPref
+-- All nine hotbar slots are always visible (the brown tray is fixed art, so there is no "show only filled" toggle).
+local function applyHotbarVisibility()
 	for i = 1, MAX_HOTBAR do
-		local slotData = hotbarSlots[i]
-		if showAll then
-			slotData.frame.Visible = true
-		else
-			-- Only show if filled
-			slotData.frame.Visible = (slotData.toolInfo ~= nil) or i == currentSelected
-		end
+		hotbarSlots[i].frame.Visible = true
 	end
 end
 
 -- Show every hotbar slot during a drag
 local function _showAllHotbarSlots()
-	applyHotbarVisibility(true) -- drag override = force all visible
+	applyHotbarVisibility()
 end
 
 -- ===================== SCROLLING LOGIC =====================
@@ -776,6 +692,48 @@ reconcileHover = function()
 	end
 end
 
+-- ===================== SELECTOR (slides between the hotbar slots) =====================
+local SelectorConf = HudTheme.slot.selector
+local selectorInfo = TweenInfo.new(
+	SelectorConf.time,
+	Enum.EasingStyle[SelectorConf.style],
+	Enum.EasingDirection[SelectorConf.direction]
+)
+local selectorShown = nil -- the slot the ring is on (or moving to)
+local selectorTween: Tween? = nil
+local rootScale = hudRoot:FindFirstChildOfClass("UIScale")
+
+--- Put the ring around the selected slot: a smooth slide when the selection changed, a snap when the layout moved.
+local moveSelector
+moveSelector = function(snap)
+	local slotData = hotbarSlots[currentSelected]
+	if not slotData then
+		return
+	end
+	local slot = slotData.frame
+	if slot.AbsoluteSize.X == 0 then
+		return -- the layout has not run yet; the AbsoluteSize signal below snaps once it has
+	end
+	local scale = rootScale and rootScale.Scale or 1
+	local rel = (slot.AbsolutePosition - hudRoot.AbsolutePosition) / scale
+	local pad = SelectorConf.pad
+	local target = UDim2.fromOffset(rel.X - pad, rel.Y - pad)
+	if snap or selectorShown == nil then
+		if selectorTween then
+			selectorTween:Cancel()
+			selectorTween = nil
+		end
+		selectorFrame.Position = target
+	elseif selectorShown ~= currentSelected then
+		if selectorTween then
+			selectorTween:Cancel()
+		end
+		selectorTween = TweenService:Create(selectorFrame, selectorInfo, { Position = target })
+		selectorTween:Play()
+	end -- same selection as before: a slide in progress keeps going
+	selectorShown = currentSelected
+end
+
 -- ===================== REFRESH DISPLAY =====================
 local function refreshHotbar()
 	for i = 1, MAX_HOTBAR do
@@ -788,9 +746,9 @@ local function refreshHotbar()
 		local isEq = isSelectedSlot(i)
 		updateSlotVisual(slotData.frame, slotData.toolInfo, isEq, slotData.hovered)
 
-		slotData.frame.Visible = hasItem or isEq -- the selected slot stays visible even when empty (empty hand)
 	end
-	applyHotbarVisibility(false) -- apply visibility based on current preference (no drag override)
+	applyHotbarVisibility()
+	moveSelector(false)
 end
 
 refreshInventory = function()
@@ -959,7 +917,7 @@ end
 
 local function _clearDragHighlight()
 	if highlightedSlot and highlightOriginalColor then
-		highlightedSlot.UIStroke.Color = highlightOriginalColor
+		SlotLook.setOutline(highlightedSlot, highlightOriginalColor)
 		highlightedSlot = nil
 		highlightOriginalColor = nil
 	end
@@ -968,8 +926,8 @@ end
 local function _setDragHighlight(slotFrame, valid)
 	_clearDragHighlight()
 	highlightedSlot = slotFrame
-	highlightOriginalColor = slotFrame.UIStroke.Color
-	slotFrame.UIStroke.Color = valid and HIGHLIGHT_COLOR_VALID or Color3.fromHex("#FF5555")
+	highlightOriginalColor = SlotLook.getOutline(slotFrame)
+	SlotLook.setOutline(slotFrame, valid and HIGHLIGHT_COLOR_VALID or Color3.fromHex("#FF5555"))
 end
 
 local function _createDragGhost(sourceFrame)
@@ -978,7 +936,6 @@ local function _createDragGhost(sourceFrame)
 	-- Parent to hotbarGui (CustomInventory) which is always enabled
 	ghost.Parent = hotbarGui
 	ghost.ZIndex = 100
-	ghost.BackgroundTransparency = GHOST_TRANSPARENCY
 	local absSize = sourceFrame.AbsoluteSize
 	ghost.Size = UDim2.fromOffset(absSize.X, absSize.Y)
 	ghost.AnchorPoint = Vector2.new(0.5, 0.5)
@@ -1006,7 +963,7 @@ local function _cleanupDrag()
 		if dragState.sourceFrame then
 			-- Restore appropriate transparency based on whether source was grid-blank
 			-- (filled slots = 0.3, but refreshAll will correct this anyway)
-			dragState.sourceFrame.BackgroundTransparency = 0.3
+			SlotLook.dim(dragState.sourceFrame, 0)
 		end
 		if dragState.ghost then
 			dragState.ghost:Destroy()
@@ -1066,7 +1023,7 @@ local function onDragMove(mousePos)
 		suppressTooltip = true
 		TooltipModule.forceHide()
 		dragState.ghost = _createDragGhost(dragState.sourceFrame)
-		dragState.sourceFrame.BackgroundTransparency = DIM_TRANSPARENCY
+		SlotLook.dim(dragState.sourceFrame, DIM_TRANSPARENCY)
 	end
 
 	-- Ghost in IgnoreGuiInset=true ScreenGui: add inset.Y to viewport-relative input.Position
@@ -1680,12 +1637,6 @@ MenuBridge._onStateChanged = function(mode)
 	end
 end
 
--- ── Hotbar visibility preference from CMC ──
-MenuBridge._onHotbarVisibilityChanged = function(showAll)
-	hotbarShowAllPref = showAll
-	applyHotbarVisibility(false)
-end
-
 -- Expose refresh for external callers
 MenuBridge._refreshInventory = function()
 	refreshInventory()
@@ -1761,3 +1712,12 @@ wireTrashSlotInput()
 refreshHotbar() -- hides the empty template slots (no "Label" placeholders) until the server data arrives
 
 hotbarFrame.Visible = true
+
+-- the ring snaps (no slide) whenever the layout itself moves: first layout pass, UIScale / viewport changes
+hudRoot:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
+	moveSelector(true)
+end)
+hotbarFrames:GetPropertyChangedSignal("AbsolutePosition"):Connect(function()
+	moveSelector(true)
+end)
+task.defer(moveSelector, true)

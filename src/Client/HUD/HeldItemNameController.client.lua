@@ -3,7 +3,7 @@
 	Place inside: StarterPlayer > StarterPlayerScripts
 
 	Shows the name of the item in hand above the hotbar, Minecraft style: it types in letter by letter, stays for a few
-	seconds, then fades out. Drives the hand-made StarterGui.StatsMenu > Name [CanvasGroup] > Label [TextLabel] (with its
+	seconds, then fades out. Drives StarterGui.FIAHUD > Root > Name [CanvasGroup] > Label [TextLabel] (with its
 	UIStroke child); this script creates no UI.
 
 	  text colour    the item's rarity colour (Rarity.hexColor)
@@ -126,10 +126,11 @@ local function watchCharacter(character: Model)
 end
 
 local function bind(gui: Instance)
-	local g = gui:WaitForChild("Name", 10)
+	local root = gui:WaitForChild("Root", 10)
+	local g = root and root:WaitForChild("Name", 10)
 	local l = g and g:WaitForChild("Label", 10)
 	if not (g and l and g:IsA("CanvasGroup") and l:IsA("TextLabel")) then
-		warn("[HeldItemName] StatsMenu.Name (CanvasGroup) > Label (TextLabel) is missing")
+		warn("[HeldItemName] FIAHUD.Root.Name (CanvasGroup) > Label (TextLabel) is missing")
 		return
 	end
 	group, label = g, l
@@ -157,12 +158,12 @@ task.spawn(function()
 	end
 end)
 
-local existing = playerGui:FindFirstChild("StatsMenu")
+local existing = playerGui:FindFirstChild("FIAHUD")
 if existing then
 	task.spawn(bind, existing)
 end
 playerGui.ChildAdded:Connect(function(child)
-	if child.Name == "StatsMenu" then
+	if child.Name == "FIAHUD" then
 		task.spawn(bind, child) -- the GUI was recreated (respawn with ResetOnSpawn)
 	end
 end)

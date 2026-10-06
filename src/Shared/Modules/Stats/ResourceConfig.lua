@@ -3,8 +3,9 @@
 	Place inside: ReplicatedStorage > Modules
 
 	One entry per rechargeable resource (Health, Mana, Stamina). The server (ResourceService) and the client
-	(ResourceBarsController) both read this table, so adding a resource is: add an entry here, add a row to the hand-made
-	StarterGui.StatsMenu.Stats (a CanvasGroup named like `row`, holding Label + Progress), done.
+	(ResourceBarsController) both read this table, so adding a resource is: add an entry here and a display for it in
+	StarterGui.FIAHUD (tools/studio/build_fiahud.luau): `display = "panel"` is a pixel panel FIAHUD.Root.Stats.<row>
+	(Bar.Fill, Value, ValueShadow); `display = "strip"` is the segmented Stamina strip FIAHUD.Root.Strip.
 
 	Each resource is published as two Player attributes, so anything (UI, abilities, other scripts) can read them:
 	    player:GetAttribute(key)          current value      e.g. "Mana"
@@ -13,8 +14,9 @@
 	Fields
 	  key        attribute name and id
 	  label      text shown in the bar's Label ("Health: 87/100")
-	  row        name of the CanvasGroup under StatsMenu.Stats
-	  color      fill colour of the bar text; the unfilled part is this colour darkened (EMPTY_DARKEN)
+	  row        name of the panel under FIAHUD.Root.Stats (display = "panel")
+	  display    "panel" | "strip" (see above)
+	  color      accent colour of the resource (the pixel HUD takes its fill colours from HudTheme)
 	  max        function(stat) -> maximum. `stat("Defense")` returns that stat's final value from the stat chain.
 	  source     "humanoid": current value IS Humanoid.Health / MaxHealth. Omit for a plain server-side value.
 	  regen      nil = no regeneration, else { stat = <stat key> OR amount = <fixed number>, unit = "percentPerSecond" |
@@ -32,7 +34,9 @@ local ResourceConfig = {}
 local HEALTH_PER_DEFENSE = 1
 local MANA_PER_INTELLIGENCE = 2
 
-ResourceConfig.EMPTY_DARKEN = 0.35 -- the unfilled part of a bar is the fill colour x this (text) / gradient gray (stroke)
+-- The level shown in the HUD badge is this Player attribute. The server publishes it (placeholder: no progression yet).
+ResourceConfig.nexusLevelAttribute = "NexusLevel"
+ResourceConfig.nexusLevelStart = 0
 ResourceConfig.TICK = 0.25 -- seconds between regeneration ticks (server); amounts scale with it
 
 ResourceConfig.resources = {
@@ -40,6 +44,7 @@ ResourceConfig.resources = {
 		key = "Health",
 		label = "Health",
 		row = "Health",
+		display = "panel",
 		color = Color3.fromRGB(255, 85, 85),
 		source = "humanoid",
 		startFull = true,
@@ -53,6 +58,7 @@ ResourceConfig.resources = {
 		key = "Mana",
 		label = "Mana",
 		row = "Mana",
+		display = "panel",
 		color = Color3.fromRGB(85, 255, 255),
 		startFull = true,
 		max = function(stat)
@@ -65,6 +71,7 @@ ResourceConfig.resources = {
 		key = "Stamina",
 		label = "Stamina",
 		row = "Stamina",
+		display = "strip",
 		color = Color3.fromRGB(255, 255, 85),
 		startFull = true,
 		max = function()

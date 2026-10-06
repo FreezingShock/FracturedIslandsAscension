@@ -37,6 +37,7 @@ Naming: `*.client.lua` = LocalScript, `*.server.lua` = Script, plain `.lua` = Mo
 - **Server-authoritative.** Clients never compute final stats. Server modules own data; clients get state via RemoteEvents (e.g. `SkillUpdated`) and only render.
 - **Persistence:** `ProfileService` (`src/Server/Data/ProfileService.luau`). One profile per player in `SkillsDataManager` (`PlayerSkills_v1`): skills at top level, inventory under `_Inventory`. `InventoryDataManager` reaches the profile through `SkillsDataManager.GetProfile` / `GetInventoryData`. New fields go in `PROFILE_TEMPLATE`; `Reconcile()` backfills existing players, so don't bump the store name.
 - **Skills:** 6 skills (Farming, Foraging, Fishing, Mining, Combat, Carpentry), levels 1–50, `XP_THRESHOLDS` in `SkillsDataManager`. Client payload = `{level, xp, xpNeeded, roman, pct}` per skill.
+- **HUD:** one `StarterGui.FIAHUD` (built by `tools/studio/build_fiahud.luau` + `build_fiahud_vines.luau`, all numbers/colours in `Config/HudTheme`) replaces StatsMenu and holds the hotbar: Health/Mana panels, the 16-segment Stamina strip, the Nexus Level badge (`NexusLevel` attribute), 9 hotbar slots with a sliding selector, vines. `ResourceBarsController` drives the bars, `InventoryController` the slots (`SlotLook` paints `ReplicatedStorage.SlotTemplate`; the grid and overflow slots use the same pixel template), `HeldItemNameController` the name label. The Studio place keeps the previous template as `SlotTemplate_Legacy` (delete when happy).
 - **UI:** `CentralizedMenuController` (client) owns menu open/close/navigate and passes a `sharedRefs` table to page modules. Page modules in `Shared/Menu/Pages` expose `init(sharedRefs, frame)`, `open(arg)`, `close()` (animated), `reset()` (instant). `GridMenuModule` is config-driven grids with stack navigation; `TooltipModule` is a single shared tooltip keyed by source id (`showRaw(key)` / `hide(key)`) so page modules don't clobber each other. `LiquidGlassHandler` is the glass effect.
 - **Stat formula:** `Final = (Base + Flat) x (1 + sum(Multipliers))`.
 
@@ -48,6 +49,7 @@ Naming: `*.client.lua` = LocalScript, `*.server.lua` = Script, plain `.lua` = Mo
 - Wire event connections once in `init`, never in `open`.
 
 ## Known issues / cleanup
+- Shared modules are flat in Studio: use `script.Parent` to reach siblings, never `script.Parent.Parent` (that is ReplicatedStorage). `Config` is a real Folder (`Modules.Config.HudTheme`). In the Studio MCP, `require` is cached across calls: builders `require(module:Clone())`. An `Infinite yield ... ReplicatedStorage:WaitForChild("Config")` warning is NOT harmless: it means some module looks for `Config` in the wrong place (one pre-existing source is still unidentified).
 - Stray instances in the live place's Workspace: copies of `ProfileService` and `LiquidGlassHandler`, UI frames `Griffin`/`Boltrod`/`EmberFlare`/`MobRemains`, and several unnamed Models. Confirm with Nate before deleting.
 - `ChangeSkill` RemoteEvent admin check is a hardcoded `ADMIN_IDS` list in `SkillsDataManager`.
 - `SkillsPageModule` yields on `workspace:WaitForChild("UISounds")` at require time.

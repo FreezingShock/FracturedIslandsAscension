@@ -2,30 +2,26 @@
 	ResourceBarsController (LocalScript, Client)
 	Place inside: StarterPlayer > StarterPlayerScripts
 
-	Binds the hand-made StarterGui.StatsMenu.Stats rows (one CanvasGroup per resource, each holding a Label and a
-	Progress TextLabel) to the Player attributes that ResourceService publishes (<Key> / Max<Key>). Which rows exist and
-	what colour they use comes from ResourceConfig; this script creates no UI.
+	Drives the resource displays of StarterGui.FIAHUD (built by tools/studio/build_fiahud.luau) from the Player
+	attributes ResourceService publishes (<Key> / Max<Key>). Which resources exist and how each is drawn comes from
+	ResourceConfig; this script creates no UI.
 
-	Progress is a row of identical glyphs (read from the label's own text, so the bar length is whatever you drew).
-	The bar fills from the left:
-	  * text   rich-text spans: filled glyphs in the resource colour, unfilled glyphs in a darkened copy
-	  * stroke the UIGradient under Progress's UIStroke gets a hard colour stop at the fill fraction: white (the stroke's
-	           own colour) up to it, a darker gray (stroke colour x gray) after it. Keep that gradient's Rotation at 0.
-	The fill eases toward the real value; the Label always shows the exact number.
+	  display "panel"  FIAHUD.Root.Stats.<row> (Health, Mana): Bar.Fill is resized in 4 px steps and Value / ValueShadow
+	                   show "current / max".
+	  display "strip"  FIAHUD.Root.Strip (Stamina): Left.Segments and Right.Segments hold 8 Segment<i> frames each, every
+	                   one with a clipped Fill. The 16 segments are ONE strip filled from the left, so it drains from the far
+	                   right end toward the badge, then continues on the left half from the badge side outward. The segment
+	                   being emptied shrinks in HudTheme.strip.partialStep px steps.
+	  Badge            FIAHUD.Root.Badge.Level shows the Player attribute named by ResourceConfig.nexusLevelAttribute.
 
-	Pixel rows: a Stats row that holds a Bar (built by tools/studio/build_resource_panels.luau: Health and Mana) is
-	drawn as a pixel panel: Bar.Fill is resized in 4 px steps (Main/Highlight/Shade/EndCap are children of it) and
-	Value / ValueShadow show "current / max". Rows without a Bar (Stamina) keep the glyph bar above. Stats carries a
-	UIScale that shrinks the whole group on narrow screens (HudTheme.hud).
-
-	The whole Stats group fades out while the Nexus Menu or the inventory is open (MenuBridge.isOpen) and fades back in
-	when it closes.
+	The fills ease toward the real value. Stats and Strip (CanvasGroups) fade out while the Nexus Menu or the inventory is
+	open (MenuBridge.isOpen) and fade back in when it closes, together with the Wings, Badge and SelectorArrow groups. Root carries a UIScale that shrinks the whole HUD on narrow
+	screens (HudTheme.hud).
 --]]
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
-
 local TweenService = game:GetService("TweenService")
 
 local Modules = ReplicatedStorage:WaitForChild("Modules")
@@ -40,21 +36,13 @@ local EASE_SPEED = 8 -- higher = the bar catches up faster
 local FADE_OUT = TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.Out) -- a menu opens
 local FADE_IN = TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out) -- the menu is gone
 local PIXEL = 4 -- panel fills move in whole art pixels
-local STOP_WIDTH = 0.0005 -- width of the hard colour stop in the stroke gradient (0..1)
+-- the HUD parts that fade out while a menu is open (the hotbar, tray and vines stay)
+local FADE_GROUPS = { "Stats", "Strip", "Wings", "Badge", "SelectorArrow" }
 
-local function toHex(color: Color3): string
-	return string.format("#%02X%02X%02X", math.round(color.R * 255), math.round(color.G * 255), math.round(color.B * 255))
-end
-
-local function darkened(color: Color3, amount: number): Color3
-	return Color3.new(color.R * amount, color.G * amount, color.B * amount)
-end
-
--- [key] = { entry, label, progress, gradient, glyph, total, shown, target, lastFilled, lastStop }
+-- [key] = { entry, shown, target, ... } plus fill (panel) or segmentFills (strip)
 local bars: { [string]: any } = {}
 
 local function renderBar(bar: any)
-	local entry = bar.entry
 	local fraction = math.clamp(bar.shown, 0, 1)
 	if bar.fill then
 		local steps = math.floor(fraction * bar.innerWidth / PIXEL + 0.5)
@@ -64,38 +52,23 @@ local function renderBar(bar: any)
 		bar.fill.Size = UDim2.new(0, steps * PIXEL, 1, 0)
 		return
 	end
-	local filled = math.floor(fraction * bar.total + 0.5)
-	if fraction > 0 and filled == 0 then
-		filled = 1 -- never look empty while there is health left
-	end
-	if filled ~= bar.lastFilled then
-		bar.lastFilled = filled
-		local fillHex = toHex(entry.color)
-		local emptyHex = toHex(darkened(entry.color, ResourceConfig.EMPTY_DARKEN))
-		bar.progress.Text = string.format(
-			'<font color="%s">%s</font><font color="%s">%s</font>',
-			fillHex,
-			string.rep(bar.glyph, filled),
-			emptyHex,
-			string.rep(bar.glyph, bar.total - filled)
-		)
-	end
 
-	local gradient = bar.gradient
-	if gradient and math.abs(fraction - (bar.lastStop or -1)) > 0.001 then
-		bar.lastStop = fraction
-		local gray = Color3.new(ResourceConfig.EMPTY_DARKEN, ResourceConfig.EMPTY_DARKEN, ResourceConfig.EMPTY_DARKEN)
-		if fraction <= 0 then
-			gradient.Color = ColorSequence.new(gray)
-		elseif fraction >= 1 - STOP_WIDTH then
-			gradient.Color = ColorSequence.new(Color3.new(1, 1, 1))
-		else
-			gradient.Color = ColorSequence.new({
-				ColorSequenceKeypoint.new(0, Color3.new(1, 1, 1)),
-				ColorSequenceKeypoint.new(fraction, Color3.new(1, 1, 1)),
-				ColorSequenceKeypoint.new(fraction + STOP_WIDTH, gray),
-				ColorSequenceKeypoint.new(1, gray),
-			})
+	local segmentWidth = HudTheme.strip.segmentSize.X
+	local step = HudTheme.strip.partialStep
+	local total = #bar.segmentFills
+	local filled = fraction * total
+	for i, fill in ipairs(bar.segmentFills) do
+		local amount = math.clamp(filled - (i - 1), 0, 1)
+		local width = segmentWidth
+		if amount < 1 then
+			width = math.floor(amount * segmentWidth / step + 0.5) * step
+			if amount > 0 and width == 0 then
+				width = step
+			end
+		end
+		if bar.widths[i] ~= width then
+			bar.widths[i] = width
+			fill.Size = UDim2.new(0, width, 1, 0)
 		end
 	end
 end
@@ -117,13 +90,11 @@ local function refresh(bar: any, snap: boolean?)
 		local text = string.format("%d / %d", math.round(current), math.round(max))
 		bar.value.Text = text
 		bar.shadow.Text = text
-	elseif bar.label then
-		bar.label.Text = string.format("%s: %d/%d", bar.entry.label, math.round(current), math.round(max))
 	end
 end
 
 -- ===================== FADE WITH THE MENUS =====================
-local fadeGroups: { CanvasGroup } = {} -- the Stats group
+local fadeGroups: { CanvasGroup } = {} -- see FADE_GROUPS
 local menuHidden: boolean? = nil -- what the groups currently show (true = faded out)
 local fadeTweens: { Tween } = {}
 
@@ -152,40 +123,89 @@ local function applyFade(instant: boolean?)
 	end
 end
 
---- Scale the Stats group down on narrow screens (1:1 from HudTheme.hud.fullScaleWidth up).
-local function fitHud(stats: Instance?)
-	local scale = stats and stats:FindFirstChildOfClass("UIScale")
+--- Scale the HUD down on narrow screens (1:1 from HudTheme.hud.fullScaleWidth up).
+local function fitHud(root: Instance?)
+	local scale = root and root:FindFirstChildOfClass("UIScale")
 	local camera = workspace.CurrentCamera
 	if scale and camera then
 		scale.Scale = math.clamp(camera.ViewportSize.X / HudTheme.hud.fullScaleWidth, HudTheme.hud.minScale, 1)
 	end
 end
 
-local warned = false
+-- ===================== BINDING =====================
+--- The 16 strip segments in order: left half first (outer end to the badge), then the right half.
+local function collectSegmentFills(strip: Instance): { Frame }?
+	local fills = {}
+	for _, side in ipairs({ "Left", "Right" }) do
+		local segments = strip:FindFirstChild(side) and strip[side]:FindFirstChild("Segments")
+		if not segments then
+			return nil
+		end
+		for i = 1, HudTheme.strip.segments do
+			local segment = segments:FindFirstChild("Segment" .. i)
+			local fill = segment and segment:FindFirstChild("Fill")
+			if not (fill and fill:IsA("Frame")) then
+				return nil
+			end
+			table.insert(fills, fill)
+		end
+	end
+	return fills
+end
+
+local function bindBadge(root: Instance)
+	local level = root:FindFirstChild("Badge") and root.Badge:FindFirstChild("Level")
+	if not (level and level:IsA("TextLabel")) then
+		warn("[ResourceBars] FIAHUD.Root.Badge.Level (TextLabel) is missing")
+		return
+	end
+	local attribute = ResourceConfig.nexusLevelAttribute
+	local function update()
+		local value = player:GetAttribute(attribute)
+		level.Text = tostring(type(value) == "number" and math.floor(value) or ResourceConfig.nexusLevelStart)
+	end
+	update()
+	player:GetAttributeChangedSignal(attribute):Connect(update)
+end
+
 local function bind(gui: Instance)
-	local stats = gui:WaitForChild("Stats", 10)
-	if not stats then
-		warn("[ResourceBars] StatsMenu.Stats is missing")
+	local root = gui:WaitForChild("Root", 10)
+	if not root then
+		warn("[ResourceBars] FIAHUD.Root is missing")
 		return
 	end
 	table.clear(bars)
 	table.clear(fadeGroups)
-	if stats:IsA("CanvasGroup") then
-		table.insert(fadeGroups, stats)
+	local stats = root:WaitForChild("Stats", 10)
+	local strip = root:WaitForChild("Strip", 10)
+	for _, name in ipairs(FADE_GROUPS) do
+		local group = root:FindFirstChild(name)
+		if group and group:IsA("CanvasGroup") then
+			table.insert(fadeGroups, group)
+		end
 	end
 	menuHidden = nil
 	applyFade(true) -- a freshly created GUI starts in the right state
-	fitHud(stats)
+	fitHud(root)
+	bindBadge(root)
+
 	for _, entry in ipairs(ResourceConfig.resources) do
-		local panel = stats:FindFirstChild(entry.row)
-		local barFrame = panel and panel:FindFirstChild("Bar") -- the row itself also has a "Fill" (its wood), so go through Bar
 		local bar: any
-		if barFrame then
-			local fill = barFrame:FindFirstChild("Fill")
-			local value = panel:FindFirstChild("Value")
-			local shadow = panel:FindFirstChild("ValueShadow")
+		if entry.display == "strip" then
+			local fills = strip and collectSegmentFills(strip)
+			if not fills then
+				warn("[ResourceBars] FIAHUD.Root.Strip needs Left/Right.Segments with Segment1..8.Fill")
+				continue
+			end
+			bar = { entry = entry, segmentFills = fills, widths = {} }
+		else
+			local panel = stats and stats:FindFirstChild(entry.row)
+			local barFrame = panel and panel:FindFirstChild("Bar") -- the panel itself also has a "Fill" (its wood), so go through Bar
+			local fill = barFrame and barFrame:FindFirstChild("Fill")
+			local value = panel and panel:FindFirstChild("Value")
+			local shadow = panel and panel:FindFirstChild("ValueShadow")
 			if not (fill and value and shadow) then
-				warn("[ResourceBars] " .. entry.row .. " needs Bar.Fill, Value and ValueShadow")
+				warn("[ResourceBars] Stats." .. entry.row .. " needs Bar.Fill, Value and ValueShadow")
 				continue
 			end
 			bar = {
@@ -194,30 +214,6 @@ local function bind(gui: Instance)
 				value = value,
 				shadow = shadow,
 				innerWidth = HudTheme.resourcePanel.barSize.X - 8,
-			}
-		else
-			local row = stats:WaitForChild(entry.row, 10)
-			local label = row and row:FindFirstChild("Label")
-			local progress = row and row:FindFirstChild("Progress")
-			if not (row and progress and progress:IsA("TextLabel")) then
-				warn("[ResourceBars] StatsMenu row '" .. entry.row .. "' needs a Progress TextLabel")
-				continue
-			end
-			progress.RichText = true
-			local original = progress.Text
-			local stroke = progress:FindFirstChildOfClass("UIStroke")
-			local gradient = stroke and stroke:FindFirstChildOfClass("UIGradient")
-			if not gradient and not warned then
-				warned = true
-				warn("[ResourceBars] no UIGradient under Progress > UIStroke: the unfilled stroke will not darken")
-			end
-			bar = {
-				entry = entry,
-				label = label and label:IsA("TextLabel") and label or nil,
-				progress = progress,
-				gradient = gradient,
-				glyph = utf8.char(utf8.codepoint(original, 1)),
-				total = utf8.len(original),
 			}
 		end
 		bars[entry.key] = bar
@@ -233,8 +229,8 @@ local function bind(gui: Instance)
 end
 
 local function onViewportChanged()
-	local gui = playerGui:FindFirstChild("StatsMenu")
-	fitHud(gui and gui:FindFirstChild("Stats"))
+	local gui = playerGui:FindFirstChild("FIAHUD")
+	fitHud(gui and gui:FindFirstChild("Root"))
 end
 local function watchCamera()
 	local camera = workspace.CurrentCamera
@@ -248,13 +244,13 @@ workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(function()
 	onViewportChanged()
 end)
 
-local existing = playerGui:FindFirstChild("StatsMenu")
+local existing = playerGui:FindFirstChild("FIAHUD")
 if existing then
 	task.spawn(bind, existing)
 end
 playerGui.ChildAdded:Connect(function(child)
-	if child.Name == "StatsMenu" then
-		task.spawn(bind, child) -- the GUI was recreated (respawn with ResetOnSpawn)
+	if child.Name == "FIAHUD" then
+		task.spawn(bind, child) -- the GUI was recreated
 	end
 end)
 

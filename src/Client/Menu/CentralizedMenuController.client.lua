@@ -152,33 +152,6 @@ local sidebarActiveTween = nil
 -- ===================== ROOT GRID KEY =====================
 local ROOT_GRID = "NexusMenu"
 
--- ===================== HOTBAR VISIBILITY STATE =====================
--- true  = show all 8 slots always
--- false = show only filled slots (default)
-local hotbarShowAll = false
-
--- Persist across sessions via a simple IntValue in PlayerData (ProfileService).
--- We read/write via a RemoteFunction so the server owns the value.
-local SetHotbarVisibilityFunc = ReplicatedStorage:WaitForChild("SetHotbarVisibility")
-local GetHotbarVisibilityFunc = ReplicatedStorage:WaitForChild("GetHotbarVisibility")
-
--- Load saved preference on init (non-blocking)
-task.spawn(function()
-	local saved = GetHotbarVisibilityFunc:InvokeServer()
-	if saved ~= nil then
-		hotbarShowAll = saved
-	end
-	-- Apply immediately to hotbar
-	MenuBridge.setHotbarShowAll(hotbarShowAll)
-end)
-
--- REPLACE WITH:
-local function toggleHotbarVisibility()
-	hotbarShowAll = not hotbarShowAll
-	SetHotbarVisibilityFunc:InvokeServer(hotbarShowAll)
-	MenuBridge.setHotbarShowAll(hotbarShowAll)
-end
-
 -- ===================== TWEEN HELPERS =====================
 local function tweenObject(object, targetProps, info)
 	local tw = TweenService:Create(object, info or tweenInfo, targetProps)
@@ -405,17 +378,6 @@ local NEXUS_BUTTONS = {
 			click = '<font color="#555555">Coming Soon</font>',
 		},
 		action = nil,
-	},
-	HotbarVisibility = {
-		tooltipData = {
-			title = '<font color="#FFAA00"><b>Hotbar Visibility</b></font>',
-			desc = '<font color="#AAAAAA">Toggle between showing only filled hotbar slots or all 8 slots at all times.</font>',
-			click = '<font color="#FFFF55">Click to toggle!</font>',
-		},
-		action = "callback",
-		callback = function()
-			toggleHotbarVisibility()
-		end,
 	},
 	BoosterOil = {
 		tooltipData = {
@@ -1032,7 +994,7 @@ local NEXUS_BLANK_GROUPS = {
 	{ layoutOrder = 1, count = 4 },
 	{ layoutOrder = 3, count = 5 },
 	{ layoutOrder = 11, count = 4 },
-	{ layoutOrder = 15, count = 12 }, -- was 15; one cell taken by HotbarVisibility
+	{ layoutOrder = 15, count = 13 }, -- the retired hotbar-toggle button's cell is blank now
 	{ layoutOrder = 17, count = 2 },
 	{ layoutOrder = 22, count = 2 },
 }
@@ -1049,7 +1011,6 @@ local NEXUS_ITEM_ORDERS = {
 	RecipeBook = 12,
 	CraftingMenu = 13,
 	Bank = 14,
-	HotbarVisibility = 16, -- bottom-left area, between Bank and WarpMap
 	WarpMap = 18,
 	CloseSlot = 19,
 	Settings = 20,

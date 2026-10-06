@@ -127,6 +127,8 @@ end
 
 local function onPlayer(player: Player)
 	states[player] = { values = {}, max = {}, lastHit = {}, applying = false }
+	-- Nexus Level (shown in the HUD badge): a placeholder until its progression is built, so it stays at the start value
+	player:SetAttribute(ResourceConfig.nexusLevelAttribute, ResourceConfig.nexusLevelStart)
 	recompute(player, true) -- attributes exist from the first moment (mana / stamina); health follows with the character
 	player.CharacterAdded:Connect(function(character)
 		onCharacter(player, character)

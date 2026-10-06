@@ -78,11 +78,83 @@ HudTheme.resourcePanel = {
 	capPx = 4, -- bright end cap on the fill
 }
 
--- StatsMenu.Stats scaling and row order (Stats is a horizontal list: Health | Stamina | Mana)
+HudTheme.font = "rbxassetid://12187371840" -- the game's HUD font (Silkscreen is not a Roblox font)
+
+-- FIAHUD.Root: a 1088 x 276 box anchored bottom centre. The controllers shrink its UIScale on narrow screens.
 HudTheme.hud = {
-	fullScaleWidth = 1280, -- viewport width at which the HUD is shown at 1:1; Stats' UIScale shrinks it below that
+	size = Vector2.new(1088, 276),
+	bottomMargin = 12,
+	fullScaleWidth = 1280, -- viewport width at which the HUD is shown at 1:1
 	minScale = 0.5,
-	rowOrder = { Health = 1, Stamina = 2, Mana = 3 },
+	healthPos = Vector2.new(40, 16),
+	manaPos = Vector2.new(692, 16),
+}
+
+-- Brown tray behind the hotbar, its posts (slot holders) and the two end ribbons
+HudTheme.tray = {
+	pos = Vector2.new(64, 156),
+	size = Vector2.new(960, 112),
+	postWidth = 16,
+	postCap = Vector2.new(24, 8),
+	postInset = 4, -- tray edge -> first post
+	ribbonSize = Vector2.new(64, 96),
+	ribbonY = 168,
+	ribbonLeftX = 8,
+	ribbonRightX = 1016,
+}
+
+-- Hotbar slots (ReplicatedStorage.SlotTemplate is built from these) and the sliding selector ring
+HudTheme.slot = {
+	count = 9,
+	size = 88,
+	gap = 16,
+	hotbarPos = Vector2.new(84, 168),
+	outline = 4,
+	rarityBarHeight = 4,
+	hoverLighten = 0.35,
+	selector = {
+		thickness = 4,
+		pad = 4, -- ring sits this far outside the slot
+		colorKey = "slotSelectedBorder",
+		time = 0.18,
+		style = "Quint",
+		direction = "Out",
+	},
+}
+
+-- Stamina strip: 8 segments per side, one continuous strip filled from the left (drains from the far right end)
+HudTheme.strip = {
+	segments = 8,
+	segmentSize = Vector2.new(40, 16),
+	gap = 4,
+	partialStep = 4, -- the partly filled segment grows in steps of this many px
+	trackSize = Vector2.new(424, 40),
+	trackY = 112,
+	leftX = 40,
+	rightX = 624,
+	leftSegmentsX = 68, -- inside the left track (outer end has the extra padding)
+	rightSegmentsX = 8,
+	segmentsY = 16,
+	ledgePos = Vector2.new(456, 112),
+	ledgeSize = Vector2.new(176, 40),
+	drainOrder = "rightToLeft",
+}
+
+-- Level badge (hexagon) with its number; the number is a Player attribute (ResourceConfig.nexusLevelAttribute)
+HudTheme.badge = {
+	pos = Vector2.new(488, 16),
+	size = Vector2.new(112, 128),
+	textSize = 32,
+	wingSize = Vector2.new(64, 40),
+	wingLeftX = 436,
+	wingRightX = 588,
+	wingY = 76,
+	arrowPos = Vector2.new(520, 152),
+}
+
+-- Held-item name (typewriter label group, auto-sized): top-centre anchor point, above the panels and the badge
+HudTheme.name = {
+	pos = Vector2.new(544, -48),
 }
 
 HudTheme.icons = {

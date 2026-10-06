@@ -13,7 +13,8 @@ restyling) unless you set `local FORCE = true` at the top.
 | `build_damage_number.luau` | `ReplicatedStorage.GUI.DamageNumber` (BillboardGui, Label, UIStroke, CritBadge) | `DamageNumberController` |
 | `build_ability_menu.luau` | `ReplicatedStorage.GUI.AbilitySlot` template + `StarterGui.AbilityMenu.Slots` | `AbilityController` |
 | `build_dummy.luau` | `ServerStorage.Dummy` (R6, straw coloured, 1000 hp) + `Workspace.DummySpawns` markers | `DummyService` |
-| `build_resource_panels.luau` | `StatsMenu.Stats.Health` and `.Mana` rebuilt as pixel panels (from `HudTheme`; old children kept as Legacy*) | `ResourceBarsController` |
+| `build_fiahud.luau` | `StarterGui.FIAHUD` (Root: tray, Stamina strip, Health/Mana panels, badge, hotbar frames, selector, arrow, Name) + the pixel `ReplicatedStorage.SlotTemplate` (old one kept as `SlotTemplate_Legacy`); `REMOVE_STATSMENU` deletes the old HUD | `ResourceBarsController`, `InventoryController`, `HeldItemNameController` |
+| `build_fiahud_vines.luau` | `FIAHUD.Root.Vines` (eight procedurally grown vines, differing per side) | none (decoration) |
 
 Rule: whenever Claude generates anything (Studio GUI / template / marker / rig, a Blender model or animation, an
 icon), the script that generated it is saved in `tools/` in the same turn (`tools/studio`, `tools/blender`, ...) and

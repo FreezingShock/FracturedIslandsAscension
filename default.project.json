@@ -186,6 +186,9 @@
         "SlotFx": {
           "$path": "src/Shared/Modules/Inventory/SlotFx.lua"
         },
+        "SlotLook": {
+          "$path": "src/Shared/Modules/Inventory/SlotLook.lua"
+        },
         "Sources": {
           "$path": "src/Shared/Modules/Stats/Sources.lua"
         },
