@@ -477,133 +477,56 @@ local NEXUS_BUTTONS = {
 	},
 }
 
+-- Collections: ONE hub button per skill (tooltip is dynamic, see the grid's onWireTooltips). Every page's Go back is
+-- CollectionsPageModule.back(): the engine rebuilds the page we return to from the module's state.
+local COLLECTION_SKILLS = { "Farming", "Foraging", "Fishing", "Mining", "Combat", "General" }
+
+local COLLECTION_BACK_TOOLTIP = {
+	title = '<font color="#55FF55"><b>Go back</b></font>',
+	desc = '<font color="#AAAAAA">Return to the previous menu.</font>',
+	click = "",
+}
+local COLLECTION_CLOSE_TOOLTIP = {
+	title = '<font color="#FF5555"><b>Close Menu</b></font>',
+	desc = "",
+	click = "",
+}
+
+local function collectionFooter()
+	return {
+		BackButton = {
+			tooltipData = COLLECTION_BACK_TOOLTIP,
+			action = "callback",
+			callback = function()
+				CollectionsPageModule.back()
+			end,
+		},
+		CloseSlot = { tooltipData = COLLECTION_CLOSE_TOOLTIP, action = "close" },
+	}
+end
+
 local COLLECTION_BUTTONS = {
-	FarmingCollections = {
-		tooltipData = {
-			title = '<font color="#FFAA00"><b>Farming</b></font><font color="#55FF55"> Collections</font>',
-			desc = '<font color="#AAAAAA">View your Farming collections!</font>',
-			click = '<font color="#FFFF55">Click to view!</font>',
-		},
-		action = "callback",
-		callback = function()
-			GridMenuModule.navigateToGrid("CollectionsMenu2")
-			CollectionsPageModule.openSkill("Farming", GridMenuModule.getActiveGridFrame())
-			typewriteTitle("Farming Collections")
-		end,
-	},
-	ForagingCollections = {
-		tooltipData = {
-			title = '<font color="#00AA00"><b>Foraging</b></font><font color="#55FF55"> Collections</font>',
-			desc = '<font color="#AAAAAA">View your Foraging collections!</font>',
-			click = '<font color="#FFFF55">Click to view!</font>',
-		},
-		action = "callback",
-		callback = function()
-			GridMenuModule.navigateToGrid("CollectionsMenu2")
-			CollectionsPageModule.openSkill("Foraging", GridMenuModule.getActiveGridFrame())
-			typewriteTitle("Foraging Collections")
-		end,
-	},
-	FishingCollections = {
-		tooltipData = {
-			title = '<font color="#00AAAA"><b>Fishing</b></font><font color="#55FF55"> Collections</font>',
-			desc = '<font color="#AAAAAA">View your Fishing collections!</font>',
-			click = '<font color="#555555">Coming Soon</font>',
-		},
-	},
-	MiningCollections = {
-		tooltipData = {
-			title = '<font color="#5555FF"><b>Mining</b></font><font color="#55FF55"> Collections</font>',
-			desc = '<font color="#AAAAAA">View your Mining collections!</font>',
-			click = '<font color="#555555">Coming Soon</font>',
-		},
-	},
-	CombatCollections = {
-		tooltipData = {
-			title = '<font color="#FF5555"><b>Combat</b></font><font color="#55FF55"> Collections</font>',
-			desc = '<font color="#AAAAAA">View your Combat collections!</font>',
-			click = '<font color="#555555">Coming Soon</font>',
-		},
-	},
-	GeneralCollections = {
-		tooltipData = {
-			title = '<font color="#FFFF55"><b>General</b></font><font color="#55FF55"> Collections</font>',
-			desc = '<font color="#AAAAAA">View your General collections!</font>',
-			click = '<font color="#FFFF55">Click to view!</font>',
-		},
-		action = "callback",
-		callback = function()
-			GridMenuModule.navigateToGrid("CollectionsMenu2")
-			CollectionsPageModule.openSkill("General", GridMenuModule.getActiveGridFrame())
-			typewriteTitle("General Collections")
-		end,
-	},
 	BackButton = {
-		tooltipData = {
-			title = '<font color="#55FF55"><b>Go back</b></font>',
-			desc = '<font color="#AAAAAA">Return to the previous menu.</font>',
-			click = "",
-		},
+		tooltipData = COLLECTION_BACK_TOOLTIP,
 		action = "callback",
 		callback = function()
 			GridMenuModule.navigateBack()
 		end,
 	},
-	CloseSlot = {
-		tooltipData = {
-			title = '<font color="#FF5555"><b>Close Menu</b></font>',
-			desc = "",
-			click = "",
-		},
-		action = "close",
-	},
+	CloseSlot = { tooltipData = COLLECTION_CLOSE_TOOLTIP, action = "close" },
 }
+for _, skillName in ipairs(COLLECTION_SKILLS) do
+	COLLECTION_BUTTONS[skillName .. "Collections"] = {
+		action = "callback",
+		callback = function()
+			CollectionsPageModule.openSkill(skillName)
+		end,
+	}
+end
 
-local COLLECTION_MENU2_BUTTONS = {
-	BackButton = {
-		tooltipData = {
-			title = '<font color="#55FF55"><b>Go back</b></font>',
-			desc = '<font color="#AAAAAA">Return to the previous menu.</font>',
-			click = "",
-		},
-		action = "callback",
-		callback = function()
-			CollectionsPageModule.closeMenu2()
-			GridMenuModule.navigateBack()
-		end,
-	},
-	CloseSlot = {
-		tooltipData = {
-			title = '<font color="#FF5555"><b>Close Menu</b></font>',
-			desc = "",
-			click = "",
-		},
-		action = "close",
-	},
-}
-
-local COLLECTION_MENU3_BUTTONS = {
-	BackButton = {
-		tooltipData = {
-			title = '<font color="#55FF55"><b>Go back</b></font>',
-			desc = '<font color="#AAAAAA">Return to the previous menu.</font>',
-			click = "",
-		},
-		action = "callback",
-		callback = function()
-			CollectionsPageModule.closeMenu3()
-			GridMenuModule.navigateBack()
-		end,
-	},
-	CloseSlot = {
-		tooltipData = {
-			title = '<font color="#FF5555"><b>Close Menu</b></font>',
-			desc = "",
-			click = "",
-		},
-		action = "close",
-	},
-}
+local COLLECTION_MENU2_BUTTONS = collectionFooter()
+local COLLECTION_MENU3_BUTTONS = collectionFooter()
+local COLLECTION_MENU4_BUTTONS = collectionFooter()
 
 -- ===================== STATISTICS ROUTING =====================
 -- Hub (StatisticsGrid): one button per skill, tooltip is dynamic (see the grid's
@@ -1287,6 +1210,7 @@ local function openMenu(mode)
 		menuFrame.Position = MENU_PANEL_HIDDEN
 		inventoryPanel.Visible = true
 		GridMenuModule.reset()
+		CollectionsPageModule.reset()
 		setTitleInstant("Your Inventory")
 		inventoryFrame.Size = INVFRAME_SIZE_DEFAULT
 	end
@@ -1490,6 +1414,31 @@ GridMenuModule.registerPooledGrid(
 		title = "Collections",
 		blankGroups = COLLECTION_BLANK_GROUPS,
 		itemOrders = {},
+		onWireTooltips = function(clonedButtons)
+			local conns = {}
+			local hovers = {}
+			for _, skillName in ipairs(COLLECTION_SKILLS) do
+				local btn = clonedButtons[skillName .. "Collections"]
+				if btn then
+					hovers[skillName .. "Collections"] = function()
+						CollectionsPageModule.showSkillTooltip(skillName, btn)
+					end
+					table.insert(
+						conns,
+						btn.MouseEnter:Connect(function()
+							CollectionsPageModule.showSkillTooltip(skillName, btn)
+						end)
+					)
+					table.insert(
+						conns,
+						btn.MouseLeave:Connect(function()
+							CollectionsPageModule.hideSkillTooltip()
+						end)
+					)
+				end
+			end
+			return conns, hovers
+		end,
 	}
 )
 
@@ -1668,23 +1617,30 @@ if AdminPageModule and AdminPageModule.getTemplateFolder() then
 	})
 end
 
-local CollectionsMenu2Template = GridTemplates:FindFirstChild("CollectionsMenu2")
-if CollectionsMenu2Template then
-	GridMenuModule.registerPooledGrid("CollectionsMenu2", CollectionsMenu2Template, COLLECTION_MENU2_BUTTONS, {
-		title = "Collections",
+-- Collections drill-down: each page is rebuilt from CollectionsPageModule's state whenever its grid is populated,
+-- so Back (which re-populates the grid we return to) never shows an empty grid.
+local function registerCollectionGrid(gridKey, buttons, title, populate)
+	local template = GridTemplates:FindFirstChild(gridKey)
+	if not template then
+		warn("[CMC] GridTemplates/" .. gridKey .. " not found - skipping registration")
+		return
+	end
+	GridMenuModule.registerPooledGrid(gridKey, template, buttons, {
+		title = title,
+		onPopulate = function(frame)
+			populate(frame)
+		end,
 	})
-else
-	warn("[CMC] GridTemplates/CollectionsMenu2 not found — skipping registration (still legacy?)")
 end
-
-local CollectionsMenu3Template = GridTemplates:FindFirstChild("CollectionsMenu3")
-if CollectionsMenu3Template then
-	GridMenuModule.registerPooledGrid("CollectionsMenu3", CollectionsMenu3Template, COLLECTION_MENU3_BUTTONS, {
-		title = "Collection",
-	})
-else
-	warn("[CMC] GridTemplates/CollectionsMenu3 not found — skipping registration (still legacy?)")
-end
+registerCollectionGrid("CollectionsMenu2", COLLECTION_MENU2_BUTTONS, "Collections", function(frame)
+	CollectionsPageModule.populateSkill(frame)
+end)
+registerCollectionGrid("CollectionsMenu3", COLLECTION_MENU3_BUTTONS, "Collection", function(frame)
+	CollectionsPageModule.populateStat(frame)
+end)
+registerCollectionGrid("CollectionsMenu4", COLLECTION_MENU4_BUTTONS, "Collection Rewards", function(frame)
+	CollectionsPageModule.populateTier(frame)
+end)
 
 GridMenuModule.registerPooledGrid("ProfileMenu2", GridTemplates:WaitForChild("ProfileMenu2"), PROFILE_MENU2_BUTTONS, {
 	title = "Attributes",

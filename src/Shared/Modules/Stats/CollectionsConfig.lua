@@ -1,14 +1,32 @@
 --[[
-	CollectionsConfig (ModuleScript)
+	CollectionsConfig (ModuleScript, Shared)
 	Place inside: ReplicatedStorage > Modules
 
-	Shared configuration for the Collections system.
-	Defines collection tier thresholds, placeholder rewards,
-	tier status colors, and grid layout constants for
-	CollectionsMenu2 and CollectionsMenu3.
+	Everything the Collections system reads: tiers, rewards, status colours and the grid layout.
+	Tier math lives in CollectionMath, reward behaviour in CollectionRewards, the server grant in CollectionService.
 
-	References StatisticsConfig.STAT_CHAINS for the stat lists
-	per skill — no duplication of stat definitions.
+	Every statistic of every skill (StatisticsConfig.STAT_CHAINS) has its own collection of TIER_COUNT tiers.
+	Tier N needs threshold(N) = 10^(N+1) lifetime of that stat (100, 1K, 10K, ...).
+
+	REWARDS are layered like CombatConfig (library -> type -> override). getRewards(skill, statKey, tier) returns the
+	first layer that has an entry, each layer REPLACES the one below it:
+	    1. stats[skill][statKey][tier]     one statistic's own tier
+	    2. skills[skill][tier]             every statistic of a skill at that tier
+	    3. milestones[tier]                every statistic at that tier (5, 10, 15, ...)
+	    4. defaultRewards(tier, skill, statKey)   the formula every other tier uses
+
+	A reward entry is { type = <registered type>, ... }; the types are in CollectionRewards:
+	    { type = "statGain",      pct = 5 }                          +5% gain of the collected statistic
+	    { type = "statGain",      pct = 5, skill = "General", key = "BronzeCoins" }   (or another one: crossStatGain)
+	    { type = "crossStatGain", skill = "General", key = "BronzeCoins", pct = 10 }
+	    { type = "gameStat",      attr = "Defense", flat = 2 }      flat bonus (or pct = 5 for +5%)
+	    { type = "item",          tool = "ToolName", count = 1 }    stub: granted only if the tool exists in ServerStorage
+	    { type = "recipe",        id = "IronSword" }                stub: recorded in the profile, recipes come later
+
+	Recipes (what a new reward takes):
+	    new reward on one tier   -> add it to milestones / skills / stats below. No code.
+	    new kind of reward       -> CollectionRewards.register("myType", { describe = ..., derive/apply = ... }).
+	    new statistic            -> add it to StatisticsConfig; it gets 28 tiers and the default reward automatically.
 --]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -21,144 +39,125 @@ local CollectionsConfig = {}
 CollectionsConfig.STAT_CHAINS = StatisticsConfig.STAT_CHAINS
 CollectionsConfig.SKILL_COLORS = StatisticsConfig.SKILL_COLORS
 CollectionsConfig.statConfigLookup = StatisticsConfig.statConfigLookup
+CollectionsConfig.SKILL_NAMES = StatisticsConfig.SKILL_NAMES
 
--- ===================== COLLECTION TIERS =====================
--- 28 levels.  Each tier = 10× the previous, starting at 100.
--- Tier 1 = 10^2, Tier 2 = 10^3, ... Tier 28 = 10^29.
--- Thresholds are exact powers of 10 so MoneyLib formats them cleanly.
+-- ===================== TIERS =====================
+CollectionsConfig.TIER_COUNT = 28
+
+--- Lifetime a statistic needs for tier `tier` (100, 1K, 10K, ... exact powers of ten so MoneyLib formats them).
+function CollectionsConfig.threshold(tier: number): number
+	return 10 ^ (tier + 1)
+end
+
 CollectionsConfig.COLLECTION_TIERS = {}
-for i = 1, 28 do
-	CollectionsConfig.COLLECTION_TIERS[i] = {
-		level = i,
-		threshold = 10 ^ (i + 1), -- i=1 → 100, i=2 → 1k, ... i=28 → 10^29
-	}
+for i = 1, CollectionsConfig.TIER_COUNT do
+	CollectionsConfig.COLLECTION_TIERS[i] = { level = i, threshold = CollectionsConfig.threshold(i) }
 end
 
--- ===================== COLLECTION REWARDS (placeholder) =====================
--- Keyed by tier level (1-28).  Each value is an array of reward entries.
--- Format matches StatisticsConfig reward entries:
---   { type = "stat", skill = "...", target = "...", pct = N }
---   { type = "gameStat", target = "...", flat = N }
--- Fill in later — for now all empty.
-CollectionsConfig.COLLECTION_REWARDS = {}
-for i = 1, 28 do
-	CollectionsConfig.COLLECTION_REWARDS[i] = {}
-end
-
--- ===================== TIER STATUS COLORS =====================
 CollectionsConfig.TIER_COLORS = {
 	locked = "#FF5555",
 	inProgress = "#FFFF55",
 	completed = "#55FF55",
 }
 
--- ===================== ROMAN NUMERALS =====================
--- Pre-built lookup for tiers 1-28.  Used by CollectionsPageModule
--- for LevelLabel text on tier slots.
-CollectionsConfig.ROMAN_NUMERALS = {
-	"I",
-	"II",
-	"III",
-	"IV",
-	"V",
-	"VI",
-	"VII",
-	"VIII",
-	"IX",
-	"X",
-	"XI",
-	"XII",
-	"XIII",
-	"XIV",
-	"XV",
-	"XVI",
-	"XVII",
-	"XVIII",
-	"XIX",
-	"XX",
-	"XXI",
-	"XXII",
-	"XXIII",
-	"XXIV",
-	"XXV",
-	"XXVI",
-	"XXVII",
-	"XXVIII",
+local ROMAN_PARTS = {
+	{ 10, "X" },
+	{ 9, "IX" },
+	{ 5, "V" },
+	{ 4, "IV" },
+	{ 1, "I" },
+}
+CollectionsConfig.ROMAN_NUMERALS = {}
+for tier = 1, CollectionsConfig.TIER_COUNT do
+	local left, text = tier, ""
+	for _, part in ipairs(ROMAN_PARTS) do
+		while left >= part[1] do
+			text ..= part[2]
+			left -= part[1]
+		end
+	end
+	CollectionsConfig.ROMAN_NUMERALS[tier] = text
+end
+
+-- ===================== REWARDS =====================
+--- Layer 4: the formula every tier without a milestone / override uses.
+function CollectionsConfig.defaultRewards(tier: number, skill: string, statKey: string)
+	return { { type = "statGain", pct = 5 } }
+end
+
+--- Layer 3: every statistic at these tiers (replaces the default).
+CollectionsConfig.milestones = {
+	[5] = {
+		{ type = "statGain", pct = 15 },
+		{ type = "gameStat", attr = "Defense", flat = 2 },
+	},
+	[10] = {
+		{ type = "statGain", pct = 25 },
+		{ type = "gameStat", attr = "Health", flat = 10 },
+		{ type = "item", tool = "CollectionToken", count = 1 }, -- stub until the tool exists
+	},
+	[15] = {
+		{ type = "statGain", pct = 35 },
+		{ type = "gameStat", attr = "Intelligence", flat = 5 },
+		{ type = "recipe", id = "CollectionRecipe15" }, -- stub: recorded only
+	},
+	[20] = {
+		{ type = "statGain", pct = 50 },
+		{ type = "gameStat", attr = "Strength", flat = 5 },
+	},
+	[25] = {
+		{ type = "statGain", pct = 75 },
+		{ type = "gameStat", attr = "Defense", pct = 2 },
+	},
+	[28] = {
+		{ type = "statGain", pct = 100 },
+		{ type = "gameStat", attr = "Health", pct = 5 },
+		{ type = "gameStat", attr = "Intelligence", pct = 5 },
+	},
 }
 
--- ===================== SKILL NAMES (with collections) =====================
-CollectionsConfig.SKILL_NAMES = { "Farming", "Foraging", "Mining", "Fishing", "Combat", "General" }
-
--- ===================== GRID LAYOUT CONSTANTS =====================
--- Both CollectionsMenu2 and CollectionsMenu3 use 9-column grids,
--- same structure as StatisticsMenu2.
---
--- ──── CollectionsMenu2 (stat slots for a skill) ────
--- Row 0: [B][B][B][B][SK][B][B][B][B]   SelectedSkill at col 4
--- Row 1: [B][B][S1][S2][S3][S4][S5][S6][S7]  2 pad + 7 stats
--- Row 2: [B][B][S8]...
--- Row 3: [B][B][S15]...
--- Row 4: [B][B][S22]...
--- Row 5: [B][B][B][B][Back][Close][B][B][B]  footer
---
--- Max 28 stat slots (4 rows × 7).
-
-CollectionsConfig.COLUMNS = 9
-CollectionsConfig.MENU2_STAT_ROWS = 4
-CollectionsConfig.MENU2_STATS_PER_ROW = 7
-CollectionsConfig.MENU2_MAX_STATS = 28
-
-CollectionsConfig.MENU2_LAYOUT = {
-	-- Row 0: header
-	headerBlanksBefore = 4,
-	selectedSkillOrder = 4,
-	headerBlanksAfter = 4,
-
-	-- Rows 1-4: stat rows
-	statRowBaseOrder = 9,
-	statRowPadCount = 2,
-
-	-- Row 5: footer
-	footerRowStart = 45,
-	footerBlanksBefore = 4,
-	backButtonOrder = 49,
-	closeSlotOrder = 50,
-	footerBlanksAfter = 4,
+--- Layer 2: skills[skill][tier] = { rewards } (every statistic of the skill at that tier).
+CollectionsConfig.skills = {
+	Farming = {
+		[10] = {
+			{ type = "statGain", pct = 25 },
+			{ type = "crossStatGain", skill = "General", key = "BronzeCoins", pct = 10 },
+			{ type = "gameStat", attr = "Health", flat = 10 },
+		},
+	},
 }
 
--- ──── CollectionsMenu3 (28 tier slots for one stat) ────
--- Row 0: [B][B][B][B][SS][B][B][B][B]          SelectedStatistic
--- Row 1: [B][B][T1][T2][T3][T4][T5][T6][T7]    2 pad + 7 tiers
--- Row 2: [B][B][T8][T9][T10][T11][T12][T13][T14]
--- Row 3: [B][B][T15][T16][T17][T18][T19][T20][T21]
--- Row 4: [B][B][T22][T23][T24][T25][T26][T27][T28]
--- Row 5: [B][B][B][B][Back][Close][B][B][B]     footer
---
--- 28 tiers = 4 rows × 7.  All rows full — no empty rows.
+--- Layer 1: stats[skill][statKey][tier] = { rewards } (one statistic only).
+CollectionsConfig.stats = {}
 
-CollectionsConfig.MENU3_TIER_ROWS = 4
-CollectionsConfig.MENU3_TIERS_PER_ROW = 7
+--- The reward list of one tier of one statistic (never nil, may be empty).
+function CollectionsConfig.getRewards(skill: string, statKey: string, tier: number): { any }
+	local byStat = CollectionsConfig.stats[skill]
+	local list = byStat and byStat[statKey] and byStat[statKey][tier]
+		or CollectionsConfig.skills[skill] and CollectionsConfig.skills[skill][tier]
+		or CollectionsConfig.milestones[tier]
+		or CollectionsConfig.defaultRewards(tier, skill, statKey)
+	return list or {}
+end
 
-CollectionsConfig.MENU3_LAYOUT = {
-	-- Row 0: header
-	-- 4 blanks at LO 0, SelectedStat at LO 1, 4 blanks at LO 2
-	headerBlanksBeforeCount = 4,
-	headerBlanksBeforeOrder = 0,
-	selectedStatOrder = 1,
-	headerBlanksAfterCount = 3,
-	headerBlanksAfterOrder = 2,
-
-	-- Rows 1-4: tier rows (all 4 rows filled)
-	tierRowBaseOrder = 9,
-	tierRowPadCount = 2,
-
-	-- Row 5: footer
-	footerRowStart = 45,
-	footerBlanksBefore = 4,
-	backButtonOrder = 49,
-	closeSlotOrder = 50,
-	footerBlanksAfter = 4,
+-- ===================== GRID LAYOUT =====================
+-- All collection grids are 9 columns x 6 rows (cell = row * columns + column, which is the LayoutOrder).
+--   Menu2  header: skill in column 4              rows 1-4: up to 28 statistics (7 per row, 1 blank column on each side)
+--   Menu3  header: statistic in column 4          rows 1-4: the 28 tier slots (7 per row)
+--   Menu4  header: tier title in column 4         rewardRow: the rewards, evenly spaced (CollectionMath.rewardColumns)
+--   footer (row 5): Back in column 4, Close in column 5
+CollectionsConfig.LAYOUT = {
+	columns = 9,
+	rows = 6,
+	headerCol = 4,
+	contentRows = { 1, 4 },
+	contentFirstCol = 1, -- one blank cell before and one after the 7 slots of a row
+	contentPerRow = 7,
+	rewardRow = 2,
+	maxRewards = 7,
+	footerRow = 5,
+	backCol = 4,
+	closeCol = 5,
 }
 
-print("CollectionsConfig: Loaded ✓")
 return CollectionsConfig

@@ -2,941 +2,814 @@
 	CollectionsPageModule (ModuleScript)
 	Place inside: ReplicatedStorage > Modules
 
-	Client-side rendering for the Collections drill-down:
-	  CollectionsMenu2 → per-skill stat grid (clones StatSlot)
-	  CollectionsMenu3 → 28 collection tiers for one stat (clones CollectionLevelSlot)
+	Client-side rendering of the Collections drill-down. Every grid is a pooled grid (GridMenuModule): the engine clones the
+	template into a buffer on every navigation (also when going BACK) and runs the grid's onPopulate hook, so each page is
+	built from `state` and survives Back. The handlers die with their slots (Destroy disconnects them): nothing to clean.
 
-	Piggybacks on StatisticsUpdated RemoteEvent for lifetime data.
-	Uses TooltipModule progress bar for tier progress display.
+	  CollectionsGrid   hub: one button per skill (CentralizedMenuController -> openSkill)
+	  CollectionsMenu2  the statistics of one skill        (StatSlot / CollectionStatSlot)
+	  CollectionsMenu3  the 28 tiers of one statistic      (CollectionLevelSlot)
+	  CollectionsMenu4  one tier: the tier numeral and its rewards on one row   (TierTitle / RewardSlot)
+
+	All grids are 9 x 6 cells placed by cell index (Config.LAYOUT); blanks fill every unused cell. Tier maths is CollectionMath,
+	rewards come from CollectionsConfig.getRewards and are shown through CollectionRewards.describe, so a new reward type
+	needs no change here. The server (CollectionService) grants the rewards; this module only displays them.
 
 	API:
-	  init(sharedRefs, menu2Frame, menu3Frame)
-	  openSkill(skillName)
-	  openStat(skillName, statKey)
-	  closeMenu2()
-	  closeMenu3()
-	  close()
-	  reset()
-	  getActiveSkill()
-	  getActiveStat()
+	  init(sharedRefs)
+	  openSkill(skill) / openStat(statKey) / openTier(tier)     navigate one level down
+	  back()                                                    the ONE back handler of Menu2, Menu3 and Menu4
+	  populateSkill(frame) / populateStat(frame) / populateTier(frame)   pooled-grid onPopulate hooks
+	  showSkillTooltip(skill, anchor) / hideSkillTooltip()      hub tooltip (tiers completed)
+	  reset() / close()                                         menu closed
+	  getActiveSkill() / getActiveStat() / getActiveTier()
 --]]
 
--- Debug logging is off by default (these ran in hot paths: every navigation / purchase / notification).
-local DEBUG = false
-local function dprint(...)
-	if DEBUG then
-		print(...)
-	end
-end
-
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local Players = game:GetService("Players")
 local ContentProvider = game:GetService("ContentProvider")
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local Config = require(Modules:WaitForChild("CollectionsConfig")) :: any
+local CollectionMath = require(Modules:WaitForChild("CollectionMath")) :: any
+local CollectionRewards = require(Modules:WaitForChild("CollectionRewards")) :: any
 local MoneyLib = require(Modules:WaitForChild("MoneyLib")) :: any
+local StatisticLogModule = require(Modules:WaitForChild("StatisticLogModule")) :: any
 
 local STAT_CHAINS = Config.STAT_CHAINS
 local SKILL_COLORS = Config.SKILL_COLORS
 local statConfigLookup = Config.statConfigLookup
-local COLLECTION_TIERS = Config.COLLECTION_TIERS
-local COLLECTION_REWARDS = Config.COLLECTION_REWARDS
 local TIER_COLORS = Config.TIER_COLORS
-local ROMAN_NUMERALS = Config.ROMAN_NUMERALS
+local ROMAN = Config.ROMAN_NUMERALS
+local TIER_COUNT = Config.TIER_COUNT
+local LAYOUT = Config.LAYOUT
 
-local COLUMNS = Config.COLUMNS
-local M2_LAYOUT = Config.MENU2_LAYOUT
-local M2_STAT_ROWS = Config.MENU2_STAT_ROWS
-local M2_STATS_PER_ROW = Config.MENU2_STATS_PER_ROW
-
-local M3_LAYOUT = Config.MENU3_LAYOUT
-local M3_TIER_ROWS = Config.MENU3_TIER_ROWS
-local M3_TIERS_PER_ROW = Config.MENU3_TIERS_PER_ROW
+local TOOLTIP_SOURCE = "collections"
+local TOAST_SECONDS = 4
 
 local player = Players.LocalPlayer
+local UISounds = workspace:WaitForChild("UISounds")
+local UIClick = UISounds:WaitForChild("Click")
+local UIClick3 = UISounds:WaitForChild("Click3")
 
--- ===================== AUDIO =====================
-local UIClick = workspace:WaitForChild("UISounds"):WaitForChild("Click")
-local UIClick3 = workspace:WaitForChild("UISounds"):WaitForChild("Click3")
-
--- ===================== STATE =====================
-local shared = nil
-local TooltipModule = nil
-local menu2Frame = nil -- CollectionsMenu2
-local menu3Frame = nil -- CollectionsMenu3
-local statSlotTemplate = nil
-local collectionLevelSlotTemplate = nil
-local blankSlotTemplate = nil
-local selectedSkillFrame = nil -- SelectedSkill in Menu2
-local selectedStatFrame = nil -- SelectedStatistic in Menu3 (cloned dynamically per openStat)
-
-local currentSkill = nil
-local currentStatKey = nil
-local cachedData = nil
-
--- Dynamic children for cleanup
-local menu2Dynamic = {}
-local menu3Dynamic = {}
-local menu2SlotRefs = {} -- statKey → { frame, countLabel }
-local menu3SlotRefs = {} -- tierLevel → { frame, levelLabel }
-
-local hoveredStatKey = nil -- Menu2 hover
-local hoveredTierLevel = nil -- Menu3 hover
-
--- ===================== REMOTES =====================
 local StatisticsUpdated = ReplicatedStorage:WaitForChild("StatisticsUpdated")
+local TierUnlocked = ReplicatedStorage:WaitForChild("CollectionTierUnlocked")
 
--- ===================== MODULE =====================
+local sharedRefs: any = nil
+local TooltipModule: any = nil
+local templates: { [string]: Instance? } = {}
+local cachedData: any = nil
+
+-- What the pages show. Survives Back because every page is rebuilt from it.
+local state = { skill = nil :: string?, statKey = nil :: string?, tier = nil :: number? }
+-- Live slots of the page on screen, for in-place refreshes: [key] = { slot, ... }
+local views = { stats = {}, tiers = {}, rewards = {} } :: { [string]: { [any]: any } }
+local hovered = { stat = nil :: string?, tier = nil :: number? }
+
 local M = {}
 
 -- ===================== HELPERS =====================
-local function formatNumber(n)
-	if n == math.floor(n) then
-		return MoneyLib.DealWithPoints(n)
-	end
-	if n >= 1000 then
+local function formatNumber(n: number): string
+	if n == math.floor(n) or n >= 1000 then
 		return MoneyLib.DealWithPoints(math.floor(n))
 	end
 	return string.format("%.2f", n)
 end
 
-local function hexToColor3(hex)
+local function hexToColor3(hex: string): Color3
 	hex = hex:gsub("#", "")
-	local r = tonumber(hex:sub(1, 2), 16) or 255
-	local g = tonumber(hex:sub(3, 4), 16) or 255
-	local b = tonumber(hex:sub(5, 6), 16) or 255
-	return Color3.fromRGB(r, g, b)
+	return Color3.fromRGB(
+		tonumber(hex:sub(1, 2), 16) or 255,
+		tonumber(hex:sub(3, 4), 16) or 255,
+		tonumber(hex:sub(5, 6), 16) or 255
+	)
 end
 
-local function getStatData(skill, statKey)
-	if not cachedData or not cachedData.skills then
-		return { count = 0, lifetime = 0, session = 0, multiplier = 1 }
-	end
-	local skillData = cachedData.skills[skill]
-	if not skillData or not skillData[statKey] then
-		return { count = 0, lifetime = 0, session = 0, multiplier = 1 }
-	end
-	return skillData[statKey]
+local function roman(tier: number): string
+	return tier > 0 and ROMAN[tier] or "0"
 end
 
---- Returns the highest completed tier index (0 if none completed).
-local function getHighestCompletedTier(lifetime)
-	local highest = 0
-	for i, tier in ipairs(COLLECTION_TIERS) do
-		if lifetime >= tier.threshold then
-			highest = i
-		else
-			break
+local function getStatData(skill: string, statKey: string)
+	local skillData = cachedData and cachedData.skills and cachedData.skills[skill]
+	return skillData and skillData[statKey] or { count = 0, lifetime = 0, session = 0, multiplier = 1 }
+end
+
+local function statConfig(skill: string?, statKey: string?)
+	return skill and statKey and statConfigLookup[skill] and statConfigLookup[skill][statKey]
+end
+
+local function alive(slot: Instance?): boolean
+	return slot ~= nil and slot.Parent ~= nil
+end
+
+--- StatSlot / CollectionLevelSlot / RewardSlot colouring: Background, BG image + stroke, Icon.
+local function paint(slot: any, colorHex: string, icon: string?)
+	local color = hexToColor3(colorHex)
+	slot.BackgroundColor3 = color
+	local bg: any = slot:FindFirstChild("BG")
+	if bg then
+		bg.ImageColor3 = color
+		local stroke = bg:FindFirstChildOfClass("UIStroke")
+		if stroke then
+			stroke.Color = color
 		end
 	end
-	return highest
+	if icon ~= nil then
+		local image: any = slot:FindFirstChild("Icon")
+		if image then
+			image.Image = icon
+		end
+	end
 end
 
---- Returns the "collection level" for display (0 = none, 1-28 = completed tiers).
-local function getCollectionLevel(lifetime)
-	return getHighestCompletedTier(lifetime)
+--- The text label of a slot: Amount (reward), LevelLabel (inside BG) or ItemCount.
+local function setLabel(slot: Instance, text: string)
+	local label = slot:FindFirstChild("Amount", true)
+		or slot:FindFirstChild("LevelLabel", true)
+		or slot:FindFirstChild("ItemCount", true)
+	if label and label:IsA("TextLabel") then
+		label.Text = text
+	end
 end
 
---- Returns the next tier the player is progressing toward (or nil if all complete).
-local function getNextTier(lifetime)
-	local highest = getHighestCompletedTier(lifetime)
-	if highest < #COLLECTION_TIERS then
-		return COLLECTION_TIERS[highest + 1]
+local function bind(slot: Instance, onEnter: (() -> ())?, onLeave: (() -> ())?, onClick: (() -> ())?)
+	local button = slot :: any
+	if onEnter then
+		button.MouseEnter:Connect(onEnter)
+	end
+	if onLeave then
+		button.MouseLeave:Connect(onLeave)
+	end
+	if onClick then
+		button.MouseButton1Click:Connect(onClick)
+	end
+end
+
+local function hideTip()
+	if TooltipModule then
+		TooltipModule.hide(TOOLTIP_SOURCE)
+	end
+end
+
+local function showTip(config: any, anchor: Instance)
+	TooltipModule.show(config, TOOLTIP_SOURCE, anchor)
+end
+
+-- ===================== GRID BUILDING =====================
+local function cell(row: number, col: number): number
+	return row * LAYOUT.columns + col
+end
+
+local function cloneTemplate(name: string, fallback: string?): any
+	local template = templates[name] or (fallback and templates[fallback])
+	return template and template:Clone() or nil
+end
+
+local function place(frame: Instance, occupied: { [number]: Instance }, index: number, slot: any)
+	slot.LayoutOrder = index
+	slot.Visible = true
+	slot.Parent = frame
+	occupied[index] = slot
+end
+
+--- Adds the footer buttons that come from the grid template, then fills every free cell with a BlankSlot.
+local function finishGrid(frame: Instance, occupied: { [number]: Instance })
+	local back: any = frame:FindFirstChild("BackButton")
+	if back then
+		back.LayoutOrder = cell(LAYOUT.footerRow, LAYOUT.backCol)
+		occupied[cell(LAYOUT.footerRow, LAYOUT.backCol)] = back
+	end
+	local close: any = frame:FindFirstChild("CloseSlot")
+	if close then
+		close.LayoutOrder = cell(LAYOUT.footerRow, LAYOUT.closeCol)
+		occupied[cell(LAYOUT.footerRow, LAYOUT.closeCol)] = close
+	end
+	local blank = templates.blank
+	if not blank then
+		return
+	end
+	for index = 0, LAYOUT.columns * LAYOUT.rows - 1 do
+		if not occupied[index] then
+			local clone = blank:Clone() :: any
+			clone.LayoutOrder = index
+			clone.Visible = true
+			clone.Parent = frame
+		end
+	end
+end
+
+--- Row/column of the n-th content slot (7 per row, rows 1-4).
+local function contentCell(n: number): number
+	local per = LAYOUT.contentPerRow
+	return cell(LAYOUT.contentRows[1] + (n - 1) // per, LAYOUT.contentFirstCol + (n - 1) % per)
+end
+
+-- ===================== TOOLTIPS =====================
+local function rewardLine(reward: any, skill: string, statKey: string, tier: number): string
+	return CollectionRewards.describe(reward, { skill = skill, key = statKey, tier = tier }).text
+end
+
+local function nextRewardText(skill: string, statKey: string, lifetime: number): string?
+	local nextTier = CollectionMath.nextTier(lifetime)
+	if not nextTier then
+		return nil
+	end
+	local lines = {}
+	for _, reward in ipairs(Config.getRewards(skill, statKey, nextTier.level)) do
+		table.insert(lines, rewardLine(reward, skill, statKey, nextTier.level))
+	end
+	if #lines == 0 then
+		return nil
+	end
+	return string.format(
+		'<font color="#AAAAAA">Next reward (%s): </font>%s',
+		roman(nextTier.level),
+		table.concat(lines, '<font color="#AAAAAA">, </font>')
+	)
+end
+
+local function progressLabel(lifetime: number, target: number, pct: number, color: string): any
+	return {
+		pct = pct,
+		color = color,
+		label = string.format(
+			'<font color="#FFFF55">%s</font><font color="#FFAA00">/</font><font color="#FFFF55">%s</font> <font color="#AAAAAA">(%d%%)</font>',
+			formatNumber(lifetime),
+			formatNumber(target),
+			math.floor(pct * 100)
+		),
+	}
+end
+
+local function statTooltip(skill: string, statKey: string, withClick: boolean): any?
+	local config = statConfig(skill, statKey)
+	if not config then
+		return nil
+	end
+	local data = getStatData(skill, statKey)
+	local lifetime = data.lifetime or 0
+	local level = CollectionMath.highestTier(lifetime)
+	local color = config.color or SKILL_COLORS[skill] or "#FFFFFF"
+
+	local lines = {
+		string.format(
+			'<font color="#FFFFFF">Total Earned: <b>%s</b></font>  <font color="#AAAAAA">(Session: %s)</font>',
+			formatNumber(lifetime),
+			formatNumber(data.session or 0)
+		),
+		string.format('<font color="#55FF55">Multiplier: <b>x%s</b></font>', formatNumber(data.multiplier or 1)),
+		"",
+		string.format(
+			'<font color="#AAAAAA">Collection Level: </font><font color="#FFFF55"><b>%s</b></font><font color="#AAAAAA"> (%d / %d)</font>',
+			roman(level),
+			level,
+			TIER_COUNT
+		),
+	}
+	local nextText = nextRewardText(skill, statKey, lifetime)
+	if nextText then
+		table.insert(lines, nextText)
+	end
+
+	local tooltip: any = {
+		title = string.format('<font color="%s"><b>%s</b></font> %s', color, config.name, roman(level)),
+		description = table.concat(lines, "\n"),
+		click = withClick and '<font color="#FFFF55">Click to view collection!</font>' or "",
+	}
+	local nextTier = CollectionMath.nextTier(lifetime)
+	if nextTier and withClick then
+		tooltip.progress = progressLabel(lifetime, nextTier.threshold, CollectionMath.progress(lifetime), "#FFFF55")
+	elseif withClick then
+		tooltip.progress = { pct = 1, color = "#55FF55", label = '<font color="#55FF55">All tiers completed!</font>' }
+	end
+	return tooltip
+end
+
+local function tierTooltip(skill: string, statKey: string, tier: number): any
+	local config = statConfig(skill, statKey)
+	local lifetime = getStatData(skill, statKey).lifetime or 0
+	local status = CollectionMath.status(tier, CollectionMath.highestTier(lifetime))
+	local statusColor = TIER_COLORS[status]
+	local statusText = ({ completed = "Completed", inProgress = "In Progress", locked = "Locked" })[status]
+	local threshold = Config.threshold(tier)
+
+	local rewardLines = {}
+	for _, reward in ipairs(Config.getRewards(skill, statKey, tier)) do
+		table.insert(rewardLines, rewardLine(reward, skill, statKey, tier))
+	end
+	if #rewardLines == 0 then
+		table.insert(rewardLines, '<font color="#AAAAAA">No rewards</font>')
+	end
+
+	local progress = math.clamp(lifetime / threshold, 0, 1)
+	return {
+		title = string.format('<font color="%s"><b>Collection %s</b></font>', statusColor, roman(tier)),
+		description = table.concat({
+			string.format(
+				'<font color="#AAAAAA">Status: </font><font color="%s"><b>%s</b></font>',
+				statusColor,
+				statusText
+			),
+			"",
+			string.format(
+				'<font color="#AAAAAA">Requirement: </font><font color="%s"><b>%s</b> %s</font>',
+				config and config.color or "#FFFFFF",
+				formatNumber(threshold),
+				config and config.name or statKey
+			),
+		}, "\n"),
+		click = '<font color="#FFFF55">Click to view rewards!</font>',
+		progress = progressLabel(lifetime, threshold, progress, statusColor),
+		blocks = { { title = "Rewards", text = table.concat(rewardLines, "\n") } },
+	}
+end
+
+--- Hub tooltip: tiers completed over every statistic of the skill.
+local function skillTotals(skill: string): (number, number)
+	local done, total = 0, 0
+	for _, item in ipairs(STAT_CHAINS[skill] or {}) do
+		done += CollectionMath.highestTier(getStatData(skill, item.key).lifetime or 0)
+		total += TIER_COUNT
+	end
+	return done, total
+end
+
+function M.showSkillTooltip(skill: string, anchor: Instance)
+	if not TooltipModule then
+		return
+	end
+	UIClick3:Play()
+	local done, total = skillTotals(skill)
+	local pct = total > 0 and done / total or 0
+	local color = SKILL_COLORS[skill] or "#FFFFFF"
+	showTip({
+		title = string.format(
+			'<font color="%s"><b>%s</b></font><font color="#55FF55"> Collections</font>',
+			color,
+			skill
+		),
+		description = string.format(
+			'<font color="#AAAAAA">Tiers completed: </font><font color="#FFFF55"><b>%d</b></font><font color="#AAAAAA"> / %d</font>',
+			done,
+			total
+		),
+		click = '<font color="#FFFF55">Click to view!</font>',
+		progress = {
+			pct = pct,
+			color = "#55FF55",
+			label = string.format(
+				'<font color="#55FF55">%d%%</font> <font color="#AAAAAA">complete</font>',
+				math.floor(pct * 100)
+			),
+		},
+	}, anchor)
+end
+
+function M.hideSkillTooltip()
+	hideTip()
+end
+
+-- ===================== MENU 2: statistics of a skill =====================
+function M.populateSkill(frame: Instance)
+	table.clear(views.stats)
+	hovered.stat = nil
+	local skill = state.skill
+	local chain = skill and STAT_CHAINS[skill]
+	local occupied: { [number]: Instance } = {}
+	if not chain then
+		warn("[CollectionsPageModule] no skill selected for CollectionsMenu2")
+		finishGrid(frame, occupied)
+		return
+	end
+
+	-- header: the skill
+	local header = cloneTemplate("statSlot")
+	if header then
+		paint(header, SKILL_COLORS[skill] or "#FFFFFF", "")
+		place(frame, occupied, cell(0, LAYOUT.headerCol), header)
+		bind(header, function()
+			local done, total = skillTotals(skill)
+			showTip({
+				title = string.format('<font color="%s"><b>%s</b></font>', SKILL_COLORS[skill] or "#FFFFFF", skill),
+				description = string.format(
+					'<font color="#AAAAAA">Tiers completed: </font><font color="#FFFF55">%d / %d</font>',
+					done,
+					total
+				),
+				click = "",
+			}, header)
+		end, hideTip)
+	end
+
+	for n, item in ipairs(chain) do
+		if n > LAYOUT.contentPerRow * (LAYOUT.contentRows[2] - LAYOUT.contentRows[1] + 1) then
+			warn("[CollectionsPageModule] " .. skill .. " has more statistics than the grid holds")
+			break
+		end
+		local slot = cloneTemplate("collectionStatSlot", "statSlot")
+		if slot then
+			slot.Name = "Coll_" .. item.key
+			paint(slot, item.color or "#FFFFFF", item.icon or "")
+			local level = CollectionMath.highestTier(getStatData(skill, item.key).lifetime or 0)
+			setLabel(slot, roman(level))
+			place(frame, occupied, contentCell(n), slot)
+			views.stats[item.key] = { slot = slot, level = level }
+			local key = item.key
+			bind(slot, function()
+				hovered.stat = key
+				UIClick3:Play()
+				local tip = statTooltip(skill, key, true)
+				if tip then
+					showTip(tip, slot)
+				end
+			end, function()
+				if hovered.stat == key then
+					hovered.stat = nil
+				end
+				hideTip()
+			end, function()
+				UIClick:Play()
+				M.openStat(key)
+			end)
+		end
+	end
+
+	if #chain == 0 then -- a skill without statistics: one dim slot in the middle explains it
+		local empty = cloneTemplate("statSlot")
+		if empty then
+			paint(empty, "#555555", "")
+			place(frame, occupied, cell(LAYOUT.rewardRow, LAYOUT.headerCol), empty)
+			bind(empty, function()
+				showTip(
+					{
+						title = '<font color="#AAAAAA"><b>No collections yet</b></font>',
+						description = "This skill has no statistics.",
+						click = "",
+					},
+					empty
+				)
+			end, hideTip)
+		end
+	end
+
+	finishGrid(frame, occupied)
+end
+
+-- ===================== MENU 3: tiers of a statistic =====================
+function M.populateStat(frame: Instance)
+	table.clear(views.tiers)
+	hovered.tier = nil
+	local skill, statKey = state.skill, state.statKey
+	local config = statConfig(skill, statKey)
+	local occupied: { [number]: Instance } = {}
+	if not (skill and statKey and config) then
+		warn("[CollectionsPageModule] no statistic selected for CollectionsMenu3")
+		finishGrid(frame, occupied)
+		return
+	end
+
+	local header = cloneTemplate("statSlot")
+	if header then
+		header.Name = "SelectedStatistic"
+		paint(header, config.color or "#FFFFFF", config.icon or "")
+		place(frame, occupied, cell(0, LAYOUT.headerCol), header)
+		bind(header, function()
+			local tip = statTooltip(skill, statKey, false)
+			if tip then
+				showTip(tip, header)
+			end
+		end, hideTip)
+	end
+
+	local highest = CollectionMath.highestTier(getStatData(skill, statKey).lifetime or 0)
+	local levelSlot = templates.levelSlot
+	if levelSlot then
+		for tier = 1, TIER_COUNT do
+			local slot = levelSlot:Clone() :: any
+			slot.Name = "Tier_" .. tier
+			setLabel(slot, roman(tier))
+			local status = CollectionMath.status(tier, highest)
+			paint(slot, TIER_COLORS[status])
+			place(frame, occupied, contentCell(tier), slot)
+			views.tiers[tier] = { slot = slot, status = status }
+			bind(slot, function()
+				hovered.tier = tier
+				UIClick3:Play()
+				showTip(tierTooltip(skill, statKey, tier), slot)
+			end, function()
+				if hovered.tier == tier then
+					hovered.tier = nil
+				end
+				hideTip()
+			end, function()
+				UIClick:Play()
+				M.openTier(tier)
+			end)
+		end
+	end
+
+	finishGrid(frame, occupied)
+end
+
+-- ===================== MENU 4: the rewards of one tier =====================
+function M.populateTier(frame: Instance)
+	table.clear(views.rewards)
+	local skill, statKey, tier = state.skill, state.statKey, state.tier
+	local config = statConfig(skill, statKey)
+	local occupied: { [number]: Instance } = {}
+	if not (skill and statKey and tier and config) then
+		warn("[CollectionsPageModule] no tier selected for CollectionsMenu4")
+		finishGrid(frame, occupied)
+		return
+	end
+
+	local lifetime = getStatData(skill, statKey).lifetime or 0
+	local status = CollectionMath.status(tier, CollectionMath.highestTier(lifetime))
+
+	local title = cloneTemplate("tierTitle", "levelSlot")
+	if title then
+		title.Name = "TierTitle"
+		setLabel(title, roman(tier))
+		paint(title, TIER_COLORS[status])
+		place(frame, occupied, cell(0, LAYOUT.headerCol), title)
+		views.rewards.title = { slot = title, status = status }
+		bind(title, function()
+			showTip(tierTooltip(skill, statKey, tier), title)
+		end, hideTip)
+	end
+
+	local rewards = Config.getRewards(skill, statKey, tier)
+	if #rewards > LAYOUT.maxRewards then
+		warn(
+			string.format(
+				"[CollectionsPageModule] %s.%s tier %d has %d rewards, showing %d",
+				skill,
+				statKey,
+				tier,
+				#rewards,
+				LAYOUT.maxRewards
+			)
+		)
+	end
+	local columns = CollectionMath.rewardColumns(#rewards)
+	for i, column in ipairs(columns) do
+		local reward = rewards[i]
+		local info = CollectionRewards.describe(reward, { skill = skill, key = statKey, tier = tier })
+		local slot = cloneTemplate("rewardSlot", "statSlot")
+		if slot then
+			slot.Name = "Reward_" .. i
+			paint(slot, info.color or "#FFFFFF", info.icon or "")
+			setLabel(slot, info.short or "")
+			place(frame, occupied, cell(LAYOUT.rewardRow, column), slot)
+			bind(slot, function()
+				UIClick3:Play()
+				showTip({
+					title = string.format(
+						'<font color="%s"><b>%s</b></font>',
+						info.color or "#FFFFFF",
+						info.name or "Reward"
+					),
+					description = info.text,
+					click = "",
+				}, slot)
+			end, hideTip)
+		end
+	end
+
+	finishGrid(frame, occupied)
+end
+
+-- ===================== LIVE REFRESH =====================
+--- StatisticsUpdated arrives about 10x/s while stats change: only touch slots whose state really changed.
+local function refresh()
+	local skill, statKey = state.skill, state.statKey
+
+	for key, view in pairs(views.stats) do
+		if not alive(view.slot) then
+			views.stats[key] = nil
+		elseif skill then
+			local level = CollectionMath.highestTier(getStatData(skill, key).lifetime or 0)
+			if level ~= view.level then
+				view.level = level
+				setLabel(view.slot, roman(level))
+			end
+		end
+	end
+	local hoveredStat = hovered.stat and views.stats[hovered.stat]
+	if hoveredStat and skill then
+		local tip = statTooltip(skill, hovered.stat :: string, true)
+		if tip then
+			showTip(tip, hoveredStat.slot)
+		end
+	end
+
+	if skill and statKey then
+		local highest = CollectionMath.highestTier(getStatData(skill, statKey).lifetime or 0)
+		for tier, view in pairs(views.tiers) do
+			if not alive(view.slot) then
+				views.tiers[tier] = nil
+			else
+				local status = CollectionMath.status(tier, highest)
+				if status ~= view.status then
+					view.status = status
+					paint(view.slot, TIER_COLORS[status])
+				end
+			end
+		end
+		local hoveredTier = hovered.tier and views.tiers[hovered.tier]
+		if hoveredTier then
+			showTip(tierTooltip(skill, statKey, hovered.tier :: number), hoveredTier.slot)
+		end
+
+		local title = views.rewards.title
+		if title and alive(title.slot) and state.tier then
+			local status = CollectionMath.status(state.tier, highest)
+			if status ~= title.status then
+				title.status = status
+				paint(title.slot, TIER_COLORS[status])
+			end
+		end
+	end
+end
+
+-- ===================== NAVIGATION =====================
+local function gridTitle(gridKey: string?): string?
+	local config = statConfig(state.skill, state.statKey)
+	if gridKey == "CollectionsMenu2" and state.skill then
+		return state.skill .. " Collections"
+	elseif gridKey == "CollectionsMenu3" and config then
+		return config.name .. " Collection"
+	elseif gridKey == "CollectionsMenu4" and config and state.tier then
+		return config.name .. " " .. roman(state.tier)
 	end
 	return nil
 end
 
---- Convert tier level to Roman numeral string.
-local function toRoman(level)
-	return ROMAN_NUMERALS[level] or tostring(level)
-end
-
--- ===================== SLOT VISUALS =====================
---- Applies color + icon to a cloned StatSlot (same pattern as StatisticsPageModule).
-local function applySlotVisuals(slot, item)
-	local color = hexToColor3(item.color or "#FFFFFF")
-
-	slot.BackgroundColor3 = color
-
-	local bg = slot:FindFirstChild("BG")
-	if bg then
-		bg.ImageColor3 = color
-		local stroke = bg:FindFirstChildOfClass("UIStroke")
-		if stroke then
-			stroke.Color = color
-		end
-	end
-
-	local icon = slot:FindFirstChild("Icon")
-	if icon then
-		icon.Image = (item.icon and item.icon ~= "") and item.icon or ""
+local function navigate(gridKey: string)
+	sharedRefs.GridMenuModule.navigateToGrid(gridKey)
+	local title = gridTitle(gridKey)
+	if title then
+		sharedRefs.typewriteTitle(title)
 	end
 end
 
---- Applies tier status color to a CollectionLevelSlot.
---- colorHex → BackgroundColor3, BG.ImageColor3, BG.UIStroke.Color
-local function applyTierColor(slot, colorHex)
-	local color = hexToColor3(colorHex)
-
-	slot.BackgroundColor3 = color
-
-	local bg = slot:FindFirstChild("BG")
-	if bg then
-		bg.ImageColor3 = color
-		local stroke = bg:FindFirstChildOfClass("UIStroke")
-		if stroke then
-			stroke.Color = color
-		end
-	end
-end
-
--- ===================== CLONE HELPERS =====================
-local function cloneBlankTo(parent, layoutOrder, dynamicList)
-	if not blankSlotTemplate then
-		return nil
-	end
-	local blank = blankSlotTemplate:Clone()
-	blank.LayoutOrder = layoutOrder
-	blank.Visible = true
-	blank.Parent = parent
-	table.insert(dynamicList, blank)
-	return blank
-end
-
--- ===================== SELECTED SKILL VISUALS (Menu2) =====================
-local function updateSelectedSkill(skillName)
-	if not selectedSkillFrame then
+function M.openSkill(skill: string)
+	if not STAT_CHAINS[skill] then
+		warn("[CollectionsPageModule] unknown skill " .. tostring(skill))
 		return
 	end
-	selectedSkillFrame.LayoutOrder = M2_LAYOUT.selectedSkillOrder
+	state.skill, state.statKey, state.tier = skill, nil, nil
+	navigate("CollectionsMenu2")
+end
 
-	local collectionsMenu1 = menu2Frame.Parent:FindFirstChild("CollectionsMenu1")
-	if not collectionsMenu1 then
+function M.openStat(statKey: string)
+	if not statConfig(state.skill, statKey) then
+		warn("[CollectionsPageModule] no config for " .. tostring(state.skill) .. "." .. tostring(statKey))
 		return
 	end
+	state.statKey, state.tier = statKey, nil
+	navigate("CollectionsMenu3")
+end
 
-	local skillButton = collectionsMenu1:FindFirstChild(skillName .. "Collections")
-	if not skillButton then
+function M.openTier(tier: number)
+	if not (state.statKey and tier >= 1 and tier <= TIER_COUNT) then
 		return
 	end
-
-	local sourceIcon = skillButton:FindFirstChild("Icon")
-	local icon = selectedSkillFrame:FindFirstChild("Icon")
-	if icon and sourceIcon then
-		icon.Image = sourceIcon.Image
-	end
-
-	local sourceBg = skillButton:FindFirstChild("BG")
-	if sourceBg then
-		selectedSkillFrame.BackgroundColor3 = sourceBg.BackgroundColor3
-		local bg = selectedSkillFrame:FindFirstChild("BG")
-		if bg then
-			bg.ImageColor3 = sourceBg.ImageColor3
-			local bgStroke = bg:FindFirstChildOfClass("UIStroke")
-			local sourceBgStroke = sourceBg:FindFirstChildOfClass("UIStroke")
-			if bgStroke and sourceBgStroke then
-				bgStroke.Color = sourceBgStroke.Color
-			end
-		end
-	end
+	state.tier = tier
+	navigate("CollectionsMenu4")
 end
 
--- (SelectedStatistic is cloned dynamically in openStat — no static update function needed)
-
--- ===================== TOOLTIP: Menu2 stat slot =====================
-local function buildMenu2Tooltip(skillName, statKey)
-	local config = statConfigLookup[skillName] and statConfigLookup[skillName][statKey]
-	if not config then
-		return nil
-	end
-
-	local data = getStatData(skillName, statKey)
-	local itemColor = config.color or (SKILL_COLORS[skillName] or "#FFFFFF")
-	local lifetime = data.lifetime or 0
-	local collLevel = getCollectionLevel(lifetime)
-
-	local title = string.format(
-		'<font color="%s"><b>%s</b></font> %s',
-		itemColor,
-		config.name,
-		collLevel > 0 and toRoman(collLevel) or "0"
-	)
-
-	local lines = {}
-
-	table.insert(
-		lines,
-		string.format(
-			'<font color="#FFFFFF">Total Earned: <b>%s</b></font>  ' .. '<font color="#AAAAAA">(Session: %s)</font>',
-			formatNumber(lifetime),
-			formatNumber(data.session or 0)
-		)
-	)
-
-	table.insert(
-		lines,
-		string.format('<font color="#55FF55">Multiplier: <b>×%s</b></font>', formatNumber(data.multiplier or 1))
-	)
-
-	table.insert(lines, "")
-	table.insert(
-		lines,
-		string.format(
-			'<font color="#AAAAAA">Collection Level: </font><font color="#FFFF55"><b>%s</b></font><font color="#AAAAAA"> (%d / %d)</font>',
-			collLevel > 0 and toRoman(collLevel) or "0",
-			collLevel,
-			#COLLECTION_TIERS
-		)
-	)
-
-	local desc = table.concat(lines, "\n")
-	local click = '<font color="#FFFF55">Click to view collection!</font>'
-
-	return { title = title, desc = desc, click = click }
-end
-
-local function showMenu2Tooltip(skillName, statKey, anchor)
-	local base = buildMenu2Tooltip(skillName, statKey)
-	if not base then
+--- The one Go back handler of Menu2, Menu3 and Menu4: pop one grid. The engine rebuilds the page we return to from `state`
+--- (onPopulate), so it is never blank; only afterwards is the state we left cleared.
+function M.back()
+	local grids = sharedRefs.GridMenuModule
+	if not grids.navigateBack() then
 		return
 	end
-
-	local data = getStatData(skillName, statKey)
-	local lifetime = data.lifetime or 0
-	local nextTier = getNextTier(lifetime)
-	local highestCompleted = getHighestCompletedTier(lifetime)
-
-	local tooltip = { title = base.title, description = base.desc, click = base.click }
-
-	if nextTier then
-		local prevThreshold = highestCompleted > 0 and COLLECTION_TIERS[highestCompleted].threshold or 0
-		local progress = math.clamp((lifetime - prevThreshold) / (nextTier.threshold - prevThreshold), 0, 1)
-		tooltip.progress = {
-			pct = progress,
-			color = "#FFFF55",
-			label = string.format(
-				'<font color="#FFFF55">%s</font><font color="#FFAA00">/</font><font color="#FFFF55">%s</font> <font color="#AAAAAA">(%d%%)</font>',
-				formatNumber(lifetime),
-				formatNumber(nextTier.threshold),
-				math.floor(progress * 100)
-			),
-		}
-	else
-		tooltip.progress = {
-			pct = 1,
-			color = "#55FF55",
-			label = '<font color="#55FF55">All tiers completed!</font>',
-		}
+	local key = grids.getActiveGridKey()
+	local title = gridTitle(key)
+	if title then
+		sharedRefs.typewriteTitle(title)
 	end
-
-	TooltipModule.show(tooltip, nil, anchor)
-end
-
--- ===================== TOOLTIP: Menu3 tier slot =====================
-local function showMenu3TierTooltip(skillName, statKey, tierIndex, anchor)
-	local tier = COLLECTION_TIERS[tierIndex]
-	if not tier then
-		return
+	if key == "CollectionsMenu3" then
+		state.tier = nil
+	elseif key == "CollectionsMenu2" then
+		state.statKey, state.tier = nil, nil
+	elseif key == "CollectionsGrid" then
+		state.skill, state.statKey, state.tier = nil, nil, nil
 	end
-
-	local config = statConfigLookup[skillName] and statConfigLookup[skillName][statKey]
-	local data = getStatData(skillName, statKey)
-	local lifetime = data.lifetime or 0
-
-	local highestCompleted = getHighestCompletedTier(lifetime)
-	local statusColor
-	local statusText
-	if tierIndex <= highestCompleted then
-		statusColor = TIER_COLORS.completed
-		statusText = "Completed"
-	elseif tierIndex == highestCompleted + 1 then
-		statusColor = TIER_COLORS.inProgress
-		statusText = "In Progress"
-	else
-		statusColor = TIER_COLORS.locked
-		statusText = "Locked"
-	end
-
-	local statName = config and config.name or statKey
-	local statColor = config and config.color or "#FFFFFF"
-
-	local lines = {
-		string.format('<font color="#AAAAAA">Status: </font><font color="%s"><b>%s</b></font>', statusColor, statusText),
-		"",
-		string.format(
-			'<font color="#AAAAAA">Requirement: </font><font color="#%s"><b>%s</b> %s</font>',
-			statColor,
-			formatNumber(tier.threshold),
-			statName
-		),
-	}
-
-	-- Rewards block body (empty tiers show a placeholder)
-	local rewardLines = {}
-	local rewards = COLLECTION_REWARDS[tier.level]
-	if rewards and #rewards > 0 then
-		for _, reward in ipairs(rewards) do
-			if reward.type == "stat" then
-				local rConfig = statConfigLookup[reward.skill] and statConfigLookup[reward.skill][reward.target]
-				table.insert(
-					rewardLines,
-					string.format(
-						'<font color="#55FF55">+%d%%</font> <font color="%s">%s</font>',
-						reward.pct,
-						rConfig and rConfig.color or "#FFFFFF",
-						rConfig and rConfig.name or reward.target
-					)
-				)
-			elseif reward.type == "gameStat" then
-				table.insert(
-					rewardLines,
-					string.format('<font color="#FF55FF">+%s %s</font>', tostring(reward.flat), reward.target)
-				)
-			end
-		end
-	else
-		table.insert(rewardLines, '<font color="#AAAAAA">Coming Soon</font>')
-	end
-
-	local progress = math.clamp(lifetime / tier.threshold, 0, 1)
-
-	TooltipModule.show({
-		title = string.format('<font color="%s"><b>Collection %s</b></font>', statusColor, toRoman(tier.level)),
-		description = table.concat(lines, "\n"),
-		progress = {
-			pct = progress,
-			color = statusColor,
-			label = string.format(
-				'<font color="#FFFF55">%s</font><font color="#FFAA00">/</font><font color="#FFFF55">%s</font> <font color="#AAAAAA">(%d%%)</font>',
-				formatNumber(lifetime),
-				formatNumber(tier.threshold),
-				math.floor(progress * 100)
-			),
-		},
-		blocks = {
-			{ title = "Rewards", text = table.concat(rewardLines, "\n") },
-		},
-	}, nil, anchor)
-end
-
--- ===================== TOOLTIP: SelectedStatistic (Menu3 header) =====================
---- Shows stat info without progress bar or click label.
-local function showSelectedStatTooltip(skillName, statKey)
-	local config = statConfigLookup[skillName] and statConfigLookup[skillName][statKey]
-	if not config then
-		return
-	end
-
-	local data = getStatData(skillName, statKey)
-	local itemColor = config.color or (SKILL_COLORS[skillName] or "#FFFFFF")
-	local lifetime = data.lifetime or 0
-
-	local title = string.format('<font color="%s"><b>%s</b></font>', itemColor, config.name)
-
-	local lines = {}
-
-	table.insert(lines, string.format('<font color="#FFFFFF">Total Earned: <b>%s</b></font>', formatNumber(lifetime)))
-	table.insert(
-		lines,
-		string.format('<font color="#AAAAAA">Session: <b>%s</b></font>', formatNumber(data.session or 0))
-	)
-	table.insert(
-		lines,
-		string.format('<font color="#55FF55">Multiplier: <b>×%s</b></font>', formatNumber(data.multiplier or 1))
-	)
-
-	local collLevel = getCollectionLevel(lifetime)
-	table.insert(lines, "")
-	table.insert(
-		lines,
-		string.format(
-			'<font color="#AAAAAA">Collection Level: </font><font color="#FFFF55"><b>%s</b></font><font color="#AAAAAA"> (%d / %d)</font>',
-			collLevel > 0 and toRoman(collLevel) or "0",
-			collLevel,
-			#COLLECTION_TIERS
-		)
-	)
-
-	local desc = table.concat(lines, "\n")
-
-	-- No click label, no progress bar
-	TooltipModule.show({ title = title, desc = desc, click = "" })
-end
-
--- ===================== CLEANUP =====================
-local function clearMenu2Dynamic()
-	for _, child in ipairs(menu2Dynamic) do
-		if child and child.Parent then
-			child:Destroy()
-		end
-	end
-	menu2Dynamic = {}
-	menu2SlotRefs = {}
-end
-
-local function clearMenu3Dynamic()
-	for _, child in ipairs(menu3Dynamic) do
-		if child and child.Parent then
-			child:Destroy()
-		end
-	end
-	menu3Dynamic = {}
-	menu3SlotRefs = {}
-end
-
--- ===================== REFRESH (silent live update) =====================
-local function refreshMenu2Counts()
-	if not currentSkill then
-		return
-	end
-	for statKey, ref in pairs(menu2SlotRefs) do
-		if ref.countLabel then
-			local data = getStatData(currentSkill, statKey)
-			local collLevel = getCollectionLevel(data.lifetime or 0)
-			ref.countLabel.Text = collLevel > 0 and toRoman(collLevel) or "0"
-		end
-	end
-
-	-- Live-refresh tooltip if hovering
-	if hoveredStatKey and menu2SlotRefs[hoveredStatKey] then
-		showMenu2Tooltip(currentSkill, hoveredStatKey, menu2SlotRefs[hoveredStatKey].frame)
-	end
-end
-
-local function refreshMenu3Tiers()
-	if not currentSkill or not currentStatKey then
-		return
-	end
-	local data = getStatData(currentSkill, currentStatKey)
-	local lifetime = data.lifetime or 0
-	local highestCompleted = getHighestCompletedTier(lifetime)
-
-	for tierLevel, ref in pairs(menu3SlotRefs) do
-		local colorHex
-		if tierLevel <= highestCompleted then
-			colorHex = TIER_COLORS.completed
-		elseif tierLevel == highestCompleted + 1 then
-			colorHex = TIER_COLORS.inProgress
-		else
-			colorHex = TIER_COLORS.locked
-		end
-		applyTierColor(ref.frame, colorHex)
-	end
-
-	-- Live-refresh tooltip if hovering
-	if hoveredTierLevel and menu3SlotRefs[hoveredTierLevel] then
-		showMenu3TierTooltip(currentSkill, currentStatKey, hoveredTierLevel, menu3SlotRefs[hoveredTierLevel].frame)
-	end
-end
-
--- ===================== OPEN SKILL (Menu2) =====================
-function M.openSkill(skillName, activeFrame)
-	-- Update frame reference if a new buffer was provided
-	if activeFrame then
-		menu2Frame = activeFrame
-		selectedSkillFrame = activeFrame:FindFirstChild("SelectedSkill")
-		-- Wire tooltip on freshly cloned SelectedSkill (GC'd with instance)
-		if selectedSkillFrame then
-			selectedSkillFrame.MouseEnter:Connect(function()
-				if currentSkill and shared.SkillsPageModule then
-					shared.SkillsPageModule.showGridSkillTooltip(currentSkill, false)
-				end
-			end)
-			selectedSkillFrame.MouseLeave:Connect(function()
-				if shared.SkillsPageModule then
-					shared.SkillsPageModule.hideGridSkillTooltip()
-				end
-			end)
-		end
-	end
-	clearMenu2Dynamic()
-	currentSkill = skillName
-	currentStatKey = nil
-
-	local chain = STAT_CHAINS[skillName]
-	if not chain then
-		warn("[CollectionsPageModule] No chain defined for " .. tostring(skillName))
-		return
-	end
-
-	-- ── Update SelectedSkill visuals ──
-	updateSelectedSkill(skillName)
-
-	-- ── Row 0: header blanks ──
-	for i = 0, M2_LAYOUT.headerBlanksBefore - 1 do
-		cloneBlankTo(menu2Frame, i, menu2Dynamic)
-	end
-	for i = 1, M2_LAYOUT.headerBlanksAfter do
-		cloneBlankTo(menu2Frame, M2_LAYOUT.selectedSkillOrder + i, menu2Dynamic)
-	end
-
-	-- ── Rows 1-4: stat slots ──
-	local statIndex = 1
-	for row = 0, M2_STAT_ROWS - 1 do
-		local rowBase = M2_LAYOUT.statRowBaseOrder + (row * COLUMNS)
-
-		-- Left pad blanks
-		for pad = 0, M2_LAYOUT.statRowPadCount - 1 do
-			cloneBlankTo(menu2Frame, rowBase + pad, menu2Dynamic)
-		end
-
-		-- Stat slots or blank fills
-		for col = M2_LAYOUT.statRowPadCount, M2_LAYOUT.statRowPadCount + M2_STATS_PER_ROW - 1 do
-			local lo = rowBase + col
-			if statIndex <= #chain then
-				local item = chain[statIndex]
-
-				local slot = statSlotTemplate:Clone()
-				slot.Name = "Coll_" .. item.key
-				slot.LayoutOrder = lo
-				slot.Visible = true
-				slot.Parent = menu2Frame
-
-				applySlotVisuals(slot, item)
-
-				-- Show collection level as Roman numeral
-				local countLabel = slot:FindFirstChild("ItemCount")
-				if countLabel then
-					local data = getStatData(skillName, item.key)
-					local collLevel = getCollectionLevel(data.lifetime or 0)
-					countLabel.Text = collLevel > 0 and toRoman(collLevel) or "0"
-				end
-
-				menu2SlotRefs[item.key] = {
-					frame = slot,
-					countLabel = countLabel,
-				}
-
-				-- Hover tooltip
-				local capturedKey = item.key
-				slot.MouseEnter:Connect(function()
-					hoveredStatKey = capturedKey
-					UIClick3:Play()
-					showMenu2Tooltip(skillName, capturedKey, slot)
-				end)
-				slot.MouseLeave:Connect(function()
-					if hoveredStatKey == capturedKey then
-						hoveredStatKey = nil
-					end
-					TooltipModule.hide()
-				end)
-
-				-- Click → open Menu3 for this stat
-				slot.MouseButton1Click:Connect(function()
-					UIClick:Play()
-					M.openStat(skillName, capturedKey)
-				end)
-
-				table.insert(menu2Dynamic, slot)
-				statIndex = statIndex + 1
-			else
-				cloneBlankTo(menu2Frame, lo, menu2Dynamic)
-			end
-		end
-	end
-
-	-- ── Row 5: footer ──
-	local backBtn = menu2Frame:FindFirstChild("BackButton")
-	if backBtn then
-		backBtn.LayoutOrder = M2_LAYOUT.backButtonOrder
-	end
-	local closeBtn = menu2Frame:FindFirstChild("CloseSlot")
-	if closeBtn then
-		closeBtn.LayoutOrder = M2_LAYOUT.closeSlotOrder
-	end
-
-	for i = 0, M2_LAYOUT.footerBlanksBefore - 1 do
-		cloneBlankTo(menu2Frame, M2_LAYOUT.footerRowStart + i, menu2Dynamic)
-	end
-	for i = 1, M2_LAYOUT.footerBlanksAfter do
-		cloneBlankTo(menu2Frame, M2_LAYOUT.closeSlotOrder + i, menu2Dynamic)
-	end
-end
-
--- ===================== OPEN STAT (Menu3) =====================
-function M.openStat(skillName, statKey)
-	clearMenu3Dynamic()
-	currentStatKey = statKey
-
-	local config = statConfigLookup[skillName] and statConfigLookup[skillName][statKey]
-	if not config then
-		warn("[CollectionsPageModule] No config for " .. tostring(skillName) .. "." .. tostring(statKey))
-		return
-	end
-
-	-- Navigate grid and update frame reference
-	local GridMenuModule = shared.GridMenuModule
-	if GridMenuModule then
-		GridMenuModule.navigateToGrid("CollectionsMenu3")
-		menu3Frame = GridMenuModule.getActiveGridFrame()
-		shared.typewriteTitle(config.name .. " Collection")
-	end
-
-	-- ── Update SelectedStatistic (clone from StatSlot) ──
-	if statSlotTemplate then
-		selectedStatFrame = statSlotTemplate:Clone()
-		selectedStatFrame.Name = "SelectedStatistic"
-		selectedStatFrame.LayoutOrder = M3_LAYOUT.selectedStatOrder
-		selectedStatFrame.Visible = true
-		selectedStatFrame.Parent = menu3Frame
-		table.insert(menu3Dynamic, selectedStatFrame)
-
-		-- Apply stat color + icon
-		local color = hexToColor3(config.color or "#FFFFFF")
-		selectedStatFrame.BackgroundColor3 = color
-		local bg = selectedStatFrame:FindFirstChild("BG")
-		if bg then
-			bg.ImageColor3 = color
-			local stroke = bg:FindFirstChildOfClass("UIStroke")
-			if stroke then
-				stroke.Color = color
-			end
-		end
-		local icon = selectedStatFrame:FindFirstChild("Icon")
-		if icon then
-			icon.Image = (config.icon and config.icon ~= "") and config.icon or ""
-		end
-
-		-- Tooltip (same as Menu2 stat tooltip, no click label)
-		selectedStatFrame.MouseEnter:Connect(function()
-			if currentSkill and currentStatKey then
-				showSelectedStatTooltip(currentSkill, currentStatKey)
-			end
-		end)
-		selectedStatFrame.MouseLeave:Connect(function()
-			TooltipModule.hide()
-		end)
-	end
-
-	-- ── Row 0: header blanks (group-style: all at same LO) ──
-	for _ = 1, M3_LAYOUT.headerBlanksBeforeCount do
-		cloneBlankTo(menu3Frame, M3_LAYOUT.headerBlanksBeforeOrder, menu3Dynamic)
-	end
-	for _ = 1, M3_LAYOUT.headerBlanksAfterCount do
-		cloneBlankTo(menu3Frame, M3_LAYOUT.headerBlanksAfterOrder, menu3Dynamic)
-	end
-
-	-- ── Rows 1-4: tier slots (28 tiers = 4 rows × 7) ──
-	local data = getStatData(skillName, statKey)
-	local lifetime = data.lifetime or 0
-	local highestCompleted = getHighestCompletedTier(lifetime)
-
-	local tierIndex = 1
-	for row = 0, M3_TIER_ROWS - 1 do
-		local rowBase = M3_LAYOUT.tierRowBaseOrder + (row * COLUMNS)
-
-		-- Left pad blanks
-		for pad = 0, M3_LAYOUT.tierRowPadCount - 1 do
-			cloneBlankTo(menu3Frame, rowBase + pad, menu3Dynamic)
-		end
-
-		-- Tier slots
-		for col = M3_LAYOUT.tierRowPadCount, M3_LAYOUT.tierRowPadCount + M3_TIERS_PER_ROW - 1 do
-			local lo = rowBase + col
-			if tierIndex <= #COLLECTION_TIERS then
-				local tier = COLLECTION_TIERS[tierIndex]
-
-				local slot = collectionLevelSlotTemplate:Clone()
-				slot.Name = "Tier_" .. tier.level
-				slot.LayoutOrder = lo
-				slot.Visible = true
-				slot.Parent = menu3Frame
-
-				-- Apply icon from stat config
-				local icon = slot:FindFirstChild("Icon")
-				if icon then
-					icon.Image = (config.icon and config.icon ~= "") and config.icon or ""
-				end
-
-				-- Set level label (LevelLabel is inside BG)
-				local bg = slot:FindFirstChild("BG")
-				local levelLabel = bg and bg:FindFirstChild("LevelLabel")
-				if levelLabel then
-					levelLabel.Text = toRoman(tier.level)
-				end
-
-				-- Apply tier status color
-				local colorHex
-				if tierIndex <= highestCompleted then
-					colorHex = TIER_COLORS.completed
-				elseif tierIndex == highestCompleted + 1 then
-					colorHex = TIER_COLORS.inProgress
-				else
-					colorHex = TIER_COLORS.locked
-				end
-				applyTierColor(slot, colorHex)
-
-				-- Count label shows threshold formatted via MoneyLib
-				local countLabel = slot:FindFirstChild("ItemCount")
-				if countLabel then
-					countLabel.Text = formatNumber(tier.threshold)
-				end
-
-				menu3SlotRefs[tierIndex] = {
-					frame = slot,
-					levelLabel = levelLabel,
-				}
-
-				-- Hover tooltip
-				local capturedTier = tierIndex
-				slot.MouseEnter:Connect(function()
-					hoveredTierLevel = capturedTier
-					UIClick3:Play()
-					showMenu3TierTooltip(skillName, statKey, capturedTier, slot)
-				end)
-				slot.MouseLeave:Connect(function()
-					if hoveredTierLevel == capturedTier then
-						hoveredTierLevel = nil
-					end
-					TooltipModule.hide()
-				end)
-
-				table.insert(menu3Dynamic, slot)
-				tierIndex = tierIndex + 1
-			else
-				cloneBlankTo(menu3Frame, lo, menu3Dynamic)
-			end
-		end
-	end
-
-	-- ── Row 5: footer ──
-	local backBtn = menu3Frame:FindFirstChild("BackButton")
-	if backBtn then
-		backBtn.LayoutOrder = M3_LAYOUT.backButtonOrder
-	end
-	local closeBtn = menu3Frame:FindFirstChild("CloseSlot")
-	if closeBtn then
-		closeBtn.LayoutOrder = M3_LAYOUT.closeSlotOrder
-	end
-
-	for i = 0, M3_LAYOUT.footerBlanksBefore - 1 do
-		cloneBlankTo(menu3Frame, M3_LAYOUT.footerRowStart + i, menu3Dynamic)
-	end
-	for i = 1, M3_LAYOUT.footerBlanksAfter do
-		cloneBlankTo(menu3Frame, M3_LAYOUT.closeSlotOrder + i, menu3Dynamic)
-	end
-end
-
--- ===================== CLOSE =====================
-function M.closeMenu2()
-	hoveredStatKey = nil
-	TooltipModule.hide()
-end
-
-function M.closeMenu3()
-	hoveredTierLevel = nil
-	clearMenu3Dynamic()
-	selectedStatFrame = nil
-	currentStatKey = nil
-	TooltipModule.hide()
 end
 
 function M.close()
-	hoveredStatKey = nil
-	hoveredTierLevel = nil
-	TooltipModule.hide()
+	table.clear(hovered)
+	hideTip()
 end
 
 function M.reset()
-	hoveredStatKey = nil
-	hoveredTierLevel = nil
-	clearMenu2Dynamic()
-	clearMenu3Dynamic()
-	currentSkill = nil
-	currentStatKey = nil
-	TooltipModule.forceHide()
-
-	-- Reset SelectedSkill visuals
-	if selectedSkillFrame then
-		selectedSkillFrame.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-		local bg = selectedSkillFrame:FindFirstChild("BG")
-		if bg then
-			bg.ImageColor3 = Color3.fromRGB(255, 255, 255)
-			local bgStroke = bg:FindFirstChildOfClass("UIStroke")
-			if bgStroke then
-				bgStroke.Color = Color3.fromRGB(255, 255, 255)
-			end
-		end
-		local icon = selectedSkillFrame:FindFirstChild("Icon")
-		if icon then
-			icon.Image = ""
-		end
+	state.skill, state.statKey, state.tier = nil, nil, nil
+	for _, group in pairs(views) do
+		table.clear(group)
 	end
-
-	-- selectedStatFrame is a dynamic child — cleared by clearMenu3Dynamic() above
-	selectedStatFrame = nil
+	table.clear(hovered)
+	if TooltipModule then
+		TooltipModule.forceHide()
+	end
 end
 
--- ===================== GETTERS =====================
 function M.getActiveSkill()
-	return currentSkill
+	return state.skill
 end
 
 function M.getActiveStat()
-	return currentStatKey
+	return state.statKey
+end
+
+function M.getActiveTier()
+	return state.tier
+end
+
+-- ===================== TOAST =====================
+local function onTierUnlocked(info: any)
+	if
+		type(info) ~= "table"
+		or type(info.skill) ~= "string"
+		or type(info.key) ~= "string"
+		or type(info.tier) ~= "number"
+	then
+		return
+	end
+	local config = statConfig(info.skill, info.key)
+	if not config or info.tier < 1 or info.tier > TIER_COUNT then
+		return
+	end
+	local parts = {}
+	for _, reward in ipairs(Config.getRewards(info.skill, info.key, info.tier)) do
+		table.insert(parts, rewardLine(reward, info.skill, info.key, info.tier))
+	end
+	local extra = (type(info.count) == "number" and info.count > 1)
+			and string.format(' <font color="#AAAAAA">(+%d tiers)</font>', info.count - 1)
+		or ""
+	StatisticLogModule.log(
+		string.format(
+			'<font color="#55FFFF"><b>COLLECTION</b></font> <font color="%s">%s</font> <font color="#FFFF55"><b>%s</b></font>%s  %s',
+			config.color or "#FFFFFF",
+			config.name,
+			roman(info.tier),
+			extra,
+			table.concat(parts, '<font color="#AAAAAA">, </font>')
+		),
+		TOAST_SECONDS
+	)
+	UIClick3:Play()
 end
 
 -- ===================== INIT =====================
-function M.init(sharedRefs, m2Frame, m3Frame)
-	shared = sharedRefs
-	TooltipModule = sharedRefs.TooltipModule
-	menu2Frame = m2Frame -- may be nil for pooled grids
-	menu3Frame = m3Frame -- may be nil for pooled grids
+function M.init(refs: any)
+	sharedRefs = refs
+	TooltipModule = refs.TooltipModule
 
-	local CentralizedMenu = player.PlayerGui:WaitForChild("CentralizedAscensionMenu")
-	local TemporaryMenus = CentralizedMenu:WaitForChild("TemporaryMenus")
-
-	statSlotTemplate = TemporaryMenus:FindFirstChild("StatSlot")
-	if not statSlotTemplate then
-		warn("[CollectionsPageModule] StatSlot template NOT FOUND in TemporaryMenus")
+	local temporary =
+		player:WaitForChild("PlayerGui"):WaitForChild("CentralizedAscensionMenu"):WaitForChild("TemporaryMenus")
+	templates.statSlot = temporary:FindFirstChild("StatSlot")
+	templates.collectionStatSlot = temporary:FindFirstChild("CollectionStatSlot") -- StatSlot + LevelLabel (build_collection_rewards)
+	templates.levelSlot = temporary:FindFirstChild("CollectionLevelSlot")
+	templates.blank = temporary:FindFirstChild("BlankSlot")
+	templates.tierTitle = temporary:FindFirstChild("TierTitle") -- optional, falls back to CollectionLevelSlot
+	templates.rewardSlot = temporary:FindFirstChild("RewardSlot") -- optional, falls back to StatSlot
+	for name, required in pairs({ statSlot = "StatSlot", levelSlot = "CollectionLevelSlot", blank = "BlankSlot" }) do
+		if not templates[name] then
+			warn("[CollectionsPageModule] TemporaryMenus." .. required .. " is missing")
+		end
+	end
+	if not (templates.tierTitle and templates.rewardSlot) then
+		warn(
+			"[CollectionsPageModule] TierTitle / RewardSlot templates missing: run tools/studio/build_collection_rewards.luau"
+		)
 	end
 
-	collectionLevelSlotTemplate = TemporaryMenus:FindFirstChild("CollectionLevelSlot")
-	if not collectionLevelSlotTemplate then
-		warn("[CollectionsPageModule] CollectionLevelSlot template NOT FOUND in TemporaryMenus")
-	end
-
-	blankSlotTemplate = TemporaryMenus:FindFirstChild("BlankSlot")
-	if not blankSlotTemplate then
-		warn("[CollectionsPageModule] BlankSlot template NOT FOUND in TemporaryMenus")
-	end
-
-	-- Frame-dependent setup (selectedSkillFrame, tooltip wiring)
-	-- is now handled in openSkill() when the buffer frame is passed.
-	if menu2Frame then
-		selectedSkillFrame = menu2Frame:FindFirstChild("SelectedSkill")
-	end
-
-	-- ── Listen for StatisticsUpdated — refresh live data ──
 	StatisticsUpdated.OnClientEvent:Connect(function(payload)
 		cachedData = payload
-		refreshMenu2Counts()
-		refreshMenu3Tiers()
+		refresh()
 	end)
+	TierUnlocked.OnClientEvent:Connect(onTierUnlocked)
 
-	-- ── Preload stat icons ──
-	local preloadList = {}
+	-- preload the statistic icons so the grids do not pop in
+	local preload = {}
 	for _, chain in pairs(STAT_CHAINS) do
 		for _, item in ipairs(chain) do
 			if item.icon and item.icon ~= "" then
-				local img = Instance.new("ImageLabel")
-				img.Image = item.icon
-				table.insert(preloadList, img)
+				local image = Instance.new("ImageLabel")
+				image.Image = item.icon
+				table.insert(preload, image)
 			end
 		end
 	end
-	if #preloadList > 0 then
-		task.spawn(function()
-			ContentProvider:PreloadAsync(preloadList)
-			for _, img in ipairs(preloadList) do
-				img:Destroy()
-			end
-			dprint("[CollectionsPageModule] Preloaded " .. #preloadList .. " stat icons ✓")
-		end)
-	end
-
-	dprint("[CollectionsPageModule] Initialized ✓")
+	task.spawn(function()
+		ContentProvider:PreloadAsync(preload)
+		for _, image in ipairs(preload) do
+			image:Destroy()
+		end
+	end)
 end
 
 return M

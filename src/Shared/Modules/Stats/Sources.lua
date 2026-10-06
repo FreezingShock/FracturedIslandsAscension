@@ -81,6 +81,13 @@ Sources.register("equipment", {
 	end,
 })
 
+Sources.register("collection", {
+	rank = 20,
+	label = "Collection",
+	color = "#55FFFF",
+	description = "A permanent reward for completing a collection tier.",
+})
+
 Sources.register("admin", {
 	rank = 90,
 	label = "Admin",

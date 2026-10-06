@@ -473,6 +473,64 @@ function AttributeStatManager.ApplyEquipment(player, entries)
 	return true
 end
 
+-- ===================== COLLECTION BOOSTS =====================
+-- Permanent collection tier rewards (CollectionService). Same idea as the equipment boosts: tagged with an id prefix and
+-- rebuilt from scratch every time, so a boost saved by a previous session is replaced and can never stack.
+local COLLECTION_PREFIX = "collection:"
+
+--- entries: array of { id, label, color?, attr, flat? = n, mult? = m } (mult is a multiplier, 1.05 = +5%).
+function AttributeStatManager.ApplyCollection(player, entries)
+	local data = getAttributeData(player)
+	if not data then
+		return false
+	end
+
+	local function keep(boost)
+		return not (type(boost.id) == "string" and boost.id:sub(1, #COLLECTION_PREFIX) == COLLECTION_PREFIX)
+	end
+
+	for _, entry in pairs(data) do
+		if type(entry) == "table" then
+			local flats, mults = {}, {}
+			for _, boost in ipairs(entry.flatBoosts or {}) do
+				if keep(boost) then
+					table.insert(flats, boost)
+				end
+			end
+			for _, boost in ipairs(entry.multipliers or {}) do
+				if keep(boost) then
+					table.insert(mults, boost)
+				end
+			end
+			entry.flatBoosts, entry.multipliers = flats, mults
+		end
+	end
+
+	for _, item in ipairs(entries or {}) do
+		local target = data[item.attr]
+		if target then
+			local boost = {
+				id = COLLECTION_PREFIX .. item.id,
+				label = item.label,
+				color = item.color,
+				sourceType = "collection",
+			}
+			if item.flat then
+				boost.value = item.flat
+				table.insert(target.flatBoosts, boost)
+			elseif item.mult then
+				boost.value = item.mult
+				table.insert(target.multipliers, boost)
+			end
+		else
+			warn("[AttributeStatManager] collection reward has no attribute: " .. tostring(item.attr))
+		end
+	end
+
+	fireStatUpdate(player)
+	return true
+end
+
 -- ===================== ADMIN (DEBUG) BOOSTS =====================
 -- /set and /add use one flat boost per attribute with this id. They are
 -- removed when the profile loads, so debug values never persist.

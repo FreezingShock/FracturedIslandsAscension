@@ -55,11 +55,19 @@ for _, skill in ipairs(SKILL_NAMES) do
 	TEMPLATE[skill] = {} -- { [statKey] = { count = 0, lifetime = 0 } }
 end
 
+-- Collections (CollectionService): claimed[skill][statKey] = highest tier already paid out (a high-water mark),
+-- recipes[id] = true for recipe rewards. Reconcile() backfills it for existing players.
+TEMPLATE._Collections = { claimed = {}, recipes = {} }
+
 local StatProfileStore = ProfileService.GetProfileStore("PlayerStatistics_v1", TEMPLATE)
 local profiles = {} -- [userId] = profile
 local sessionData = {} -- [userId] = { [skill] = { [key] = gained this session } }
 local dirty = {} -- [Player] = true when a snapshot is owed
 local adminSnapshot = {} -- [userId] = { [skill] = { [key] = { count, lifetime } } } (admin panel undo)
+-- Permanent gain bonuses derived by CollectionService from the claimed tiers: [profile.Data] = { [skill] = { [key] = pct } }.
+-- Never saved and never added into the owned counts, so a restore or clamp cannot make them stack.
+local collectionBonus = setmetatable({}, { __mode = "k" })
+local flushListeners = {} -- fn(player), called after every snapshot flush (CollectionService re-derives from it)
 
 -- ===================== REMOTE EVENTS =====================
 local function ensureRemote(name)
@@ -124,15 +132,33 @@ end
 --- Multiplier applied when acquiring statKey in skill:
 ---   1 + sum(sourceOwned * pct / 100) over every stat (any skill) that rewards it.
 function StatisticsDataManager.GetMultiplier(data, skill, statKey)
-	local boosts = boostLookup[skill] and boostLookup[skill][statKey]
-	if not boosts then
-		return 1
-	end
 	local total = 0
-	for _, boost in ipairs(boosts) do
-		total += getStatCount(data, boost.sourceSkill, boost.sourceKey) * boost.pct / 100
+	local boosts = boostLookup[skill] and boostLookup[skill][statKey]
+	if boosts then
+		for _, boost in ipairs(boosts) do
+			total += getStatCount(data, boost.sourceSkill, boost.sourceKey) * boost.pct / 100
+		end
+	end
+	local bonus = collectionBonus[data]
+	local pct = bonus and bonus[skill] and bonus[skill][statKey]
+	if pct then
+		total += pct / 100
 	end
 	return 1 + finite(total)
+end
+
+--- CollectionService: replace the derived collection gain bonuses ({ [skill] = { [key] = pct } }).
+function StatisticsDataManager.SetCollectionBonus(player, bonus)
+	local data = getPlayerData(player)
+	if data then
+		collectionBonus[data] = bonus
+		dirty[player] = true
+	end
+end
+
+--- Register fn(player), called after each snapshot flush (and when a profile finishes loading).
+function StatisticsDataManager.OnFlush(fn)
+	table.insert(flushListeners, fn)
 end
 
 -- ===================== CLIENT SYNC =====================
@@ -181,6 +207,9 @@ local function flush(player)
 	local payload = buildPayload(player)
 	if payload then
 		StatisticsUpdated:FireClient(player, payload)
+	end
+	for _, fn in ipairs(flushListeners) do
+		task.spawn(fn, player)
 	end
 end
 

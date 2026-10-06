@@ -19,6 +19,12 @@
       "ChatService": {
         "$path": "src/Server/Chat/ChatService.lua"
       },
+      "CollectionInit": {
+        "$path": "src/Server/Stats/CollectionInit.server.lua"
+      },
+      "CollectionService": {
+        "$path": "src/Server/Stats/CollectionService.lua"
+      },
       "DamageService": {
         "$path": "src/Server/Combat/DamageService.lua"
       },
@@ -122,6 +128,12 @@
         },
         "CloudSystem": {
           "$path": "src/Shared/Modules/World/CloudSystem.lua"
+        },
+        "CollectionMath": {
+          "$path": "src/Shared/Modules/Stats/CollectionMath.lua"
+        },
+        "CollectionRewards": {
+          "$path": "src/Shared/Modules/Stats/CollectionRewards.lua"
         },
         "CollectionsConfig": {
           "$path": "src/Shared/Modules/Stats/CollectionsConfig.lua"
