@@ -174,7 +174,7 @@ function Items.fromDrop(info: any)
 	local full = Items.fromTool({
 		toolName = def and def.toolName or nil,
 		name = info.name,
-		displayName = def and def.name or info.name,
+		displayName = def and (def.displayName or def.name) or info.name,
 		count = count,
 		rarity = info.rarity,
 	})

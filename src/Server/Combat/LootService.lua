@@ -10,8 +10,9 @@
 	XP: EnemyConfig.enemies[type].xp = { skill, amount } through SkillsDataManager.AddXP(killer, skill, amount, "Kill"),
 	with a chat line. Drops: each entry rolls its own chance (the killer's MagicFind multiplies it); pools pick by weight.
 
-	DropTooltipController (client) shows a card over every drop tagged "DropTooltip" (attributes DropKind, ItemId, Count,
-	Rarity, DropColor, DropSkill, DropName); the plain DropLabel hides while a card or chip is up.
+	DropTooltipController (client) shows a dot / folded tag / card over every drop tagged "DropTooltip" (attributes DropKind,
+	ItemId, Count, Rarity, DropColor, DropSkill, DropName) and DropFXController (client) draws its glow and particles from the
+	same attributes; the plain DropLabel stays hidden while they run.
 
 	A drop is an anchored glowing cube at the kill point with a name label (ReplicatedStorage.GUI.DropLabel, hand-restylable:
 	BillboardGui > Label). Only the killer can collect it for `OWNER_SECONDS`, then anyone; it despawns after `LIFETIME`.
@@ -78,7 +79,7 @@ local function describe(entry: any): any?
 		kind = "item",
 		id = entry.id,
 		toolName = def.toolName,
-		name = def.name,
+		name = def.displayName or def.name or entry.id, -- item defs carry displayName, not name
 		rarity = def.rarity or 0,
 		color = Items.getRarity(def.rarity).color,
 		count = count,
@@ -145,12 +146,6 @@ function LootService.spawnDrop(position: Vector3, drop: any, ownerId: number?)
 		part:SetAttribute("DropSkill", drop.skill)
 	end
 	CollectionService:AddTag(part, "DropTooltip")
-
-	local light = Instance.new("PointLight")
-	light.Color = drop.color
-	light.Range = 8
-	light.Brightness = 1.5
-	light.Parent = part
 
 	local guiFolder = ReplicatedStorage:FindFirstChild("GUI")
 	local template = guiFolder and guiFolder:FindFirstChild("DropLabel")

@@ -312,8 +312,12 @@ function ItemDrops.spawn(opts: any): number?
 	model:SetAttribute("DropId", id)
 	model:SetAttribute("ItemId", rec.itemId)
 	model:SetAttribute("DropKind", "item")
-	model:SetAttribute("DropName", def and def.name or toolName)
+	model:SetAttribute("DropName", def and (def.displayName or def.name) or toolName)
 	model:SetAttribute("Rarity", def and def.rarity or 0)
+	local rarityDef = def and Items.getRarity(def.rarity)
+	if rarityDef and rarityDef.color then
+		model:SetAttribute("DropColor", rarityDef.color:ToHex()) -- the colour DropFXController glows in
+	end
 	model:SetAttribute("Phase", math.random() * math.pi * 2)
 	model:SetAttribute("Settled", false)
 	updateLabel(rec)
