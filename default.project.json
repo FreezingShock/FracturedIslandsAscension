@@ -297,6 +297,9 @@
         "DamageNumberController": {
           "$path": "src/Client/Combat/DamageNumberController.client.lua"
         },
+        "DropTooltipController": {
+          "$path": "src/Client/Inventory/DropTooltipController.client.lua"
+        },
         "EnemyNameplateController": {
           "$path": "src/Client/Combat/EnemyNameplateController.client.lua"
         },

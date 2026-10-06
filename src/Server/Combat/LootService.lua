@@ -10,12 +10,16 @@
 	XP: EnemyConfig.enemies[type].xp = { skill, amount } through SkillsDataManager.AddXP(killer, skill, amount, "Kill"),
 	with a chat line. Drops: each entry rolls its own chance (the killer's MagicFind multiplies it); pools pick by weight.
 
+	DropTooltipController (client) shows a card over every drop tagged "DropTooltip" (attributes DropKind, ItemId, Count,
+	Rarity, DropColor, DropSkill, DropName); the plain DropLabel hides while a card or chip is up.
+
 	A drop is an anchored glowing cube at the kill point with a name label (ReplicatedStorage.GUI.DropLabel, hand-restylable:
 	BillboardGui > Label). Only the killer can collect it for `OWNER_SECONDS`, then anyone; it despawns after `LIFETIME`.
 	Collecting is a server distance check (PICKUP_RADIUS studs): the client sends nothing. Items and armor go to
 	InventoryDataManager.AddItem (the drop stays when the inventory is full), stats to StatisticsDataManager.GrantStat.
 --]]
 
+local CollectionService = game:GetService("CollectionService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
@@ -75,6 +79,7 @@ local function describe(entry: any): any?
 		id = entry.id,
 		toolName = def.toolName,
 		name = def.name,
+		rarity = def.rarity or 0,
 		color = Items.getRarity(def.rarity).color,
 		count = count,
 	}
@@ -130,6 +135,16 @@ function LootService.spawnDrop(position: Vector3, drop: any, ownerId: number?)
 	part.Color = drop.color
 	part.Position = position + offset
 	part:SetAttribute("DropName", drop.name)
+	-- read-only description for DropTooltipController (client builds the card from these, sends nothing back)
+	part:SetAttribute("DropKind", drop.kind == "stat" and "stat" or "item")
+	part:SetAttribute("ItemId", drop.id)
+	part:SetAttribute("Count", drop.count)
+	part:SetAttribute("Rarity", drop.rarity or 0)
+	part:SetAttribute("DropColor", drop.color:ToHex())
+	if drop.skill then
+		part:SetAttribute("DropSkill", drop.skill)
+	end
+	CollectionService:AddTag(part, "DropTooltip")
 
 	local light = Instance.new("PointLight")
 	light.Color = drop.color

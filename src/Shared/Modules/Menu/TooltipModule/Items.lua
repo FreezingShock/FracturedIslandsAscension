@@ -6,6 +6,9 @@
 	tooltip template, so adding a new item field means editing this file.
 
 	  Items.fromTool(toolInfo)  -> config for TooltipModule.show()
+	  Items.fromDrop(info)      -> the SUMMARY of a dropped item for DropTooltipController (title, titleColor, stack, icon,
+	                               tags incl. a rarity tag even for Common, description); same mapping as fromTool, trimmed.
+	                               info = { kind = "item" | "stat", itemId, name, count, rarity, color (hex), skill }
 
 	toolInfo is the table the server sends per inventory slot:
 	  { name, displayName, count, rarity, description }
@@ -152,6 +155,46 @@ function Items.fromTool(toolInfo: any)
 	end
 
 	return config
+end
+
+--- Summary of a dropped item (see header). Reuses fromTool so a new item field shows up on drops with no extra code.
+function Items.fromDrop(info: any)
+	local count = tonumber(info.count) or 1
+	if info.kind == "stat" then
+		local color = info.color or "#FFFFFF"
+		local tags = { { text = "STAT", color = "#FFFFFF" } }
+		if info.skill then
+			table.insert(tags, { text = info.skill, color = Style.SKILL_COLORS[info.skill] or "#FFFFFF" })
+		end
+		return { title = info.name, titleColor = color, stack = count > 1 and count or nil, icon = { color = color }, tags = tags }
+	end
+
+	local reg = registry()
+	local def = reg and reg.get(info.itemId) or nil
+	local full = Items.fromTool({
+		toolName = def and def.toolName or nil,
+		name = info.name,
+		displayName = def and def.name or info.name,
+		count = count,
+		rarity = info.rarity,
+	})
+	local rarity = info.rarity or (def and def.rarity) or 0
+	local rarityConf = reg and reg.getRarity(rarity) or nil
+	local mainColor = (rarityConf and rarityConf.hexColor) or "#AAAAAA"
+	local tags = full.tags
+	if rarity == 0 and (not def or def.showRarityTag ~= false) then
+		table.insert(tags, 1, { text = rarityConf and rarityConf.name or "Common", color = mainColor })
+	end
+	return {
+		title = full.title,
+		titleColor = full.titleColor,
+		stack = full.stack,
+		icon = full.icon,
+		tags = tags,
+		description = full.description,
+		rarity = rarity,
+		dark = rarityConf and rarityConf.darkColor and Style.hex(rarityConf.darkColor) or Style.dark(mainColor),
+	}
 end
 
 return Items

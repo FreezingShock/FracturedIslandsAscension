@@ -311,11 +311,15 @@ function ItemDrops.spawn(opts: any): number?
 	body:SetAttribute("DropId", id)
 	model:SetAttribute("DropId", id)
 	model:SetAttribute("ItemId", rec.itemId)
+	model:SetAttribute("DropKind", "item")
+	model:SetAttribute("DropName", def and def.name or toolName)
+	model:SetAttribute("Rarity", def and def.rarity or 0)
 	model:SetAttribute("Phase", math.random() * math.pi * 2)
 	model:SetAttribute("Settled", false)
 	updateLabel(rec)
 	model.Parent = folder
 	CollectionService:AddTag(model, TAG)
+	CollectionService:AddTag(model, "DropTooltip") -- read by DropTooltipController (client), attributes above
 	body:SetNetworkOwner(nil)
 	if typeof(opts.velocity) == "Vector3" then
 		body.AssemblyLinearVelocity = opts.velocity

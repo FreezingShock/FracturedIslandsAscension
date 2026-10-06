@@ -15,6 +15,7 @@ restyling) unless you set `local FORCE = true` at the top.
 | `build_enemy_nameplate.luau` | `ReplicatedStorage.GUI.EnemyNameplate` (BillboardGui, NameLabel, Bar, Fill) | `EnemyNameplateController` |
 | `build_attack_bar.luau` | `ReplicatedStorage.GUI.AttackBar` (ScreenGui, Frame, Fill) | `AttackBarController` |
 | `build_drop_label.luau` | `ReplicatedStorage.GUI.DropLabel` (BillboardGui, Label) | `LootService` |
+| `build_drop_card.luau` | `ReplicatedStorage.GUI.DropCard` and `DropChip` (BillboardGui, cut from `TooltipMenu.Template`) | `DropTooltipController` |
 | `build_enemy_spawns.luau` | `Workspace.EnemySpawns` marker(s), attribute `EnemyType` | `EnemyService` |
 | `build_dummy.luau` | `ServerStorage.Dummy` (R6, straw coloured, 1000 hp) + `Workspace.DummySpawns` markers | `DummyService` |
 | `build_fiahud.luau` | `StarterGui.FIAHUD` (Root: tray, Stamina strip, Health/Mana panels, badge, hotbar frames, selector, arrow, Name) + the pixel `ReplicatedStorage.SlotTemplate` (old one kept as `SlotTemplate_Legacy`); `REMOVE_STATSMENU` deletes the old HUD | `ResourceBarsController`, `InventoryController`, `HeldItemNameController` |
