@@ -1,5 +1,5 @@
 -- build_fiahud_vines.luau
--- Grows the vines of StarterGui.FIAHUD.Root.Vines (ZIndex 10, above the hotbar slots, never blocks input): eight vines
+-- Grows the vines of StarterGui.FIAHUD.Root.Vines (ZIndex 10: above the dark brown background, below the hotbar slots, selector and arrow; never blocks input): eight vines
 -- along both edges of the HUD, each a stem of 4 px blocks with leaf sprites attached alternately. The left and right sides
 -- use different routes and seeds, so they differ. Same algorithm and seeds as the Figma file. Colours: HudTheme leaf*.
 -- Run on the Edit datamodel with the Studio MCP after build_fiahud.luau. Skips an existing Vines unless FORCE = true.

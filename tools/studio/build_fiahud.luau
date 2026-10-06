@@ -3,17 +3,18 @@
 -- ReplicatedStorage.Modules.Config.HudTheme):
 --   StarterGui.FIAHUD (ScreenGui, ResetOnSpawn off)
 --     Root (Frame 1088 x 276, flush with the screen bottom, UIScale)   ZIndex
---       Back     ribbons + HotbarTray (brown posts = the slot holders)                1
+--       Back     ribbons + HotbarTray (brown posts = the slot holders)                1   (dark brown background)
 --       Strip    CanvasGroup: Ledge, Left/Right (track + Segments > Segment1..8 > Fill)   2   (Stamina)
 --       (Strip, Wings, Stats, Badge and SelectorArrow are CanvasGroups: they fade out while a menu is open)
 --       Wings    ribbon tabs behind the badge                                         3
 --       Stats    CanvasGroup: Health / Mana panels (Bar.Fill, Value, ValueShadow, Icon) 4
 --       Badge    hexagon + Level (Nexus Level)                                        5
---       Hotbar   HotbarBB > HotbarFrames (UIListLayout; InventoryController fills it)  6
---       Selector lavender ring that InventoryController slides between slots          11 (above the vines)
---       SelectorArrow  green V above the selected slot; slides with the Selector      12 (above the vines)
---       Name     the held-item name group, moved from StatsMenu if it is still there  9
---       (Vines is added by build_fiahud_vines.luau)                                   10
+--       Vines    (build_fiahud_vines.luau) above the dark brown background            10
+--       Hotbar   HotbarBB > HotbarFrames (UIListLayout; InventoryController fills it)  11  (the slots sit ABOVE the vines)
+--       Selector lavender ring that InventoryController slides between slots          12
+--       SelectorArrow  green V above the selected slot; slides with the Selector      13
+--       Name     the held-item name group, moved from StatsMenu if it is still there  14
+--     The numbers live in the Z table below: change the stacking there only.
 --   ReplicatedStorage.SlotTemplate: the pixel item slot (the previous template is kept as SlotTemplate_Legacy).
 --     Children InventoryController and SlotLook use: Outline, Face, Highlight, Shade, Rarity (Bar, CL, CR), ItemImage,
 --     ToolName, StackNum, SlotNum, RarityLabel (hidden), Swap, Select.
@@ -27,6 +28,9 @@ local T = require(RS.Modules.Config.HudTheme:Clone()) -- a clone, so a stale req
 local C, P, H, TR, SL, ST, BD, NM = T.colors, T.resourcePanel, T.hud, T.tray, T.slot, T.strip, T.badge, T.name
 local FONT = Font.new(T.font, Enum.FontWeight.Regular, Enum.FontStyle.Normal)
 local out = {}
+
+-- ZIndex stacking of FIAHUD.Root's children (Sibling behaviour: higher draws on top; Vines uses 10 in build_fiahud_vines)
+local Z = { back = 1, strip = 2, wings = 3, stats = 4, badge = 5, vines = 10, hotbar = 11, selector = 12, arrow = 13, name = 14 }
 
 local function hex(h)
 	local n = tonumber(h:sub(2), 16)
@@ -384,7 +388,7 @@ local function buildHud()
 	scale.Parent = root
 
 	-- Back: ribbons + tray + posts
-	local back = z(frame(root, "Back", 0, 0, H.size.X, H.size.Y, nil), 1)
+	local back = z(frame(root, "Back", 0, 0, H.size.X, H.size.Y, nil), Z.back)
 	local RL = { { 0, 16, 0 }, { 16, 28, 8 }, { 28, 40, 16 }, { 40, 56, 24 }, { 56, 68, 16 }, { 68, 80, 8 }, { 80, 96, 0 } }
 	bandShape(back, "RibbonLeft", TR.ribbonLeftX, TR.ribbonY, TR.ribbonSize.X, TR.ribbonSize.Y, RL, false, true)
 	bandShape(back, "RibbonRight", TR.ribbonRightX, TR.ribbonY, TR.ribbonSize.X, TR.ribbonSize.Y, RL, true, true)
@@ -407,7 +411,7 @@ local function buildHud()
 	strip.BackgroundTransparency = 1
 	strip.BorderSizePixel = 0
 	strip.Size = UDim2.fromOffset(H.size.X, H.size.Y)
-	strip.ZIndex = 2
+	strip.ZIndex = Z.strip
 	strip.Parent = root
 	local led = frame(strip, "Ledge", ST.ledgePos.X, ST.ledgePos.Y, ST.ledgeSize.X, ST.ledgeSize.Y, nil)
 	frame(led, "Edge", 0, 0, ST.ledgeSize.X, ST.ledgeSize.Y, C.panelBorder)
@@ -417,7 +421,7 @@ local function buildHud()
 	track(strip, "Right", ST.rightX, ST.rightSegmentsX)
 
 	-- Wings (ribbon tabs behind the badge)
-	local wings = group(root, "Wings", 0, 0, H.size.X, H.size.Y, 3)
+	local wings = group(root, "Wings", 0, 0, H.size.X, H.size.Y, Z.wings)
 	local WB = { { 0, 8, 0 }, { 8, 16, 8 }, { 16, 24, 16 }, { 24, 32, 8 }, { 32, 40, 0 } }
 	bandShape(wings, "WingLeft", BD.wingLeftX, BD.wingY, BD.wingSize.X, BD.wingSize.Y, WB, false, true)
 	bandShape(wings, "WingRight", BD.wingRightX, BD.wingY, BD.wingSize.X, BD.wingSize.Y, WB, true, true)
@@ -428,13 +432,13 @@ local function buildHud()
 	stats.BackgroundTransparency = 1
 	stats.BorderSizePixel = 0
 	stats.Size = UDim2.fromOffset(H.size.X, H.size.Y)
-	stats.ZIndex = 4
+	stats.ZIndex = Z.stats
 	stats.Parent = root
 	panel(stats, "Health", H.healthPos, "health")
 	panel(stats, "Mana", H.manaPos, "mana")
 
 	-- Badge
-	local badge = group(root, "Badge", BD.pos.X, BD.pos.Y, BD.size.X, BD.size.Y, 5)
+	local badge = group(root, "Badge", BD.pos.X, BD.pos.Y, BD.size.X, BD.size.Y, Z.badge)
 	hexRows(badge, "Outline", 112, 128, 0, 0, C.badgeBorder)
 	hexRows(badge, "Rim", 104, 120, 4, 4, C.badgeWhite)
 	hexRows(badge, "Face", 104, 112, 4, 12, C.badgeFill)
@@ -448,7 +452,7 @@ local function buildHud()
 
 	-- Hotbar
 	local hotbarW = SL.count * SL.size + (SL.count - 1) * SL.gap
-	local hotbar = z(frame(root, "Hotbar", SL.hotbarPos.X, SL.hotbarPos.Y, hotbarW, SL.size, nil), 6)
+	local hotbar = z(frame(root, "Hotbar", SL.hotbarPos.X, SL.hotbarPos.Y, hotbarW, SL.size, nil), Z.hotbar)
 	local hbb = frame(hotbar, "HotbarBB", 0, 0, hotbarW, SL.size, nil)
 	local frames = frame(hbb, "HotbarFrames", 0, 0, hotbarW, SL.size, nil)
 	local list = Instance.new("UIListLayout")
@@ -461,7 +465,7 @@ local function buildHud()
 	-- Selector ring
 	local ring = SL.size + 2 * SL.selector.pad
 	local t = SL.selector.thickness
-	local selector = z(frame(root, "Selector", SL.hotbarPos.X - SL.selector.pad, SL.hotbarPos.Y - SL.selector.pad, ring, ring, nil), 11)
+	local selector = z(frame(root, "Selector", SL.hotbarPos.X - SL.selector.pad, SL.hotbarPos.Y - SL.selector.pad, ring, ring, nil), Z.selector)
 	local rc = C[SL.selector.colorKey]
 	frame(selector, "Top", t, 0, ring - 2 * t, t, rc)
 	frame(selector, "Bottom", t, ring - t, ring - 2 * t, t, rc)
@@ -469,7 +473,7 @@ local function buildHud()
 	frame(selector, "Right", ring - t, t, t, ring - 2 * t, rc)
 
 	-- Selector arrow (under the badge tip)
-	local arrow = group(root, "SelectorArrow", BD.arrowPos.X, BD.arrowPos.Y, BD.arrowSize.X, BD.arrowSize.Y, 12)
+	local arrow = group(root, "SelectorArrow", BD.arrowPos.X, BD.arrowPos.Y, BD.arrowSize.X, BD.arrowSize.Y, Z.arrow)
 	local rows = { { 0, 48 }, { 4, 40 }, { 8, 32 }, { 12, 24 }, { 16, 16 }, { 20, 8 } }
 	for i, r in ipairs(rows) do
 		frame(arrow, "O" .. i, r[1] - 4, (i - 1) * 4, r[2] + 8, 4, C.leafDark)
@@ -498,7 +502,7 @@ local function buildHud()
 	end
 	nameGroup.AnchorPoint = Vector2.new(0.5, 0)
 	nameGroup.Position = UDim2.fromOffset(NM.pos.X, NM.pos.Y)
-	nameGroup.ZIndex = 9
+	nameGroup.ZIndex = Z.name
 
 	gui.Parent = StarterGui
 	return "FIAHUD: built"
