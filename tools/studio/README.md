@@ -12,6 +12,8 @@ restyling) unless you set `local FORCE = true` at the top.
 |---|---|---|
 | `build_damage_number.luau` | `ReplicatedStorage.GUI.DamageNumber` (BillboardGui, Label, UIStroke, CritBadge) | `DamageNumberController` |
 | `build_ability_menu.luau` | `ReplicatedStorage.GUI.AbilitySlot` template + `StarterGui.AbilityMenu.Slots` | `AbilityController` |
+| `build_enemy_nameplate.luau` | `ReplicatedStorage.GUI.EnemyNameplate` (BillboardGui, NameLabel, Bar, Fill) | `EnemyNameplateController` |
+| `build_enemy_spawns.luau` | `Workspace.EnemySpawns` marker(s), attribute `EnemyType` | `EnemyService` |
 | `build_dummy.luau` | `ServerStorage.Dummy` (R6, straw coloured, 1000 hp) + `Workspace.DummySpawns` markers | `DummyService` |
 | `build_fiahud.luau` | `StarterGui.FIAHUD` (Root: tray, Stamina strip, Health/Mana panels, badge, hotbar frames, selector, arrow, Name) + the pixel `ReplicatedStorage.SlotTemplate` (old one kept as `SlotTemplate_Legacy`); `REMOVE_STATSMENU` deletes the old HUD | `ResourceBarsController`, `InventoryController`, `HeldItemNameController` |
 | `build_fiahud_vines.luau` | `FIAHUD.Root.Vines` (eight procedurally grown vines, differing per side) | none (decoration) |

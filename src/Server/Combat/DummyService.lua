@@ -63,6 +63,8 @@ local function spawnDummy(marker: BasePart)
 	dummy:PivotTo(marker.CFrame * CFrame.new(0, 3.1, 0)) -- an R6 root sits about 3 studs above the ground
 	dummy.Parent = workspace
 	CollectionService:AddTag(dummy, DamageService.TAG)
+	dummy:SetAttribute("EnemyType", "dummy") -- EnemyConfig key: its hit effects, sounds and nameplate
+	CollectionService:AddTag(dummy, "Enemy") -- the nameplate controller shows a health bar over every Enemy
 	root:SetNetworkOwner(nil) -- the server owns the physics, so knockback is the same for everyone
 	dummies[dummy] = marker.Position
 

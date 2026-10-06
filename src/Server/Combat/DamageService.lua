@@ -17,12 +17,14 @@
 	(see CombatConfig.damage). Strength / CritChance / CritIncrease = the player's stat chain value + the held weapon's own
 	stat of that name (weapon stats are not applied to the chain yet).
 
-	Each hit is broadcast on the WeaponHit remote so every client can show the impact (flash, number, sound).
+	Each hit is broadcast on the WeaponHit remote so every client can show the impact (flash, number, effects, sound):
+	{ target, crash (landing-swing Crash hit, primary or AoE), step (combo step, swings only), first (nearest target), position (number spot), point (contact on the body), dir (spray direction), enemyType, damage, isCrit,
+	killed, attacker, weaponType, weaponId }. EnemyType is a model attribute (EnemyConfig key).
 
-	  DamageService.swing(player, stepIndex, weaponId, weaponStats)        a combo step (cone from CombatConfig)
+	  DamageService.swing(player, stepIndex, weaponId, weaponStats, crash?)  a combo step (cone from CombatConfig)
 	  DamageService.strike(player, ability, weaponId, weaponStats) -> n    an ability hit (circle / cone / line, AbilityConfig)
 	  DamageService.query(character, origin, facing, shape) -> hits        the shared target query
-	  DamageService.compute(player, weaponStats, weaponId, step, forceCrit?) -> amount, isCrit
+	  DamageService.compute(player, weaponStats, weaponId, step, forceCrit?, crash?) -> amount, isCrit
 	  DamageService.TAG
 --]]
 
@@ -62,7 +64,7 @@ local function stat(player: Player, weaponId: string, key: string): number
 	return (tonumber(AttributeStatManager.GetFinalValue(player, key)) or 0) + weaponStat(weaponId, key)
 end
 
-function DamageService.compute(player: Player, weaponStats: any, weaponId: string, step: any, forceCrit: boolean?): (number, boolean)
+function DamageService.compute(player: Player, weaponStats: any, weaponId: string, step: any, forceCrit: boolean?, crash: boolean?): (number, boolean)
 	local base = ((weaponStats.baseDamage or 0) + DAMAGE.flatBase)
 		* (1 + stat(player, weaponId, "Strength") * DAMAGE.strengthScale)
 		* (step.damageMult or 1)
@@ -76,6 +78,9 @@ function DamageService.compute(player: Player, weaponStats: any, weaponId: strin
 	end
 	if isCrit then
 		base *= 1 + (DAMAGE.critBase + stat(player, weaponId, "CritIncrease")) * DAMAGE.critScale
+	end
+	if crash then
+		base *= CombatConfig.crash.damageMult -- after the crit multiplier: a crash crit is the strongest hit
 	end
 	return math.max(1, math.floor(base + 0.5)), isCrit
 end
@@ -160,12 +165,32 @@ local function casterFrame(player: Player): (Model?, Vector3?, Vector3?)
 	return character, root.Position, facing.Unit
 end
 
+local contactParams = RaycastParams.new()
+contactParams.FilterType = Enum.RaycastFilterType.Include
+
+--- Where the hit lands on the target's body: a ray from the attacker's side toward a random spot on the torso (so
+--- repeated hits do not stack on one pixel) stops on the nearest surface. Returns that point and the direction the
+--- effect should spray (back toward the attacker, leaning on the surface normal).
+local function contactOf(from: Vector3, hit: any): (Vector3, Vector3)
+	local center = hit.root.Position
+	local toward = from - center
+	local dir = toward.Magnitude > 0.05 and toward.Unit or Vector3.yAxis
+	local aim = center + Vector3.new((math.random() - 0.5) * 1.2, (math.random() - 0.5) * 1.6, (math.random() - 0.5) * 1.2)
+	contactParams.FilterDescendantsInstances = { hit.model }
+	local result = workspace:Raycast(aim + dir * 8, -dir * 16, contactParams)
+	if result then
+		return result.Position, (dir * 0.65 + result.Normal * 0.35).Unit
+	end
+	return aim + dir * (radiusOf(hit.model) * 0.8), dir
+end
+
 --- Damage, knock back and broadcast every target of `hits` (from query). `hitInfo` = { damageMult, knockback, maxTargets }.
-local function applyHits(player: Player, hits: { any }, hitInfo: any, facing: Vector3, weaponId: string, weaponStats: any): number
+--- `from` = where the blow comes from (the swinger, or an ability's fixed origin): effects spray back toward it.
+local function applyHits(player: Player, hits: { any }, hitInfo: any, facing: Vector3, weaponId: string, weaponStats: any, from: Vector3, stepIndex: number?, crash: boolean?): number
 	local count = math.min(#hits, hitInfo.maxTargets or 1)
 	for i = 1, count do
 		local hit = hits[i]
-		local amount, isCrit = DamageService.compute(player, weaponStats, weaponId, hitInfo)
+		local amount, isCrit = DamageService.compute(player, weaponStats, weaponId, hitInfo, nil, crash)
 		hit.humanoid:TakeDamage(amount)
 		DamageTracker.record(player, amount)
 		hit.model:SetAttribute("LastHit", os.clock())
@@ -179,9 +204,16 @@ local function applyHits(player: Player, hits: { any }, hitInfo: any, facing: Ve
 		end
 
 		local head = hit.model:FindFirstChild("Head") :: BasePart?
+		local point, dir = contactOf(from, hit)
 		WeaponHitEvent:FireAllClients({
 			target = hit.model,
-			position = (head and head.Position or hit.root.Position) + Vector3.new(0, 1, 0),
+			position = (head and head.Position or hit.root.Position) + Vector3.new(0, 1, 0), -- the damage number
+			point = point, -- where the blow landed on the body (impact effects)
+			dir = dir, -- unit vector the effects spray along
+			step = stepIndex, -- combo step for a swing (the client plays that step's attack sound once, on the first target)
+			first = i == 1,
+			crash = crash == true, -- a falling-swing Crash hit (red style; damage already x CombatConfig.crash.damageMult)
+			enemyType = hit.model:GetAttribute("EnemyType"), -- EnemyConfig key (nil = default)
 			damage = amount,
 			isCrit = isCrit,
 			killed = hit.humanoid.Health <= 0,
@@ -193,7 +225,7 @@ local function applyHits(player: Player, hits: { any }, hitInfo: any, facing: Ve
 	return count
 end
 
-function DamageService.swing(player: Player, stepIndex: number, weaponId: string, weaponStats: any)
+function DamageService.swing(player: Player, stepIndex: number, weaponId: string, weaponStats: any, crash: boolean?)
 	local typeConfig = CombatConfig.get(weaponStats and weaponStats.weaponType)
 	local step = typeConfig and typeConfig.steps[stepIndex]
 	local character, origin, facing = casterFrame(player)
@@ -201,7 +233,34 @@ function DamageService.swing(player: Player, stepIndex: number, weaponId: string
 		return
 	end
 	local hits = DamageService.query(character, origin, facing, { kind = "cone", reach = step.reach, arc = step.arc })
-	applyHits(player, hits, step, facing, weaponId, weaponStats)
+	if not crash then
+		applyHits(player, hits, step, facing, weaponId, weaponStats, origin, stepIndex)
+		return
+	end
+
+	-- Crash hit: the nearest enemy in the cone takes the full hit (x damageMult), everything else within aoeRadius of it
+	-- takes the AoE share. With nothing in the cone there is no hit and no AoE.
+	local primary = hits[1]
+	if not primary then
+		return
+	end
+	local config = CombatConfig.crash
+	applyHits(player, { primary }, step, facing, weaponId, weaponStats, origin, stepIndex, true)
+	local center = primary.root.Position
+	local around = {}
+	for _, other in ipairs(DamageService.query(character, center, facing, { kind = "circle", radius = config.aoeRadius, lineOfSight = false })) do
+		if other.model ~= primary.model then
+			table.insert(around, other)
+		end
+	end
+	if #around > 0 then
+		local aoeInfo = {
+			damageMult = (step.damageMult or 1) * DAMAGE.aoeMult,
+			knockback = (step.knockback or 0) * config.aoeKnockbackMult,
+			maxTargets = config.aoeMaxTargets,
+		}
+		applyHits(player, around, aoeInfo, facing, weaponId, weaponStats, center, nil, true) -- no step: no second attack sound
+	end
 end
 
 --- An ability's hit: everything inside `ability.shape` around `fixedOrigin` (default: the caster's position). The shape
@@ -213,7 +272,7 @@ function DamageService.strike(player: Player, ability: any, weaponId: string, we
 		return 0
 	end
 	local hits = DamageService.query(character, fixedOrigin or origin, facing, ability.shape)
-	return applyHits(player, hits, ability, facing, weaponId, weaponStats)
+	return applyHits(player, hits, ability, facing, weaponId, weaponStats, fixedOrigin or origin)
 end
 
 return DamageService

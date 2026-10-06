@@ -6,7 +6,7 @@
 	per-weapon overrides); this module only loads, caches and plays tracks. Entries without an id play nothing.
 	Tracks played by the owning client replicate to everyone else, so only the local player's client calls this.
 
-	  CombatAnimator.play(character, weaponType, stepIndex, attackSpeed, weaponId?) -> AnimationTrack?   combo step
+	  CombatAnimator.play(character, weaponType, stepIndex, attackSpeed, weaponId?, crash?) -> AnimationTrack?   combo step
 	  CombatAnimator.playSlot(character, weaponType, slot, weaponId?, speed?)       -> AnimationTrack?   "equip", "idle", ...
 	  CombatAnimator.playKey(character, key, speed?)                                -> AnimationTrack?   one library key (abilities)
 	  CombatAnimator.stopSlot(character, slot)
@@ -55,7 +55,7 @@ local function trackFor(animator: Animator, mine: any, key: string, entry: any):
 	return track
 end
 
-function CombatAnimator.play(character: Model, weaponType: string, stepIndex: number, attackSpeed: number?, weaponId: string?): AnimationTrack?
+function CombatAnimator.play(character: Model, weaponType: string, stepIndex: number, attackSpeed: number?, weaponId: string?, crash: boolean?): AnimationTrack?
 	local animator = getAnimator(character)
 	if not animator then
 		return nil
@@ -65,7 +65,7 @@ function CombatAnimator.play(character: Model, weaponType: string, stepIndex: nu
 		mine.current:Stop(0.08)
 		mine.current = nil
 	end
-	local entry, key = CombatConfig.stepAnimation(weaponType, stepIndex, weaponId)
+	local entry, key = CombatConfig.stepAnimation(weaponType, stepIndex, weaponId, crash)
 	local track = key and trackFor(animator, mine, key, entry)
 	if not track then
 		return nil

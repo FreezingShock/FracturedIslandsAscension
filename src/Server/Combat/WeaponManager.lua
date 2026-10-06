@@ -18,6 +18,7 @@
 -- ============================================================
 
 local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
 local ServerScriptService = game:GetService("ServerScriptService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Modules = ReplicatedStorage:WaitForChild("Modules")
@@ -48,7 +49,7 @@ local EquipWeaponEvent = ensureRemote("RemoteEvent", "EquipWeapon")
 local UnequipWeaponEvent = ensureRemote("RemoteEvent", "UnequipWeapon")
 ensureRemote("RemoteEvent", "WeaponHit") -- DamageService broadcasts every hit on it: (target, position, damage, isCrit, ...)
 local UpdateWeaponStatsEvent = ensureRemote("RemoteEvent", "UpdateWeaponStats")
-local SwordSwingEvent = ensureRemote("RemoteEvent", "SwordSwing") -- client -> server: "I clicked"; server -> clients: (player, step, speed)
+local SwordSwingEvent = ensureRemote("RemoteEvent", "SwordSwing") -- client -> server: "I clicked"; server -> clients: (player, step, speed, weaponType, weaponId, crash)
 
 -- ===================== RUNTIME STATE =====================
 -- [userId] = { weaponId, toolInstance, stats, abilities }
@@ -57,15 +58,19 @@ local playerWeapons = {}
 -- [userId] = { step, busyUntil, expiresAt, ticket, slowed, baseSpeed }
 local combos = {}
 local SWING_SLACK = 0.1 -- network jitter allowance when a swing arrives just before the previous one has ended
+-- [userId] = { at = os.clock() of a click made in the air, grounded = consecutive frames on the ground } waiting for the
+-- landing (the Crash hit); see WeaponManager.Click
+local queued = {}
+local LANDED_FRAMES = 3 -- frames on the ground in a row that count as having landed
 
 --- Called at each accepted swing's hit frame: the hit is only resolved if the same weapon is still held (a weapon
 --- switch or reset in between cancels it). Replace `WeaponManager.onSwingHit` to change what a swing does.
-WeaponManager.onSwingHit = function(player, stepIndex, weaponId)
+WeaponManager.onSwingHit = function(player, stepIndex, weaponId, crash)
 	local state = playerWeapons[player.UserId]
 	if not state or state.weaponId ~= weaponId then
 		return
 	end
-	DamageService.swing(player, stepIndex, weaponId, state.stats)
+	DamageService.swing(player, stepIndex, weaponId, state.stats, crash)
 end
 
 -- ===================== HELPERS =====================
@@ -131,12 +136,15 @@ local function resetCombo(player)
 	c.step = 0
 	c.busyUntil = 0
 	c.expiresAt = 0
+	queued[player.UserId] = nil
 	restoreWalkSpeed(player, c)
 	player:SetAttribute("ComboStep", 0)
 end
 
---- A click with the held weapon. Returns (accepted, stepIndex).
-function WeaponManager.TrySwing(player): (boolean, number?)
+--- A swing with the held weapon. `crash` = the queued landing swing of a click made in the air: it ignores the swing lock
+--- (WeaponManager.Click checked it), uses CombatConfig.crash.step, never slows the walk, and hits as a Crash.
+--- Returns (accepted, stepIndex).
+function WeaponManager.TrySwing(player, crash: boolean?): (boolean, number?)
 	local weapon = playerWeapons[player.UserId]
 	local typeConfig = weapon and CombatConfig.get(weapon.config.weaponType)
 	local character = player.Character
@@ -150,12 +158,16 @@ function WeaponManager.TrySwing(player): (boolean, number?)
 
 	local c = getCombo(player)
 	local now = os.clock()
-	if now < c.busyUntil - SWING_SLACK then
+	if not crash and now < c.busyUntil - SWING_SLACK then
 		return false, nil -- still swinging
 	end
 
 	local stepCount = #typeConfig.steps
 	local stepIndex = (c.step >= stepCount or now > c.expiresAt) and 1 or c.step + 1
+	if crash then
+		local wanted = CombatConfig.crash.step
+		stepIndex = math.clamp(wanted == "last" and stepCount or tonumber(wanted) or stepCount, 1, stepCount)
+	end
 	local step = typeConfig.steps[stepIndex]
 	local speed = math.max(0.5, weapon.stats.attackSpeed or 1)
 	local swingTime = CombatConfig.swingTime(step, speed)
@@ -167,16 +179,18 @@ function WeaponManager.TrySwing(player): (boolean, number?)
 	c.expiresAt = c.busyUntil + typeConfig.comboWindow
 	player:SetAttribute("ComboStep", stepIndex)
 
-	-- slower walking while swinging (the finisher is heavier)
-	c.slowed = true
-	MovementService.SetFactor(player, "combat", stepIndex == stepCount and typeConfig.finisherMoveSpeedFactor or typeConfig.moveSpeedFactor)
+	-- slower walking while swinging (the finisher is heavier); a Crash never slows you
+	if not crash then
+		c.slowed = true
+		MovementService.SetFactor(player, "combat", stepIndex == stepCount and typeConfig.finisherMoveSpeedFactor or typeConfig.moveSpeedFactor)
+	end
 
-	SwordSwingEvent:FireAllClients(player, stepIndex, speed, weapon.config.weaponType, weapon.weaponId)
+	SwordSwingEvent:FireAllClients(player, stepIndex, speed, weapon.config.weaponType, weapon.weaponId, crash == true)
 
 	task.delay(step.hitFrame / speed, function()
 		local hook = (WeaponManager :: any).onSwingHit
 		if hook and c.ticket == ticket then
-			hook(player, stepIndex, weapon.weaponId)
+			hook(player, stepIndex, weapon.weaponId, crash == true)
 		end
 	end)
 	task.delay(swingTime, function()
@@ -193,10 +207,43 @@ function WeaponManager.TrySwing(player): (boolean, number?)
 	return true, stepIndex
 end
 
+--- A click. On the ground it is a normal swing; in the air (nothing under the humanoid) it is queued, one per jump, and
+--- the swing plays when the player lands (the Crash hit, CombatConfig.crash). Movement is never locked while waiting.
+function WeaponManager.Click(player)
+	local character = player.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	if humanoid and humanoid.Health > 0 and humanoid.FloorMaterial == Enum.Material.Air then
+		if playerWeapons[player.UserId] and not queued[player.UserId] then
+			queued[player.UserId] = { at = os.clock(), grounded = 0 }
+		end
+		return
+	end
+	WeaponManager.TrySwing(player)
+end
+
+RunService.Heartbeat:Connect(function()
+	local now = os.clock()
+	for userId, wait in pairs(queued) do
+		local player = Players:GetPlayerByUserId(userId)
+		local character = player and player.Character
+		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+		if not (player and humanoid and playerWeapons[userId]) or humanoid.Health <= 0 or now - wait.at > CombatConfig.crash.queueSeconds then
+			queued[userId] = nil -- gone, dead, weapon changed, or still airborne too long
+		else
+			-- landed = on the ground for a few frames in a row (the replicated floor state flickers for a moment)
+			wait.grounded = humanoid.FloorMaterial ~= Enum.Material.Air and wait.grounded + 1 or 0
+			if wait.grounded >= LANDED_FRAMES and now >= getCombo(player).busyUntil - SWING_SLACK then
+				queued[userId] = nil
+				WeaponManager.TrySwing(player, true)
+			end
+		end
+	end
+end)
+
 local swingAllowed = RateLimiter.new(8, 6)
 SwordSwingEvent.OnServerEvent:Connect(function(player)
 	if swingAllowed(player) then
-		WeaponManager.TrySwing(player)
+		WeaponManager.Click(player)
 	end
 end)
 

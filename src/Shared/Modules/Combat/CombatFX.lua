@@ -10,9 +10,10 @@
 	Runs locally on every client: the swinger's client calls it at once, and the other clients call it when the server
 	broadcasts SwordSwing. (Animations replicate by themselves; trails and sounds do not.)
 
-	  CombatFX.swing(character, weaponType, stepIndex, attackSpeed, weaponId?)   trail window + sound + burst for one swing
+	  CombatFX.swing(character, weaponType, stepIndex, attackSpeed, weaponId?)   trail window + burst for one swing (its sound plays on a hit: hitSound)
 	  CombatFX.equip(character, weaponType, weaponId?)                           equip sound
-	  CombatFX.impact(position, weaponType, weaponId?)                           reserved for the damage system
+	  CombatFX.impact(position, weaponType, weaponId?)                           the weapon's `impact` slot sound at a hit
+	CombatFX.playAt(position, entry)                                           any sound entry, 3D at a world position
 	  CombatFX.stop(character)                                                   trail off (unequip, death)
 	  CombatFX.preload()                                                         load every configured sound
 --]]
@@ -147,16 +148,6 @@ function CombatFX.swing(character: Model, weaponType: string, stepIndex: number,
 	end
 	local speed = math.max(0.5, attackSpeed or 1)
 
-	-- sound
-	local soundEntry = CombatConfig.stepSound(weaponType, stepIndex, weaponId)
-	if soundEntry then
-		task.delay((step.soundAt or 0) / speed, function()
-			if handle.Parent then
-				playSound(handle, soundEntry)
-			end
-		end)
-	end
-
 	-- trail window + burst at the hit frame
 	local fx, fxKey = CombatConfig.fxFor(weaponType, weaponId)
 	local rig = fx and ensureRig(character, tool, fx, fxKey)
@@ -187,6 +178,12 @@ function CombatFX.swing(character: Model, weaponType: string, stepIndex: number,
 	end
 end
 
+--- The swing's attack sound (steps[i].sound, or critSound on a crit), 3D at the point the blow landed. Played only for
+--- a swing that hit something, from the WeaponHit broadcast, never on a miss.
+function CombatFX.hitSound(position: Vector3, weaponType: string, stepIndex: number, weaponId: string?, isCrit: boolean)
+	CombatFX.playAt(position, (CombatConfig.stepSound(weaponType, stepIndex, weaponId, isCrit)))
+end
+
 function CombatFX.equip(character: Model, weaponType: string, weaponId: string?)
 	local tool = character and toolOf(character)
 	local handle = tool and tool:FindFirstChild("Handle")
@@ -195,9 +192,9 @@ function CombatFX.equip(character: Model, weaponType: string, weaponId: string?)
 	end
 end
 
-function CombatFX.impact(position: Vector3, weaponType: string, weaponId: string?)
-	local entry = CombatConfig.slotSound(weaponType, "impact", weaponId)
-	if not entry then
+--- A 3D sound entry ({ id, volume, pitch, minDistance, maxDistance }) played at a world position; silent for an empty id.
+function CombatFX.playAt(position: Vector3, entry: any)
+	if not (entry and entry.id and entry.id ~= "") then
 		return
 	end
 	local anchor = Instance.new("Part")
@@ -206,6 +203,10 @@ function CombatFX.impact(position: Vector3, weaponType: string, weaponId: string
 	anchor.Parent = workspace
 	playSound(anchor, entry)
 	Debris:AddItem(anchor, 4)
+end
+
+function CombatFX.impact(position: Vector3, weaponType: string, weaponId: string?)
+	CombatFX.playAt(position, CombatConfig.slotSound(weaponType, "impact", weaponId))
 end
 
 function CombatFX.stop(character: Model)
@@ -219,12 +220,15 @@ end
 
 function CombatFX.preload()
 	local assets, seen = {}, {}
-	for _, entry in pairs(CombatConfig.sounds) do
-		if entry.id and entry.id ~= "" and not seen[entry.id] then
-			seen[entry.id] = true
-			local sound = Instance.new("Sound")
-			sound.SoundId = entry.id
-			table.insert(assets, sound)
+	local EnemyConfig = require(script.Parent:WaitForChild("EnemyConfig")) :: any
+	for _, library in ipairs({ CombatConfig.sounds, EnemyConfig.sounds }) do
+		for _, entry in pairs(library) do
+			if entry.id and entry.id ~= "" and not seen[entry.id] then
+				seen[entry.id] = true
+				local sound = Instance.new("Sound")
+				sound.SoundId = entry.id
+				table.insert(assets, sound)
+			end
 		end
 	end
 	task.spawn(function()

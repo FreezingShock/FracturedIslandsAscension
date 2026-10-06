@@ -5,6 +5,7 @@
 	Shows what a hit looks like, for every player's hits (the server broadcasts each one on the WeaponHit remote):
 	  * a white flash (Highlight) on the target
 	  * the weapon's `impact` slot sound at the hit point (CombatConfig; silent until an id is set)
+	  * the enemy's hit / crit / death effects and sounds at the contact point (EnemyFX, styled by EnemyConfig)
 	  * a floating damage number cloned from the hand-made template ReplicatedStorage.GUI.DamageNumber
 	    (BillboardGui > Label + UIStroke; restyle it in Studio). Crits use CombatConfig.hit.crit colours and size.
 	No UI is built here: the script only clones the template and sets its text, colours and motion.
@@ -17,6 +18,7 @@ local Debris = game:GetService("Debris")
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local CombatConfig = require(Modules:WaitForChild("CombatConfig")) :: any
 local CombatFX = require(Modules:WaitForChild("CombatFX")) :: any
+local EnemyFX = require(Modules:WaitForChild("EnemyFX")) :: any
 
 local WeaponHit = ReplicatedStorage:WaitForChild("WeaponHit")
 local template = ReplicatedStorage:WaitForChild("GUI"):WaitForChild("DamageNumber") :: BillboardGui
@@ -53,8 +55,8 @@ local function flash(model: Model)
 	end)
 end
 
-local function spawnNumber(position: Vector3, amount: number, isCrit: boolean)
-	local style = isCrit and HIT.crit or HIT.normal
+local function spawnNumber(position: Vector3, amount: number, isCrit: boolean, isCrash: boolean)
+	local style = isCrash and HIT.crash or isCrit and HIT.crit or HIT.normal
 	local spread = HIT.numberSpread
 	local anchor = Instance.new("Part")
 	anchor.Name = "DamageNumberAnchor"
@@ -113,9 +115,14 @@ WeaponHit.OnClientEvent:Connect(function(data)
 	if type(data) ~= "table" or typeof(data.position) ~= "Vector3" or type(data.damage) ~= "number" then
 		return
 	end
-	spawnNumber(data.position, data.damage, data.isCrit == true)
+	spawnNumber(data.position, data.damage, data.isCrit == true, data.crash == true)
 	if typeof(data.target) == "Instance" and data.target:IsA("Model") then
 		flash(data.target)
 	end
 	CombatFX.impact(data.position, data.weaponType, data.weaponId)
+	-- the swing's attack sound: only when it hit, once per swing (the nearest target), crit variant on a crit
+	if type(data.step) == "number" and data.first == true and type(data.weaponType) == "string" then
+		CombatFX.hitSound(typeof(data.point) == "Vector3" and data.point or data.position, data.weaponType, data.step, data.weaponId, data.isCrit == true)
+	end
+	EnemyFX.hit(data)
 end)

@@ -212,6 +212,16 @@ local function onAttackInput()
 	if not comboAllowed() then
 		return
 	end
+	-- a click in the air plays nothing now: the server holds the swing until we land (Crash hit) and then broadcasts it
+	local humanoid = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
+	if humanoid and humanoid.FloorMaterial == Enum.Material.Air then
+		local now = os.clock()
+		if not (combo.awaitUntil and now < combo.awaitUntil) then
+			combo.awaitUntil = now + CombatConfig.crash.queueSeconds + 0.5
+			SwordSwingEvent:FireServer()
+		end
+		return
+	end
 	local typeConfig = CombatConfig.get(currentWeapon.weaponType)
 	local now = os.clock()
 	if now >= combo.busyUntil then
@@ -240,9 +250,23 @@ end)
 
 -- our own authoritative step. Other players' animations replicate by themselves, but their trail and sound are local
 -- effects, so each client plays those from the server's broadcast.
-SwordSwingEvent.OnClientEvent:Connect(function(swinger, stepIndex, speed, weaponType, weaponId)
+SwordSwingEvent.OnClientEvent:Connect(function(swinger, stepIndex, speed, weaponType, weaponId, crash)
 	if swinger == player then
 		combo.step = stepIndex -- the server's step wins
+		-- a swing we did not animate ourselves (the landing swing of a click made in the air): play it now
+		local waiting = combo.awaitUntil ~= nil and os.clock() < combo.awaitUntil
+		local typeConfig = CombatConfig.get(weaponType)
+		local step = typeConfig and typeConfig.steps[stepIndex]
+		if (crash == true or waiting) and step and player.Character then
+			combo.awaitUntil = nil
+			local now = os.clock()
+			combo.busyUntil = now + CombatConfig.swingTime(step, speed)
+			combo.expiresAt = combo.busyUntil + typeConfig.comboWindow
+			combo.buffered = false
+			faceCursor()
+			CombatAnimator.play(player.Character, weaponType, stepIndex, speed, weaponId, crash == true)
+			CombatFX.swing(player.Character, weaponType, stepIndex, speed, weaponId)
+		end
 	elseif swinger and swinger.Character then
 		CombatFX.swing(swinger.Character, weaponType, stepIndex, speed, weaponId)
 	end

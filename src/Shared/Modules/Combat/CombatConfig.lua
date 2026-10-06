@@ -38,8 +38,8 @@
 	FX AND SOUND (same layering: library -> type -> per-weapon override)
 	  CombatConfig.sounds[key] = { id, volume, pitch = {min, max} }   id "" = silent; ids can be rbxassetid:// or rbxasset://
 	  CombatConfig.fx[key]     = { trail = {...}, burst = {...} }      the swing trail ribbon and the spark burst
-	  steps[i].sound / soundAt        sound key played soundAt seconds into the swing (at attack speed 1; scales with it)
-	                                  the attack sounds are ~0.09s accents, so soundAt sits just before hitFrame
+	  steps[i].sound / critSound      sound keys played when the swing HITS something (not on a miss): the normal one, or the
+	                                  crit one when that hit was a crit (falls back to `sound` when no critSound)
 	  steps[i].trail = { from, to }   seconds (at attack speed 1) the trail ribbon is visible
 	  type.fx                          fx key every weapon of the type uses
 	  type.slotSounds[name]            sound key for a situation ("equip", later "impact", ...)
@@ -49,9 +49,9 @@
 	API
 	  CombatConfig.get(weaponType)                          -> type config or nil
 	  CombatConfig.swingTime(step, attackSpeed)             -> seconds a swing locks the player for
-	  CombatConfig.stepAnimation(type, stepIndex, weaponId) -> library entry or nil (override first, then type)
+	  CombatConfig.stepAnimation(type, stepIndex, weaponId, crash?) -> library entry or nil (crash slam first, override, then type)
 	  CombatConfig.slotAnimation(type, slot, weaponId)      -> library entry or nil
-	  CombatConfig.stepSound(type, stepIndex, weaponId)     -> sound entry or nil
+	  CombatConfig.stepSound(type, stepIndex, weaponId, crit?) -> sound entry or nil
 	  CombatConfig.slotSound(type, slot, weaponId)          -> sound entry or nil
 	  CombatConfig.fxFor(type, weaponId)                    -> fx entry (and its key) or nil
 	  CombatConfig.types()                                  -> list of weaponType strings that have a config
@@ -82,6 +82,27 @@ CombatConfig.damage = {
 	critChanceCap = 100,
 	verticalTolerance = 7, -- studs above / below the swinger a target may be and still be hit
 	lineOfSight = true, -- a wall between swinger and target blocks the hit
+	aoeMult = 0.33, -- the damage share of anything hit by an AoE rather than directly (Crash hit AoE; future AoEs)
+}
+
+-- CRASH HIT: click while airborne and the swing is held back until you land (movement is never locked in the air);
+-- on landing it plays and hits as a Crash. The server decides all of it (WeaponManager.Click / TrySwing).
+--   step             combo step whose timings (and animation, when no dedicated one) a crash uses: "last" or a number
+--   animation        key in CombatConfig.animations for a dedicated ground-slam; an empty id = the step's own animation
+--   queueSeconds     a click in the air waits at most this long for the landing, then is dropped
+--   damageMult       x final damage, after the crit multiplier (a crash can also crit)
+--   aoeRadius        studs around the primary target (the nearest enemy in the swing's cone); others in it take the AoE share
+--   aoeMaxTargets / aoeKnockbackMult   how many others are hit, and their knockback relative to the swing's
+-- The AoE damage share is CombatConfig.damage.aoeMult (33%, the shared rule for any AoE). Look: hit.crash below +
+-- EnemyConfig.fx.hit_crash.
+CombatConfig.crash = {
+	step = "last",
+	animation = "sword_crash",
+	queueSeconds = 1.5,
+	damageMult = 1.25,
+	aoeRadius = 8,
+	aoeMaxTargets = 8,
+	aoeKnockbackMult = 0.5,
 }
 
 CombatConfig.hit = {
@@ -96,6 +117,11 @@ CombatConfig.hit = {
 	crit = {
 		color = "#5555FF", stroke = "#0000AA", scale = 1.45,
 		badge = { color = "#0000AA", transparency = 0.45 },
+	},
+	-- crash: the crit layout in red (it wins over the blue crit when a hit is both)
+	crash = {
+		color = "#FF5555", stroke = "#AA0000", scale = 1.45, prefix = "Crash",
+		badge = { color = "#AA0000", transparency = 0.45 },
 	},
 }
 
@@ -114,6 +140,9 @@ CombatConfig.animations = {
 	sword_combo3 = { id = "rbxassetid://107854592014324", priority = "Action", fade = 0.06 }, -- fence jab
 	sword_combo4 = { id = "rbxassetid://92264070348960", priority = "Action", fade = 0.06 }, -- overhead slash
 
+	-- the Crash hit's dedicated ground-slam (CombatConfig.crash.animation); empty = the crash uses the last combo step's animation
+	sword_crash = { id = "", priority = "Action", fade = 0.06 },
+
 	-- situations (no animation yet; fill in an id and it plays)
 	sword_equip = { id = "", priority = "Action", fade = 0.1 },
 	sword_idle = { id = "", priority = "Idle", fade = 0.2, looped = true },
@@ -128,6 +157,11 @@ CombatConfig.sounds = {
 	sword_atk2 = { id = "rbxassetid://83101665211645", volume = 0.8, pitch = { 0.97, 1.03 }, minDistance = 12, maxDistance = 90 },
 	sword_atk3 = { id = "rbxassetid://109876336137523", volume = 0.8, pitch = { 0.97, 1.03 }, minDistance = 12, maxDistance = 90 },
 	sword_atk4 = { id = "rbxassetid://120264723935510", volume = 0.9, pitch = { 0.97, 1.03 }, minDistance = 14, maxDistance = 100 },
+	-- the same four steps when the hit is a crit (they replace the normal one; steps[i].critSound)
+	sword_crit1 = { id = "rbxassetid://97881726980530", volume = 0.9, pitch = { 0.97, 1.03 }, minDistance = 14, maxDistance = 100 },
+	sword_crit2 = { id = "rbxassetid://82383170249566", volume = 0.9, pitch = { 0.97, 1.03 }, minDistance = 14, maxDistance = 100 },
+	sword_crit3 = { id = "rbxassetid://127769468592171", volume = 0.9, pitch = { 0.97, 1.03 }, minDistance = 14, maxDistance = 100 },
+	sword_crit4 = { id = "rbxassetid://90751268932745", volume = 1.0, pitch = { 0.97, 1.03 }, minDistance = 16, maxDistance = 110 },
 	sword_equip = { id = "rbxasset://sounds/unsheath.wav", volume = 0.45, pitch = { 0.95, 1.05 } },
 	sword_impact = { id = "", volume = 0.7, pitch = { 0.9, 1.1 } }, -- reserved for the damage system
 }
@@ -169,16 +203,16 @@ CombatConfig.sword = {
 	steps = {
 		{ name = "SlashDownLeft", animation = "sword_combo1", duration = 0.50, hitFrame = 0.20, recovery = 0.05,
 			reach = 9, arc = 130, damageMult = 1.0, knockback = 14, maxTargets = 4,
-			sound = "sword_atk1", soundAt = 0.17, trail = { from = 0.10, to = 0.36 } },
+			sound = "sword_atk1", critSound = "sword_crit1", trail = { from = 0.10, to = 0.36 } },
 		{ name = "SlashDownRight", animation = "sword_combo2", duration = 0.50, hitFrame = 0.20, recovery = 0.05,
 			reach = 9, arc = 130, damageMult = 1.0, knockback = 14, maxTargets = 4,
-			sound = "sword_atk2", soundAt = 0.17, trail = { from = 0.10, to = 0.36 } },
+			sound = "sword_atk2", critSound = "sword_crit2", trail = { from = 0.10, to = 0.36 } },
 		{ name = "Jab", animation = "sword_combo3", duration = 0.47, hitFrame = 0.17, recovery = 0.05,
 			reach = 12, arc = 40, damageMult = 1.1, knockback = 20, maxTargets = 2,
-			sound = "sword_atk3", soundAt = 0.14, trail = { from = 0.12, to = 0.30 } },
+			sound = "sword_atk3", critSound = "sword_crit3", trail = { from = 0.12, to = 0.30 } },
 		{ name = "OverheadSlash", animation = "sword_combo4", duration = 0.70, hitFrame = 0.32, recovery = 0.30,
 			reach = 10, arc = 150, damageMult = 1.5, knockback = 30, maxTargets = 6,
-			sound = "sword_atk4", soundAt = 0.29, trail = { from = 0.18, to = 0.46 } },
+			sound = "sword_atk4", critSound = "sword_crit4", trail = { from = 0.18, to = 0.46 } },
 	},
 	slots = {
 		equip = "sword_equip",
@@ -230,7 +264,13 @@ local function entryOf(key: string?): any?
 	return CombatConfig.animations[key]
 end
 
-function CombatConfig.stepAnimation(weaponType: string?, stepIndex: number, weaponId: string?): any?
+function CombatConfig.stepAnimation(weaponType: string?, stepIndex: number, weaponId: string?, crash: boolean?): any?
+	if crash then
+		local slam = entryOf(CombatConfig.crash.animation)
+		if slam and slam.id and slam.id ~= "" then
+			return slam, CombatConfig.crash.animation
+		end
+	end
 	local override = weaponId and CombatConfig.overrides[weaponId]
 	local key = override and override.steps and override.steps[stepIndex]
 	if not key then
@@ -262,9 +302,20 @@ local function soundEntry(key: string?): any?
 	return nil
 end
 
-function CombatConfig.stepSound(weaponType: string?, stepIndex: number, weaponId: string?): any?
+function CombatConfig.stepSound(weaponType: string?, stepIndex: number, weaponId: string?, crit: boolean?): any?
 	local override = weaponId and CombatConfig.overrides[weaponId]
-	local key = override and override.stepSounds and override.stepSounds[stepIndex]
+	local key
+	if crit then
+		key = override and override.stepCritSounds and override.stepCritSounds[stepIndex]
+		if not key then
+			local cfg = CombatConfig.get(weaponType)
+			local step = cfg and cfg.steps[stepIndex]
+			key = step and step.critSound
+		end
+	end
+	if not key then
+		key = override and override.stepSounds and override.stepSounds[stepIndex]
+	end
 	if not key then
 		local cfg = CombatConfig.get(weaponType)
 		local step = cfg and cfg.steps[stepIndex]

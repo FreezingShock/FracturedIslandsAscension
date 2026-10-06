@@ -37,6 +37,12 @@
       "DummyService": {
         "$path": "src/Server/Combat/DummyService.lua"
       },
+      "EnemyInit": {
+        "$path": "src/Server/Combat/EnemyInit.server.lua"
+      },
+      "EnemyService": {
+        "$path": "src/Server/Combat/EnemyService.lua"
+      },
       "EquipmentInit": {
         "$path": "src/Server/Inventory/EquipmentInit.server.lua"
       },
@@ -162,6 +168,12 @@
         "Config": {
           "$path": "src/Shared/Modules/Config"
         },
+        "EnemyConfig": {
+          "$path": "src/Shared/Modules/Combat/EnemyConfig.lua"
+        },
+        "EnemyFX": {
+          "$path": "src/Shared/Modules/Combat/EnemyFX.lua"
+        },
         "EquipmentConfig": {
           "$path": "src/Shared/Modules/Inventory/EquipmentConfig.lua"
         },
@@ -278,6 +290,9 @@
         },
         "DamageNumberController": {
           "$path": "src/Client/Combat/DamageNumberController.client.lua"
+        },
+        "EnemyNameplateController": {
+          "$path": "src/Client/Combat/EnemyNameplateController.client.lua"
         },
         "HeldItemNameController": {
           "$path": "src/Client/HUD/HeldItemNameController.client.lua"
