@@ -31,6 +31,8 @@
 	  New pickup colour / icon:    items["item:Oak Wood"] = { color = "#55FF55", icon = "rbxassetid://123" }
 	  Sounds:                      kinds.levelup.sounds.show = { id = "rbxassetid://...", volume = 0.8, pitch = 1 }   ("" = silent)
 	  New skill icon:              skills.Combat.icon = "rbxassetid://..."
+	  Fully themed item:           items["item:Gold Ingot"] = { color = "#FFD700", theme = { bodyTint = 0.3, labelTint = true } }   (see library.default.theme)
+	  No sheen / pop:              library.default.intro = { sheenStrength = 0, popFrom = 1 }
 	  Fainter / solid cards:       library.default.bodyTransparency / borderTransparency
 ]]
 
@@ -61,6 +63,15 @@ NotificationConfig.library = {
 		bodyTransparency = 0.45, -- the black body
 		borderTransparency = 0.35, -- the 4px outer border
 		timerBar = true,
+		-- THEME: every card is coloured from the thing it shows (its `color`): the 4px border is a dark shade of it, the body a very dark
+		-- tint, the 2px stroke a light shade, the text gets a soft top-to-bottom gradient and the timer bar a shine. *Mix = how far toward
+		-- black / white (0-1); bodyTint = how much of the colour the black body keeps; labelTint = the item name takes the colour too.
+		theme = { borderMix = 0.6, strokeLight = 0.3, bodyTint = 0.16, textGradient = true, textShade = 0.3, labelTint = false, fillShine = true },
+		-- ANIMATION: pop (Back easing overshoot) + a sheen sweeping across the body + the stroke flaring, all on arrival; on a merge a
+		-- smaller version; the card shrinks a little as it slides out.
+		intro = { popFrom = 0.9, popTime = 0.4, sheenTime = 0.7, sheenStrength = 0.3, strokePulse = 4, pulseTime = 0.45 },
+		mergeFx = { sheenTime = 0.5, strokePulse = 3.5 },
+		outro = { scale = 0.94 },
 		-- SOUNDS: { id, volume, pitch }; "" = silent until you have ids. show / hide default to the toast in / out sounds the drop tags use.
 		sounds = {
 			show = { id = "rbxassetid://105736529842995", volume = 0.35, pitch = 1.1 },
@@ -76,6 +87,8 @@ NotificationConfig.kinds = {
 		priority = 3,
 		hold = 9,
 		title = { format = "SKILL LEVEL UP", color = "#FFD700" },
+		intro = { popFrom = 0.8, popTime = 0.55, sheenTime = 1.1, sheenStrength = 0.5, strokePulse = 6, pulseTime = 0.7 },
+		theme = { bodyTint = 0.2 },
 		heading = "{name} {from} <font color='#555555'>\u{2192}</font> {to}", -- old level gray, arrow dark gray, new level white
 		fromColor = "#AAAAAA",
 		toColor = "#FFFFFF",
@@ -93,6 +106,8 @@ NotificationConfig.kinds = {
 		priority = 3,
 		hold = 9,
 		title = { format = "COLLECTION TIER UP", color = "#55FFFF" },
+		intro = { popFrom = 0.84, popTime = 0.5, sheenTime = 1, sheenStrength = 0.45, strokePulse = 5.5, pulseTime = 0.65 },
+		theme = { bodyTint = 0.2 },
 		heading = "{name} {from} <font color='#555555'>\u{2192}</font> {to}",
 		fromColor = "#AAAAAA",
 		toColor = "#FFFFFF",
@@ -135,7 +150,12 @@ NotificationConfig.skills = {
 
 -- per pickup key overrides: { color?, icon?, hold? }
 NotificationConfig.items = {
-	coins = { color = "#FFAA00" },
+	-- Coins: the whole card is gold (border, body, stroke, label, bar)
+	coins = {
+		color = "#FFAA00",
+		theme = { borderMix = 0.25, strokeLight = 0.45, bodyTint = 0.34, labelTint = true, textShade = 0.45 },
+		intro = { sheenStrength = 0.5 },
+	},
 }
 
 local function merge(base: any, over: any): any

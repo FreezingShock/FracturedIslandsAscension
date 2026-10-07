@@ -36,6 +36,7 @@ local DEFAULT = Config.library.default
 type Entry = {
 	kind: string,
 	key: string?,
+	color: string,
 	cfg: any,
 	slot: Frame,
 	card: Frame,
@@ -95,6 +96,86 @@ local function number(n: number): string
 	return tostring(math.floor(n * 100 + 0.5) / 100)
 end
 
+local WHITE, BLACK = Color3.new(1, 1, 1), Color3.new(0, 0, 0)
+
+local function keypoints(...: Color3): ColorSequence
+	local colors = { ... }
+	local points = {}
+	for i, c in ipairs(colors) do
+		table.insert(points, ColorSequenceKeypoint.new((i - 1) / (#colors - 1), c))
+	end
+	return ColorSequence.new(points)
+end
+
+--- Colours a whole card from one colour: dark shade for the 4px border, very dark tint for the body, light shade for the 2px stroke,
+--- a soft top-to-bottom gradient on every text and a shine on the timer bar (all through the template's UIGradients).
+local function applyTheme(card: Frame, colorHex: string, theme: any)
+	local tint = hex(colorHex)
+	local body = card:WaitForChild("Body") :: Frame
+	local border = tint:Lerp(BLACK, theme.borderMix)
+	local borderGradient = card:FindFirstChild("BorderGradient") :: UIGradient?
+	if borderGradient then
+		borderGradient.Color = keypoints(border, border:Lerp(tint, 0.35), border)
+	end
+	local base = tint:Lerp(BLACK, 1 - theme.bodyTint)
+	card:SetAttribute("BodyBase", base)
+	card:SetAttribute("Tint", tint)
+	local bodyGradient = body:FindFirstChild("BodyGradient") :: UIGradient?
+	if bodyGradient then
+		bodyGradient.Color = ColorSequence.new(base)
+		bodyGradient.Offset = Vector2.zero
+	end
+	local stroke = body:FindFirstChildOfClass("UIStroke")
+	local strokeGradient = stroke and stroke:FindFirstChild("StrokeGradient") :: UIGradient?
+	if strokeGradient then
+		local light = tint:Lerp(WHITE, theme.strokeLight)
+		strokeGradient.Color = keypoints(light, tint, light)
+	end
+	local textBottom = WHITE:Lerp(tint, theme.textShade)
+	for _, d in ipairs(card:GetDescendants()) do
+		if d:IsA("UIGradient") and d.Name == "TextGradient" then
+			d.Enabled = theme.textGradient
+			d.Color = keypoints(WHITE, textBottom)
+		elseif d:IsA("UIGradient") and d.Name == "FillGradient" then
+			d.Enabled = theme.fillShine
+			d.Color = keypoints(tint, tint:Lerp(WHITE, 0.6), tint)
+			if theme.fillShine then
+				(d.Parent :: Frame).BackgroundColor3 = WHITE
+			end
+		end
+	end
+end
+
+--- A bright band sweeps across the body (UIGradient offset) and the 2px stroke flares.
+local function sheen(card: Frame, time: number, strength: number, pulse: number, pulseTime: number)
+	local body = card:FindFirstChild("Body") :: Frame?
+	local base = card:GetAttribute("BodyBase") :: Color3?
+	local tint = card:GetAttribute("Tint") :: Color3?
+	if not (body and base and tint) then
+		return
+	end
+	local gradient = body:FindFirstChild("BodyGradient") :: UIGradient?
+	if gradient and strength > 0 and time > 0 then
+		local bright = base:Lerp(tint:Lerp(WHITE, 0.5), strength)
+		gradient.Color = keypoints(base, base, bright, base, base)
+		gradient.Offset = Vector2.new(-1, 0)
+		TweenService:Create(gradient, TweenInfo.new(time, Enum.EasingStyle.Quad, Enum.EasingDirection.InOut), { Offset = Vector2.new(1, 0) }):Play()
+	end
+	local stroke = body:FindFirstChildOfClass("UIStroke")
+	if stroke and pulse > 0 then
+		stroke.Thickness = pulse
+		TweenService:Create(stroke, TweenInfo.new(pulseTime, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), { Thickness = 2 }):Play()
+	end
+end
+
+local function pop(card: Frame, from: number, time: number)
+	local scaleObj = card:FindFirstChild("Pop") :: UIScale?
+	if scaleObj and from ~= 1 then
+		scaleObj.Scale = from
+		TweenService:Create(scaleObj, TweenInfo.new(time, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1 }):Play()
+	end
+end
+
 local function play(slot: any)
 	if not slot or not slot.id or slot.id == "" then
 		return
@@ -109,6 +190,7 @@ local function play(slot: any)
 end
 
 -- ===================== LAYOUT =====================
+local stackTarget: UDim2? = nil
 local function applyLayout()
 	local camera = workspace.CurrentCamera
 	if not camera then
@@ -117,7 +199,22 @@ local function applyLayout()
 	local s = math.clamp(camera.ViewportSize.Y / DEFAULT.baseHeight, DEFAULT.minScale, DEFAULT.maxScale)
 	scale.Scale = s
 	stack.AnchorPoint = Vector2.new(0, 1)
-	stack.Position = UDim2.new(0, math.floor(DEFAULT.margin * s), 1, -math.floor(DEFAULT.bottomOffset * s))
+	-- the stack sits above the chat panel (FIAChatGui, bottom-left) while it is open, else at the bottom margin
+	local above = 0
+	local chat = player.PlayerGui:FindFirstChild("FIAChatGui")
+	local panel = chat and chat:FindFirstChild("Panel")
+	if chat and panel and chat:IsA("ScreenGui") and chat.Enabled then
+		above = math.max(0, gui.AbsoluteSize.Y - (panel :: GuiObject).AbsolutePosition.Y) + DEFAULT.gap
+	end
+	local target = UDim2.new(0, math.floor(DEFAULT.margin * s), 1, -math.max(math.floor(DEFAULT.bottomOffset * s), math.floor(above)))
+	if target ~= stackTarget then
+		if stackTarget == nil then
+			stack.Position = target
+		else
+			TweenService:Create(stack, tweenInfo(DEFAULT.restack), { Position = target }):Play() -- follows the chat opening / closing
+		end
+		stackTarget = target
+	end
 	list.Padding = UDim.new(0, DEFAULT.gap)
 end
 
@@ -132,6 +229,15 @@ watchCamera()
 workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(function()
 	watchCamera()
 	applyLayout()
+end)
+
+local layoutClock = 0
+RunService.Heartbeat:Connect(function(dt) -- the chat can open, close or move
+	layoutClock += dt
+	if layoutClock >= 0.1 then
+		layoutClock = 0
+		applyLayout()
+	end
 end)
 
 -- ===================== FILLING A CARD =====================
@@ -232,13 +338,13 @@ local function fillPickup(entry: Entry)
 	local row = body.Row
 	local label = row.Label :: TextLabel
 	local count = row.Count :: TextLabel
-	local color = cfg.color
+	local color = entry.color
 	local text = cfg.format
 		:gsub("{amount}", function()
 			return value(cfg.amountPrefix .. number(entry.amount), color, label.TextSize)
 		end)
 		:gsub("{label}", function()
-			return value(payload.label, cfg.labelColor, label.TextSize)
+			return value(payload.label, cfg.theme.labelTint and color or cfg.labelColor, label.TextSize)
 		end)
 	label.Text = text
 	if entry.count > 1 then
@@ -335,6 +441,10 @@ leave = function(entry: Entry)
 	local out = TweenService:Create(entry.card, tweenInfo(entry.cfg.slideOut), {
 		Position = UDim2.fromOffset(-(entry.width + DEFAULT.margin + 40), 0),
 	})
+	local popScale = entry.card:FindFirstChild("Pop") :: UIScale?
+	if popScale then
+		TweenService:Create(popScale, tweenInfo(entry.cfg.slideOut), { Scale = entry.cfg.outro.scale }):Play()
+	end
 	out.Completed:Connect(function()
 		if entry.dead or entry.gen ~= gen then
 			return
@@ -384,6 +494,7 @@ show = function(payload: any)
 	local entry: Entry = {
 		kind = kind,
 		key = key,
+		color = cfg.color,
 		cfg = cfg,
 		slot = slot,
 		card = card,
@@ -397,6 +508,12 @@ show = function(payload: any)
 		dead = false,
 		gen = 0,
 	}
+	if kind == "pickup" then
+		local override = Config.items[key :: string]
+		entry.color = (override and override.color) or payload.color or cfg.color
+	elseif kind == "system" then
+		entry.color = payload.color or cfg.color
+	end
 	if kind == "levelup" or kind == "collection" then
 		fillTier(entry, payload)
 	elseif kind == "pickup" then
@@ -406,8 +523,12 @@ show = function(payload: any)
 	end
 	card.Body.BackgroundTransparency = cfg.bodyTransparency
 	card.BackgroundTransparency = cfg.borderTransparency
+	applyTheme(card, entry.color, cfg.theme)
 	table.insert(active, entry)
 	startTimer(entry)
+	local intro = cfg.intro
+	pop(card, intro.popFrom, intro.popTime)
+	sheen(card, intro.sheenTime, intro.sheenStrength, intro.strokePulse, intro.pulseTime)
 
 	TweenService:Create(card, tweenInfo(cfg.slideIn), { Position = UDim2.fromOffset(0, 0) }):Play()
 	if cfg.sounds and cfg.sounds.show and os.clock() - lastShowSound > 0.1 then
@@ -448,12 +569,14 @@ local function merge(payload: any): boolean
 			entry.count += 1
 			entry.amount += payload.amount
 			fillPickup(entry)
+			applyTheme(entry.card, entry.color, entry.cfg.theme)
 			startTimer(entry)
-			local pop = entry.card:FindFirstChild("Pop") :: UIScale?
-			if pop then
-				pop.Scale = entry.cfg.pop.scale
-				TweenService:Create(pop, TweenInfo.new(entry.cfg.pop.time, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), { Scale = 1 }):Play()
+			local popScale = entry.card:FindFirstChild("Pop") :: UIScale?
+			if popScale then
+				popScale.Scale = entry.cfg.pop.scale
+				TweenService:Create(popScale, TweenInfo.new(entry.cfg.pop.time, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1 }):Play()
 			end
+			sheen(entry.card, entry.cfg.mergeFx.sheenTime, entry.cfg.intro.sheenStrength, entry.cfg.mergeFx.strokePulse, entry.cfg.intro.pulseTime)
 			return true
 		end
 	end

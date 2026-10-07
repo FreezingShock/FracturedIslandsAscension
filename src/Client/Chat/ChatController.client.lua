@@ -1,62 +1,43 @@
--- ============================================================
---  ChatController (LocalScript) — INTEGRATED TOPBARPLUS
---  Place inside: StarterPlayerScripts
---
---  WHAT CHANGED:
---    - TopbarPlus button creation moved into this file
---    - Single chatVisible state variable tracks panel visibility
---    - Button.selected:Connect wires directly to ChatGui.Enabled
---    - No separate ChatToggleButton.lua script needed
---    - Tab system REMOVED — unified message stream
---
---  ARCHITECTURE (2025/2026 compliant):
---    SENDING:   InputBox Enter/Send → TextChannel:SendAsync()
---               Roblox's TextChatService pipeline handles filtering
---               automatically on the backend. No manual FilterStringAsync.
---
---    RECEIVING: TextChatService.MessageReceived fires on every client
---               when a filtered message arrives from the server.
---               msg.Text is already filtered. msg.TextSource.UserId
---               identifies the sender.
---
---    SYSTEM:    SystemMessage RemoteEvent from ChatService (server)
---               for level-up, day change, etc. Rendered the same way.
---
---  Panel behaviour:
---    - High transparency when idle (unfocused, cursor not inside panel)
---    - Low transparency (opaque) when InputBox focused or cursor inside
---    - Messages fade when panel is idle
---    - / key focuses the input bar
---    - TopbarPlus button toggles chat panel visibility
--- ============================================================
+--[[
+	ChatController (LocalScript)
+	Place inside: StarterPlayerScripts
 
+	The custom chat: a bottom-left panel in the tooltip look (ReplicatedStorage.GUI.FIAChatGui, built by tools/studio/build_chat_gui.luau,
+	cloned into PlayerGui). Layout, fonts, transparencies, colours and limits come from Modules/Config/ChatConfig (Visual / Behaviour).
+
+	  SENDING     InputBox -> TextChannel:SendAsync(); Roblox filters the text on its backend (nothing is filtered here).
+	  RECEIVING   TextChatService.MessageReceived (text is already filtered AND rich-text escaped), SystemMessage RemoteEvent
+	              (ChatService: level-ups / join / leave), ChatBridge.postRaw / postLocal (client-only lines).
+	  KEYS        "/" shows / hides the whole chat (same as the topbar pill), Enter highlights the input (and opens the chat if it is
+	              hidden), Enter again sends, Esc leaves the box, Up / Down recall what you sent. Press Enter, then type "/give ...".
+	  IDLE        faint panel; old lines fade by age; focus or hover makes the panel solid and brings every line back.
+
+	Messages are cloned from FIAChatGui.Templates (Entry / Line / Spacer); nothing is built in code.
+--]]
+
+local Debris = game:GetService("Debris")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local TextChatService = game:GetService("TextChatService")
-local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
-local TweenService = game:GetService("TweenService")
-local StarterGui = game:GetService("StarterGui")
 local SoundService = game:GetService("SoundService")
+local StarterGui = game:GetService("StarterGui")
+local TextChatService = game:GetService("TextChatService")
+local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 
 local Modules = ReplicatedStorage:WaitForChild("Modules")
-local Config = ReplicatedStorage:WaitForChild("Config")
-local ChatConfig = require(Config:WaitForChild("ChatConfig"))
-local ChatBridge = require(Modules:WaitForChild("ChatBridge"))
-
--- Load TopbarPlus for chat toggle button
-local Topbar = require(ReplicatedStorage:WaitForChild("TopbarPlus"))
-
--- SystemMessage remote (server → client, system blocks only)
-local SystemMsg = ReplicatedStorage:WaitForChild("SystemMessage")
+local ChatConfig = require(Modules:WaitForChild("Config"):WaitForChild("ChatConfig")) :: any
+local ChatBridge = require(Modules:WaitForChild("ChatBridge")) :: any
+local Topbar = require(ReplicatedStorage:WaitForChild("TopbarPlus")) :: any
+local SystemMsg = ReplicatedStorage:WaitForChild("SystemMessage") :: RemoteEvent
 
 local V = ChatConfig.Visual
 local B = ChatConfig.Behaviour
 
--- ===================== HIDE DEFAULT ROBLOX CHAT =====================
+-- ===================== HIDE THE NATIVE CHAT =====================
 local function hideDefaultChat()
 	local ok, err = pcall(StarterGui.SetCoreGuiEnabled, StarterGui, Enum.CoreGuiType.Chat, false)
 	if not ok then
@@ -66,570 +47,441 @@ end
 hideDefaultChat()
 player.CharacterAdded:Connect(hideDefaultChat)
 
--- ===================== TEXTCHANNEL REFERENCE =====================
--- Get the RBXGeneral channel that Roblox auto-creates.
--- SendAsync must be called on this channel from the client.
--- We wait for it because it may not exist the instant this script runs.
-local RBXGeneral = nil
+-- ===================== CHANNEL =====================
+local general: TextChannel? = nil
+task.spawn(function()
+	local channels = TextChatService:WaitForChild("TextChannels", 15)
+	general = channels and channels:WaitForChild("RBXGeneral", 15) :: TextChannel?
+	if not general then
+		warn("[ChatController] RBXGeneral TextChannel not found (TextChatService.CreateDefaultTextChannels must be on).")
+	end
+end)
 
-local function findTextChannel()
-	local tcs = TextChatService
-	local channels = tcs:FindFirstChild("TextChannels")
-	if channels then
-		RBXGeneral = channels:FindFirstChild("RBXGeneral")
+-- ===================== GUI (clone of the Studio template) =====================
+local guiRoot = ReplicatedStorage:WaitForChild("GUI", 10)
+local template = guiRoot and guiRoot:WaitForChild("FIAChatGui", 10)
+assert(template, "[ChatController] ReplicatedStorage.GUI.FIAChatGui is missing (run tools/studio/build_chat_gui.luau)")
+
+local ChatGui = template:Clone() :: ScreenGui
+ChatGui.Name = "FIAChatGui"
+ChatGui.ResetOnSpawn = false
+ChatGui.Enabled = true
+
+local Panel = ChatGui:WaitForChild("Panel") :: Frame
+local Body = Panel:WaitForChild("Body") :: Frame
+local LogFrame = Body:WaitForChild("LogFrame") :: ScrollingFrame
+local InputBar = Body:WaitForChild("InputBar") :: Frame
+local InputBox = InputBar:WaitForChild("InputBox") :: TextBox
+local CharCount = InputBar:WaitForChild("CharCount") :: TextLabel
+local SendBtn = InputBar:WaitForChild("SendBtn") :: ImageButton
+local NewMsgBtn = Body:WaitForChild("NewMsgBtn") :: TextButton
+local PanelScale = Panel:WaitForChild("Scale") :: UIScale
+local inputStroke = InputBar:FindFirstChildOfClass("UIStroke") :: UIStroke
+local Templates = ChatGui:WaitForChild("Templates")
+local EntryT = Templates:WaitForChild("Entry") :: Frame
+local LineT = Templates:WaitForChild("Line") :: TextLabel
+local SpacerT = Templates:WaitForChild("Spacer") :: Frame
+
+NewMsgBtn.Visible = false
+InputBox.FontFace = V.ChatFont
+InputBox.TextSize = V.FontSize
+Panel.BackgroundTransparency = V.BorderIdleAlpha
+Body.BackgroundTransparency = V.BodyIdleAlpha
+ChatGui.Parent = playerGui
+
+local isFocused = false
+local chatOpen = true
+local slideTween: Tween? = nil
+local sliding = false
+local panelWidth = V.PanelWidth
+
+--- Left edge (screen px) of the FIAHUD plate, or nil while it does not exist yet.
+local function hudLeft(): number?
+	local hud = playerGui:FindFirstChild("FIAHUD")
+	local root = hud and hud:FindFirstChild("Root")
+	local back = root and root:FindFirstChild("Back")
+	if back and back:IsA("GuiObject") and back.AbsoluteSize.X > 0 then
+		return back.AbsolutePosition.X
 	end
-	if not RBXGeneral then
-		-- Try the flat path some Studio configs use
-		RBXGeneral = tcs:FindFirstChild("RBXGeneral")
-	end
+	return nil
 end
 
-findTextChannel()
-
-if not RBXGeneral then
-	-- Wait up to 5 seconds for TextChatService to initialise
-	task.spawn(function()
-		for _ = 1, 50 do
-			task.wait(0.1)
-			findTextChannel()
-			if RBXGeneral then
-				break
-			end
-		end
-		if not RBXGeneral then
-			warn(
-				"[ChatController] RBXGeneral TextChannel not found. "
-					.. "Ensure TextChatService.CreateDefaultTextChannels = true in Studio."
-			)
-		end
-	end)
+local function currentScale(): number
+	local camera = workspace.CurrentCamera
+	return camera and math.clamp(camera.ViewportSize.Y / V.BaseHeight, V.MinScale, V.MaxScale) or 1
 end
 
--- ===================== HELPERS =====================
-
-local function toHex(color)
-	return string.format(
-		"%02X%02X%02X",
-		math.floor(color.R * 255),
-		math.floor(color.G * 255),
-		math.floor(color.B * 255)
-	)
+local function restPosition(s: number): UDim2
+	return UDim2.new(0, math.floor(V.Margin * s), 1, -math.floor(V.Margin * s))
 end
 
-local function hexToColor3(hex)
-	local r = tonumber(hex:sub(1, 2), 16) / 255
-	local g = tonumber(hex:sub(3, 4), 16) / 255
-	local b = tonumber(hex:sub(5, 6), 16) / 255
-	return Color3.new(r, g, b)
+local function offPosition(): UDim2
+	return UDim2.new(0, -(panelWidth + V.Margin + 40), 1, -V.Margin)
 end
 
--- ===================== GUI BUILD (clone from ReplicatedStorage) =====================
---
---  Expected hierarchy in ReplicatedStorage > GUI > FIAChatGui  (ScreenGui):
---    FIAChatGui  (ScreenGui — blank, no children needed in template)
---      Panel       (Frame)
---        LogFrame  (ScrollingFrame)
---          UIListLayout
---          UIPadding
---        InputBar  (Frame)
---          InputBox  (TextBox)
---            UIPadding
---          SendBtn   (TextButton)
---        NewMsgBtn (TextButton)
---
---  The clone receives all layout properties from ChatConfig.Visual at
---  runtime so the template in Studio only needs the correct Name on
---  each instance — all sizes, colours, and positions are applied here.
---  This means you can freely restyle the template in Studio without
---  touching this script, and vice versa.
---
---  SECURITY: The template lives in ReplicatedStorage (read-only from
---  the client's perspective after initial load). We clone it, apply
---  runtime config, then parent to playerGui. The original is never
---  modified. If the template is missing we hard-error with a clear
---  message rather than silently producing a broken UI.
-
-local GUI_TEMPLATE_PATH = { "GUI", "FIAChatGui" } -- ReplicatedStorage > GUI > FIAChatGui
-
-local function cloneChatGui()
-	-- Walk the path under ReplicatedStorage
-	local root = ReplicatedStorage
-	for _, name in ipairs(GUI_TEMPLATE_PATH) do
-		local child = root:FindFirstChild(name)
-		if not child then
-			error(
-				string.format(
-					"[ChatController] Template not found: ReplicatedStorage.%s\n"
-						.. "Create a ScreenGui named 'FIAChatGui' inside ReplicatedStorage > GUI.",
-					table.concat(GUI_TEMPLATE_PATH, ".")
-				),
-				2
-			)
-		end
-		root = child
+local function applyLayout()
+	local s = currentScale()
+	PanelScale.Scale = s
+	local width = V.PanelWidth
+	local left = V.FollowHud and hudLeft()
+	if left then
+		width = math.clamp((left - (V.Margin + V.HudGap) * s) / s, V.MinWidth, V.MaxWidth)
 	end
-
-	local template = root -- root is now the FIAChatGui ScreenGui
-
-	-- Clone the ScreenGui shell (children cloned automatically)
-	local gui = template:Clone()
-	gui.Name = "FIAChatGui"
-	gui.ResetOnSpawn = false
-	gui.DisplayOrder = 5
-	gui.IgnoreGuiInset = true
-	gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-	gui.Enabled = true
-
-	-- ── Resolve named descendants ────────────────────────────
-	-- Each instance must exist in the template (or be created below).
-	-- We use :FindFirstChild on the correct parent so the lookup is
-	-- explicit and the error message names exactly what is missing.
-
-	local function need(parent, name, className)
-		local inst = parent:FindFirstChild(name)
-		if not inst then
-			-- Create it rather than erroring, so a minimal blank ScreenGui works
-			inst = Instance.new(className or "Frame")
-			inst.Name = name
-			inst.Parent = parent
-		end
-		return inst
+	panelWidth = math.floor(width)
+	Panel.AnchorPoint = Vector2.new(0, 1)
+	Panel.Size = UDim2.fromOffset(panelWidth, V.PanelHeight)
+	if not sliding then
+		Panel.Position = chatOpen and restPosition(s) or offPosition()
 	end
-
-	local Panel = need(gui, "Panel", "Frame")
-	local LogFrame = need(Panel, "LogFrame", "ScrollingFrame")
-	local InputBar = need(Panel, "InputBar", "Frame")
-	local InputBox = need(InputBar, "InputBox", "TextBox")
-	local SendBtn = need(InputBar, "SendBtn", "TextButton")
-	local NewMsgBtn = need(Panel, "NewMsgBtn", "TextButton")
-
-	-- ── Ensure layout instances exist inside LogFrame ─
-	local function ensureLayout(parent, class, props)
-		local existing = parent:FindFirstChildOfClass(class)
-		if existing then
-			return existing
-		end
-		local inst = Instance.new(class)
-		for k, v in pairs(props or {}) do
-			inst[k] = v
-		end
-		inst.Parent = parent
-		return inst
-	end
-
-	ensureLayout(LogFrame, "UIListLayout", {
-		FillDirection = Enum.FillDirection.Vertical,
-		SortOrder = Enum.SortOrder.LayoutOrder,
-		Padding = UDim.new(0, 2),
-	})
-	local logPadding = LogFrame:FindFirstChildOfClass("UIPadding")
-	if not logPadding then
-		logPadding = Instance.new("UIPadding")
-		logPadding.Parent = LogFrame
-	end
-	logPadding.PaddingLeft = UDim.new(0, 8)
-	logPadding.PaddingRight = UDim.new(0, 12)
-	logPadding.PaddingTop = UDim.new(0, 4)
-	logPadding.PaddingBottom = UDim.new(0, 4)
-
-	-- Ensure InputBox has its left padding
-	local inputBoxPad = InputBox:FindFirstChildOfClass("UIPadding")
-	if not inputBoxPad then
-		inputBoxPad = Instance.new("UIPadding")
-		inputBoxPad.Parent = InputBox
-	end
-	inputBoxPad.PaddingLeft = UDim.new(0, 4)
-
-	-- ── Apply runtime config (ChatConfig.Visual) ─────────────
-	-- Sizes, positions, colours come from config — not baked into template.
-	-- This keeps the Studio template as a pure structural scaffold.
-
-	Panel.BackgroundColor3 = V.PanelBackground
-	Panel.BackgroundTransparency = V.PanelBackgroundAlpha
-	Panel.BorderSizePixel = 0
-	Panel.ClipsDescendants = false
-
-	LogFrame.Size = UDim2.new(1, 0, 1, -43)
-	LogFrame.Position = UDim2.new(0, 0, 0, 0)
-	LogFrame.BackgroundTransparency = 1
-	LogFrame.BorderSizePixel = 0
-	LogFrame.ScrollBarThickness = 4
-	LogFrame.ScrollBarImageColor3 = V.ScrollBarColor
-	LogFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
-	LogFrame.AutomaticCanvasSize = Enum.AutomaticSize.Y
-	LogFrame.ScrollingDirection = Enum.ScrollingDirection.Y
-	LogFrame.VerticalScrollBarPosition = Enum.VerticalScrollBarPosition.Right
-
-	InputBar.Size = UDim2.new(1, 0, 0, V.InputBarHeight)
-	InputBar.Position = UDim2.new(0, 0, 1, -38)
-	InputBar.BackgroundColor3 = V.InputBackground
-	InputBar.BackgroundTransparency = V.InputBackgroundAlpha
-	InputBar.BorderSizePixel = 0
-
-	InputBox.Size = UDim2.new(1, -50, 1, 0)
-	InputBox.Position = UDim2.new(0, 0, 0, 0)
-	InputBox.BackgroundTransparency = 1
-	InputBox.BorderSizePixel = 0
-	InputBox.TextStrokeTransparency = 0
-	InputBox.FontFace = V.ChatFont
-	InputBox.TextSize = V.FontSize
-	InputBox.TextColor3 = V.PlayerTextColor
-	InputBox.TextXAlignment = Enum.TextXAlignment.Left
-	InputBox.ClearTextOnFocus = false
-	InputBox.MultiLine = false
-
-	NewMsgBtn.Size = UDim2.new(1, 0, 0, 22)
-	NewMsgBtn.Position = UDim2.new(0, 0, 0, V.LogHeight - 22)
-	NewMsgBtn.BackgroundTransparency = 0.2
-	NewMsgBtn.BorderSizePixel = 0
-	NewMsgBtn.TextSize = 13
-	NewMsgBtn.Text = V.NewMessageButtonText
-	NewMsgBtn.AutoButtonColor = false
-	NewMsgBtn.Visible = false
-	NewMsgBtn.ZIndex = 6
-
-	-- Parent last — one reparent, no intermediate layout thrash
-	gui.Parent = playerGui
-
-	return gui, Panel, LogFrame, InputBar, InputBox, SendBtn, NewMsgBtn
+	InputBar.Size = UDim2.new(1, -16, 0, V.InputBarHeight)
+	LogFrame.Size = UDim2.new(1, 0, 1, -(V.InputBarHeight + 16))
 end
+applyLayout()
+local layoutClock = 0
+RunService.Heartbeat:Connect(function(dt) -- the HUD can appear or resize after the chat
+	layoutClock += dt
+	if layoutClock >= 0.3 then
+		layoutClock = 0
+		applyLayout()
+	end
+end)
+local function watchCamera()
+	local camera = workspace.CurrentCamera
+	if camera then
+		camera:GetPropertyChangedSignal("ViewportSize"):Connect(applyLayout)
+	end
+end
+watchCamera()
+workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(function()
+	watchCamera()
+	applyLayout()
+end)
 
-local ChatGui, Panel, LogFrame, InputBar, InputBox, SendBtn, NewMsgBtn = cloneChatGui()
-
--- ===================== TOPBARPLUS CHAT TOGGLE =====================
-local chatVisible = true -- Chat starts visible
-
+-- ===================== TOPBARPLUS TOGGLE =====================
 local chatIcon = Topbar.new()
 chatIcon:setName("ChatToggle")
 chatIcon:setLabel("Chat")
 chatIcon:setOrder(1)
-
--- Apply initial state: solid icon (open)
 chatIcon:setImage("rbxassetid://72986449768058")
-
--- Modify theme for hover effect (brighten on hover)
--- White background, white stroke, white text with black stroke
--- White background, white stroke, white text with black stroke
--- White background, black stroke, white text with black stroke
 chatIcon:modifyTheme({
-	{ "IconButton", "BackgroundColor3", Color3.fromRGB(255, 255, 255) }, -- White bg
-	{ "IconButton", "BackgroundTransparency", 0.8 }, -- Opaque
-	{ "IconButton", "BorderSizePixel", 2 }, -- Add black border
-	{ "IconButton", "BorderColor3", Color3.fromRGB(0, 0, 0) }, -- Black border
-	{ "IconLabel", "TextColor3", Color3.fromRGB(255, 255, 255) }, -- White text
-	{ "IconLabel", "TextStrokeColor3", Color3.fromRGB(0, 0, 0) }, -- Black stroke on text
-	{ "IconLabel", "TextStrokeTransparency", 0 }, -- Visible stroke
-	{ "UICorner", "CornerRadius", UDim.new(0, 8) }, -- Rounded corners (adjust if needed)
+	{ "IconButton", "BackgroundColor3", Color3.fromRGB(255, 255, 255) },
+	{ "IconButton", "BackgroundTransparency", 0.8 },
+	{ "IconButton", "BorderSizePixel", 2 },
+	{ "IconButton", "BorderColor3", Color3.fromRGB(0, 0, 0) },
+	{ "IconLabel", "TextColor3", Color3.fromRGB(255, 255, 255) },
+	{ "IconLabel", "TextStrokeColor3", Color3.fromRGB(0, 0, 0) },
+	{ "IconLabel", "TextStrokeTransparency", 0 },
+	{ "UICorner", "CornerRadius", UDim.new(0, 8) },
 })
+chatIcon:setCaption("Toggle Chat (/)")
 
-chatIcon:bindToggleKey(Enum.KeyCode.V)
-chatIcon:setCaption("Toggle Chat")
--- Track visibility state and sync icon + panel
-local function updateChatState(isOpen)
-	chatVisible = isOpen
-	ChatGui.Enabled = chatVisible
-
-	-- Update icon based on state
-	if chatVisible then
-		chatIcon:setImage("rbxassetid://72986449768058") -- Solid (open)
-	else
-		chatIcon:setImage("rbxassetid://122351441139765") -- Dashed (closed)
+--- Slides the whole chat in from / out to the left edge.
+local function setChatOpen(open: boolean)
+	if open == chatOpen and ChatGui.Enabled == open then
+		return
 	end
+	chatOpen = open
+	chatIcon:setImage(open and "rbxassetid://72986449768058" or "rbxassetid://122351441139765")
+	if slideTween then
+		slideTween:Cancel()
+	end
+	sliding = true
+	if open then
+		ChatGui.Enabled = true
+		Panel.Position = offPosition()
+		slideTween = TweenService:Create(Panel, TweenInfo.new(V.OpenTime, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), { Position = restPosition(currentScale()) })
+	else
+		if isFocused then
+			InputBox:ReleaseFocus()
+		end
+		slideTween = TweenService:Create(Panel, TweenInfo.new(V.CloseTime, Enum.EasingStyle.Quint, Enum.EasingDirection.In), { Position = offPosition() })
+	end
+	local tween = slideTween :: Tween
+	tween.Completed:Connect(function(state)
+		if slideTween ~= tween then
+			return -- a newer open / close replaced this one
+		end
+		sliding = false
+		if not chatOpen and state == Enum.PlaybackState.Completed then
+			ChatGui.Enabled = false
+		end
+	end)
+	tween:Play()
 end
-
--- When button is selected (clicked while deselected)
 chatIcon.selected:Connect(function()
-	updateChatState(true)
+	setChatOpen(true)
 end)
-
--- When button is deselected (clicked while selected)
 chatIcon.deselected:Connect(function()
-	updateChatState(false)
+	setChatOpen(false)
 end)
+chatIcon:select() -- the chat starts open, so the pill starts selected
 
 -- ===================== STATE =====================
-local messages = {}
-local isFocused = false
+local messages: { any } = {}
 local isHovered = false
 local lastSendTime = 0
 local autoScroll = true
 local layoutOrder = 0
-
--- Track which TextChatMessage IDs we've already rendered to avoid duplicates.
--- TextChatService.MessageReceived can fire twice for the sending client
--- (once as "pending", once as the server-confirmed message).
-local renderedMsgIds = {}
+local renderedIds: { [string]: boolean } = {}
+local renderedCount = 0
+local sentHistory: { string } = {}
+local historyIndex = 0
+local focusLostAt = 0
 
 -- ===================== FOCUS / TRANSPARENCY =====================
+local panelTween: Tween? = nil
+local bodyTween: Tween? = nil
 
-local panelTween = nil
-
-local function setPanelTransparency(focused)
-	local targetAlpha = focused and V.PanelFocusedAlpha or V.PanelBackgroundAlpha
-	if panelTween then
-		panelTween:Cancel()
-	end
-	panelTween = TweenService:Create(
-		Panel,
-		TweenInfo.new(V.TransitionTime, Enum.EasingStyle.Quad),
-		{ BackgroundTransparency = targetAlpha }
-	)
-	panelTween:Play()
-end
-
-local function updateFocusState()
-	local active = isFocused or isHovered
-	setPanelTransparency(active)
-	if active then
-		for _, record in ipairs(messages) do
-			record.fadeAlpha = nil
-			for _, lbl in ipairs(record.labels) do
-				lbl.TextTransparency = 0
+local function showEverything()
+	for _, record in ipairs(messages) do
+		record.fadeAlpha = nil
+		for _, line in ipairs(record.labels) do
+			line.TextTransparency = 0
+			local stroke = line:FindFirstChildOfClass("UIStroke")
+			if stroke then
+				stroke.Transparency = V.StrokeTransparency
 			end
 		end
 	end
 end
 
-InputBox.Focused:Connect(function()
-	isFocused = true
-	updateFocusState()
-end)
-
-InputBox.FocusLost:Connect(function()
-	isFocused = false
-	updateFocusState()
-end)
+local function updateFocusState()
+	local active = isFocused or isHovered
+	local info = TweenInfo.new(V.TransitionTime, Enum.EasingStyle.Quad)
+	if panelTween then
+		panelTween:Cancel()
+	end
+	if bodyTween then
+		bodyTween:Cancel()
+	end
+	panelTween = TweenService:Create(Panel, info, { BackgroundTransparency = active and V.BorderActiveAlpha or V.BorderIdleAlpha })
+	bodyTween = TweenService:Create(Body, info, { BackgroundTransparency = active and V.BodyActiveAlpha or V.BodyIdleAlpha })
+	panelTween:Play()
+	bodyTween:Play()
+	if inputStroke then
+		TweenService:Create(inputStroke, info, { Color = isFocused and V.InputActiveStroke or V.InputIdleStroke }):Play()
+		if isFocused then
+			inputStroke.Thickness = V.FocusPulse
+			TweenService:Create(inputStroke, TweenInfo.new(0.35, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), { Thickness = 2 }):Play()
+		end
+	end
+	if active then
+		showEverything()
+	end
+end
 
 Panel.MouseEnter:Connect(function()
 	isHovered = true
 	updateFocusState()
 end)
-
 Panel.MouseLeave:Connect(function()
 	isHovered = false
 	updateFocusState()
 end)
 
--- ===================== SCROLL HELPERS =====================
+-- ===================== SCROLL =====================
+local scrollTween: Tween? = nil
+local scrolling = false
 local function scrollToBottom()
 	RunService.Heartbeat:Wait()
-	local canvasH = LogFrame.AbsoluteCanvasSize.Y
-	local frameH = LogFrame.AbsoluteSize.Y
-	LogFrame.CanvasPosition = Vector2.new(0, math.max(0, canvasH - frameH))
-end
-
-local function isNearBottom()
-	local canvasH = LogFrame.AbsoluteCanvasSize.Y
-	local frameH = LogFrame.AbsoluteSize.Y
-	return (canvasH - frameH - LogFrame.CanvasPosition.Y) <= V.AutoScrollThreshold
-end
-
--- ===================== MESSAGE RENDERING =====================
-
-local function makeLineLabel(text, hexColor, isBold, order)
-	local lbl = Instance.new("TextLabel")
-	lbl.Name = "Line_" .. order
-	lbl.Size = UDim2.new(1, 0, 0, 0)
-	lbl.AutomaticSize = Enum.AutomaticSize.Y
-	lbl.BackgroundTransparency = 1
-	lbl.TextStrokeTransparency = 0
-	lbl.FontFace = V.ChatFont
-	lbl.TextSize = V.FontSize
-	lbl.TextXAlignment = Enum.TextXAlignment.Left
-	lbl.TextWrapped = true
-	lbl.RichText = true
-	lbl.LayoutOrder = order
-
-	local display = text
-	if isBold then
-		display = "<b>" .. display .. "</b>"
+	local target = Vector2.new(0, math.max(0, LogFrame.AbsoluteCanvasSize.Y - LogFrame.AbsoluteSize.Y))
+	if scrollTween then
+		scrollTween:Cancel()
 	end
-	if hexColor then
-		display = '<font color="#' .. hexColor .. '">' .. display .. "</font>"
-	end
-
-	lbl.Text = display
-	lbl.TextColor3 = hexColor and hexToColor3(hexColor) or V.PlayerTextColor
-	return lbl
-end
-
--- Core renderer — handles both player messages and system payloads.
-local function renderPayload(payload)
-	layoutOrder = layoutOrder + 1
-	local order = layoutOrder
-
-	local entry = Instance.new("Frame")
-	entry.Name = "Msg_" .. order
-	entry.AutomaticSize = Enum.AutomaticSize.Y
-	entry.Size = UDim2.new(1, 0, 0, 0)
-	entry.BackgroundTransparency = 1
-	entry.BorderSizePixel = 0
-	entry.LayoutOrder = order
-	entry.Parent = LogFrame
-
-	local entryLayout = Instance.new("UIListLayout")
-	entryLayout.FillDirection = Enum.FillDirection.Vertical
-	entryLayout.SortOrder = Enum.SortOrder.LayoutOrder
-	entryLayout.Padding = UDim.new(0, V.LineSpacing)
-	entryLayout.Parent = entry
-
-	local lineLabels = {}
-
-	if payload.type == "player" then
-		-- "DisplayName: message" — text is pre-filtered by TextChatService
-		local nameHex = toHex(V.PlayerNameColor)
-		local textHex = toHex(V.PlayerTextColor)
-
-		local prefix = ""
-		if B.ShowTimestamps then
-			local t = payload.timestamp or os.time()
-			local m = math.floor(t / 60) % 60
-			local s = t % 60
-			prefix = string.format('<font color="#%s">[%02d:%02d] </font>', toHex(V.TimestampColor), m, s)
+	scrolling = true
+	local tween = TweenService:Create(LogFrame, TweenInfo.new(V.ScrollTime, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { CanvasPosition = target })
+	scrollTween = tween
+	tween.Completed:Connect(function()
+		if scrollTween == tween then
+			scrolling = false
 		end
+	end)
+	tween:Play()
+end
 
-		local richText = string.format(
-			'%s<font color="#%s"><b>%s</b></font><font color="#%s">: %s</font>',
-			prefix,
-			nameHex,
+local function isNearBottom(): boolean
+	return (LogFrame.AbsoluteCanvasSize.Y - LogFrame.AbsoluteSize.Y - LogFrame.CanvasPosition.Y) <= V.AutoScrollThreshold
+end
+
+LogFrame:GetPropertyChangedSignal("CanvasPosition"):Connect(function()
+	if scrolling then
+		return -- our own smooth scroll
+	end
+	autoScroll = isNearBottom()
+	if autoScroll then
+		NewMsgBtn.Visible = false
+	end
+end)
+NewMsgBtn.MouseButton1Click:Connect(function()
+	autoScroll = true
+	NewMsgBtn.Visible = false
+	scrollToBottom()
+end)
+
+-- ===================== RENDERING =====================
+local function nameColorFor(userId: number?): string
+	if userId == player.UserId and V.SelfNameColor then
+		return V.SelfNameColor
+	end
+	local colors = V.NameColors
+	return colors[((userId or 0) % #colors) + 1]
+end
+
+local function newLine(entry: Frame, order: number, rich: string): TextLabel
+	local line = LineT:Clone()
+	line.Name = "Line" .. order
+	line.LayoutOrder = order
+	line.FontFace = V.ChatFont
+	line.TextSize = V.FontSize
+	line.Text = rich
+	local stroke = line:FindFirstChildOfClass("UIStroke")
+	line.TextTransparency = 1 -- fades in
+	if stroke then
+		stroke.Transparency = 1
+		TweenService:Create(stroke, TweenInfo.new(V.LineFadeTime), { Transparency = V.StrokeTransparency }):Play()
+	end
+	TweenService:Create(line, TweenInfo.new(V.LineFadeTime), { TextTransparency = 0 }):Play()
+	line.Parent = entry
+	return line
+end
+
+local function playSound(id: string?)
+	if not id or id == "" then
+		return
+	end
+	local s = Instance.new("Sound")
+	s.SoundId = id
+	s.Volume = 0.5
+	s.Parent = SoundService
+	s:Play()
+	Debris:AddItem(s, 5)
+end
+
+local function renderPayload(payload: any)
+	layoutOrder += 1
+	local entry = EntryT:Clone()
+	entry.Name = "Msg_" .. layoutOrder
+	entry.LayoutOrder = layoutOrder
+	local labels = {}
+
+	if payload.type == "player" or payload.type == "notice" then
+		local stamp = ""
+		if B.ShowTimestamps then
+			stamp = string.format('<font color="#%s">[%s] </font>', V.TimestampColor:ToHex(), os.date("%H:%M", payload.timestamp or os.time()))
+		end
+		local nameHex = payload.nameColor or nameColorFor(payload.userId)
+		local rich = string.format(
+			'%s<font color="#%s">%s</font><font color="#%s">: %s</font>',
+			stamp,
+			nameHex:gsub("^#", ""),
 			payload.playerName or "?",
-			textHex,
+			V.PlayerTextColor:ToHex(),
 			payload.text or ""
 		)
-
-		local lbl = Instance.new("TextLabel")
-		lbl.Name = "Line_1"
-		lbl.Size = UDim2.new(1, 0, 0, 0)
-		lbl.AutomaticSize = Enum.AutomaticSize.Y
-		lbl.BackgroundTransparency = 1
-		lbl.TextStrokeTransparency = 0
-		lbl.FontFace = V.ChatFont
-		lbl.TextSize = V.FontSize
-		lbl.TextXAlignment = Enum.TextXAlignment.Left
-		lbl.TextWrapped = true
-		lbl.RichText = true
-		lbl.Text = richText
-		lbl.TextColor3 = V.PlayerTextColor
-		lbl.LayoutOrder = 1
-		lbl.Parent = entry
-		table.insert(lineLabels, lbl)
+		table.insert(labels, newLine(entry, 1, rich))
 	else
-		-- Multi-line system block
-		local defaultHex = "DCDCDC"
-
-		for i, lineText in ipairs(payload.lines) do
+		for i, lineText in ipairs(payload.lines or {}) do
 			if lineText == "" then
-				local spacer = Instance.new("Frame")
-				spacer.Name = "Spacer_" .. i
-				spacer.Size = UDim2.new(1, 0, 0, 6)
-				spacer.BackgroundTransparency = 1
+				local spacer = SpacerT:Clone()
 				spacer.LayoutOrder = i
 				spacer.Parent = entry
 			else
-				local hexColor = (payload.colors and payload.colors[i]) or defaultHex
-				local isBold = payload.bold and payload.bold[i] == true
-				local lbl = makeLineLabel(lineText, hexColor, isBold, i)
-				lbl.Parent = entry
-				table.insert(lineLabels, lbl)
+				local hexColor = (payload.colors and payload.colors[i]) or "DCDCDC"
+				local rich = lineText
+				if payload.bold and payload.bold[i] == true then
+					rich = "<b>" .. rich .. "</b>"
+				end
+				table.insert(labels, newLine(entry, i, string.format('<font color="#%s">%s</font>', hexColor, rich)))
 			end
 		end
 	end
+	entry.Parent = LogFrame
+	playSound(payload.sound)
 
-	-- Sound
-	if payload.sound then
-		local snd = Instance.new("Sound")
-		snd.SoundId = payload.sound
-		snd.Volume = 0.5
-		snd.Parent = SoundService
-		snd:Play()
-		game:GetService("Debris"):AddItem(snd, 5)
-	end
-
-	local record = {
-		payload = payload,
-		frame = entry,
-		labels = lineLabels,
-		timestamp = payload.timestamp or os.time(),
-	}
-	table.insert(messages, record)
-
+	table.insert(messages, { frame = entry, labels = labels, timestamp = payload.timestamp or os.time(), fadeAlpha = 0 })
 	if #messages > B.MaxHistory then
-		local oldest = table.remove(messages, 1)
-		oldest.frame:Destroy()
+		table.remove(messages, 1).frame:Destroy()
 	end
-
+	if isFocused or isHovered then
+		showEverything()
+	end
 	if autoScroll then
 		task.defer(scrollToBottom)
 	else
 		NewMsgBtn.Visible = true
 	end
-
-	return record
 end
 
 ChatBridge.registerRenderer(renderPayload)
 
--- ===================== FADE SYSTEM =====================
--- Messages fade with age while the chat isn't focused/hovered. This used to rewrite every label's
--- TextTransparency every frame; now it runs 5x a second and only writes labels whose value changes
--- (fully faded old messages cost nothing).
+--- A one-line system notice in the chat itself.
+local function notice(text: string, hexColor: string?)
+	renderPayload({ type = "system", lines = { text }, colors = { [1] = hexColor or "FF5555" }, timestamp = os.time() })
+end
+
+-- ===================== FADE =====================
 local FADE_INTERVAL = 0.2
 local fadeAccum = 0
 RunService.Heartbeat:Connect(function(dt)
 	fadeAccum += dt
-	if fadeAccum < FADE_INTERVAL then
+	if fadeAccum < FADE_INTERVAL or isFocused or isHovered then
 		return
 	end
 	fadeAccum = 0
-	if isFocused or isHovered then
-		return
-	end
 	local now = os.time()
 	for _, record in ipairs(messages) do
 		local age = now - record.timestamp
-		local alpha
-		if age < V.FadeStartAge then
-			alpha = 0
-		elseif age > V.FadeEndAge then
+		local alpha = 0
+		if age > V.FadeEndAge then
 			alpha = 1
-		else
+		elseif age >= V.FadeStartAge then
 			alpha = (age - V.FadeStartAge) / (V.FadeEndAge - V.FadeStartAge)
 		end
 		if record.fadeAlpha ~= alpha then
 			record.fadeAlpha = alpha
-			for _, lbl in ipairs(record.labels) do
-				lbl.TextTransparency = alpha
+			for _, line in ipairs(record.labels) do
+				line.TextTransparency = alpha
+				local stroke = line:FindFirstChildOfClass("UIStroke")
+				if stroke then
+					stroke.Transparency = V.StrokeTransparency + (1 - V.StrokeTransparency) * alpha
+				end
 			end
 		end
 	end
 end)
 
--- ===================== SEND MESSAGE =====================
--- Route through TextChannel:SendAsync — Roblox filters automatically.
-local function trySendMessage()
-	local text = InputBox.Text
+-- ===================== SENDING =====================
+local function trySend()
+	local text = InputBox.Text:gsub("^%s+", ""):gsub("%s+$", "")
 	if text == "" then
 		return
 	end
-	if not RBXGeneral then
-		warn("[ChatController] Cannot send: RBXGeneral TextChannel not found.")
+	if #text > B.MaxMessageLength then
+		text = text:sub(1, B.MaxMessageLength)
+	end
+	local channel = general
+	if not channel then
+		notice("Chat is still loading, try again in a moment.")
 		return
 	end
-
-	local now = tick()
+	local now = os.clock()
 	if now - lastSendTime < B.SendRateLimit then
+		notice(B.TooFastNotice)
 		return
 	end
 	lastSendTime = now
 
-	local msgText = text
+	table.insert(sentHistory, text)
+	if #sentHistory > B.SendHistory then
+		table.remove(sentHistory, 1)
+	end
+	historyIndex = #sentHistory + 1
 	InputBox.Text = ""
 	InputBox:ReleaseFocus()
 
-	-- SendAsync yields — run in a separate thread so UI doesn't block
 	task.spawn(function()
 		local ok, err = pcall(function()
-			RBXGeneral:SendAsync(msgText)
+			channel:SendAsync(text)
 		end)
 		if not ok then
 			warn("[ChatController] SendAsync failed:", err)
@@ -637,114 +489,130 @@ local function trySendMessage()
 	end)
 end
 
+InputBox.Focused:Connect(function()
+	isFocused = true
+	CharCount.Visible = true
+	updateFocusState()
+end)
 InputBox.FocusLost:Connect(function(enterPressed)
+	isFocused = false
+	focusLostAt = os.clock()
+	CharCount.Visible = false
+	updateFocusState()
 	if enterPressed then
-		trySendMessage()
+		trySend()
 	end
 end)
+InputBox:GetPropertyChangedSignal("Text"):Connect(function()
+	local length = #InputBox.Text
+	if length > B.MaxMessageLength then
+		InputBox.Text = InputBox.Text:sub(1, B.MaxMessageLength)
+		return
+	end
+	CharCount.Text = string.format("%d/%d", length, B.MaxMessageLength)
+	CharCount.TextColor3 = length >= B.MaxMessageLength - 20 and Color3.fromHex("#FF5555") or Color3.fromHex("#AAAAAA")
+end)
+SendBtn.MouseButton1Click:Connect(trySend)
 
-SendBtn.MouseButton1Click:Connect(trySendMessage)
+local function focusInput(prefill: string?)
+	if isFocused or not ChatGui.Enabled then
+		return
+	end
+	InputBox:CaptureFocus()
+	if prefill then
+		RunService.Heartbeat:Wait()
+		if InputBox.Text == "" then
+			InputBox.Text = prefill
+		end
+		InputBox.CursorPosition = #InputBox.Text + 1
+	end
+end
 
-UserInputService.InputBegan:Connect(function(input, gameProcessed)
-	if gameProcessed then
+UserInputService.InputBegan:Connect(function(input, processed)
+	if isFocused then
+		if input.KeyCode == Enum.KeyCode.Escape then
+			InputBox:ReleaseFocus()
+		elseif input.KeyCode == Enum.KeyCode.Up and #sentHistory > 0 then
+			historyIndex = math.max(1, historyIndex - 1)
+			InputBox.Text = sentHistory[historyIndex]
+			InputBox.CursorPosition = #InputBox.Text + 1
+		elseif input.KeyCode == Enum.KeyCode.Down and #sentHistory > 0 then
+			historyIndex = math.min(#sentHistory + 1, historyIndex + 1)
+			InputBox.Text = sentHistory[historyIndex] or ""
+			InputBox.CursorPosition = #InputBox.Text + 1
+		end
+		return
+	end
+	if processed then
 		return
 	end
 	if input.KeyCode == Enum.KeyCode.Slash then
-		InputBox:CaptureFocus()
+		if chatOpen then
+			chatIcon:deselect() -- the topbar pill drives setChatOpen
+		else
+			chatIcon:select()
+		end
+	elseif input.KeyCode == Enum.KeyCode.Return and os.clock() - focusLostAt > 0.25 then
+		if not chatOpen then
+			chatIcon:select()
+		end
+		task.spawn(focusInput, nil)
 	end
 end)
 
--- ===================== RECEIVE PLAYER MESSAGES =====================
--- TextChatService.MessageReceived fires on every client when a message
--- is delivered by the server. msg.Text is already filtered by Roblox.
--- msg.TextSource contains the sender's UserId.
---
--- IMPORTANT: This fires TWICE for the sending client —
---   1. Immediately as a "pending" message (MessageId may be provisional)
---   2. Again when the server confirms delivery (with final filtered text)
--- We deduplicate on MessageId to avoid showing the same message twice.
--- However, the second fire has the real filtered text, so if both fire
--- we want the second one. Strategy: always render on first fire, then
--- on second fire UPDATE the existing entry if it matches the same ID.
+-- ===================== RECEIVING =====================
+local function hidden(text: string): boolean
+	for _, pattern in ipairs(B.HideNoticePatterns) do
+		if text:find(pattern, 1, true) then
+			return true
+		end
+	end
+	return false
+end
 
 TextChatService.MessageReceived:Connect(function(msg)
-	-- msg.Text is empty when the message is in "pending" state (before server confirms).
-	-- Skip pending messages — wait for the confirmed version.
 	if not msg.Text or msg.Text == "" then
-		return
+		return -- still pending: the confirmed message fires again
 	end
-
-	-- Get the sender's display name
-	local senderName = "Server"
-	if msg.TextSource then
-		local userId = msg.TextSource.UserId
-		local senderPlayer = Players:GetPlayerByUserId(userId)
-		if senderPlayer then
-			senderName = senderPlayer.DisplayName
-		end
-	end
-
-	-- Deduplicate: if we've already rendered this MessageId, skip
-	local msgId = msg.MessageId
-	if msgId and msgId ~= "" then
-		if renderedMsgIds[msgId] then
+	local id = msg.MessageId
+	if id and id ~= "" then
+		if renderedIds[id] then
 			return
 		end
-		renderedMsgIds[msgId] = true
-
-		-- Prune old IDs to prevent memory leak (keep last 200)
-		local count = 0
-		for _ in pairs(renderedMsgIds) do
-			count = count + 1
-		end
-		if count > 200 then
-			renderedMsgIds = {}
+		renderedIds[id] = true
+		renderedCount += 1
+		if renderedCount > 200 then
+			renderedIds = { [id] = true }
+			renderedCount = 1
 		end
 	end
-
-	local payload = {
+	local source = msg.TextSource
+	if not source then
+		if hidden(msg.Text) then
+			return
+		end
+		renderPayload({ type = "notice", playerName = "System", nameColor = V.SystemNameColor:ToHex(), text = msg.Text, timestamp = os.time() })
+		return
+	end
+	local sender = Players:GetPlayerByUserId(source.UserId)
+	renderPayload({
 		type = "player",
-		playerName = senderName,
-		text = msg.Text, -- already filtered by Roblox
-		channel = "all",
+		playerName = sender and sender.DisplayName or source.Name,
+		userId = source.UserId,
+		text = msg.Text, -- filtered and rich-text escaped by TextChatService
 		timestamp = os.time(),
-	}
-
-	renderPayload(payload)
+	})
 end)
 
--- ===================== RECEIVE SYSTEM MESSAGES =====================
-SystemMsg.OnClientEvent:Connect(function(payload)
-	renderPayload(payload)
-end)
+SystemMsg.OnClientEvent:Connect(renderPayload)
 
--- ===================== SCROLL TRACKING =====================
-LogFrame:GetPropertyChangedSignal("CanvasPosition"):Connect(function()
-	autoScroll = isNearBottom()
-	if autoScroll then
-		NewMsgBtn.Visible = false
-	end
-end)
-
-NewMsgBtn.MouseButton1Click:Connect(function()
-	autoScroll = true
-	NewMsgBtn.Visible = false
-	scrollToBottom()
-end)
-
--- ===================== STARTUP MESSAGE =====================
+-- ===================== STARTUP LINES =====================
 task.defer(function()
 	ChatBridge.postRaw({
-		"",
-		"  Welcome to Fractured Islands: Ascension",
-		"  Press / to chat. Click chat icon to toggle.",
-		"  Custom chat is in early beta — expect bugs and missing features!",
-		"",
+		"Welcome to Fractured Islands: Ascension",
+		"Press Enter to chat. / shows or hides the chat.",
 	}, {
-		[2] = toHex(Color3.fromHex("#FF55FF")),
-		[3] = toHex(Color3.fromHex("#AAAAAA")),
-		[4] = toHex(Color3.fromHex("#FF5555")),
-	}, { [2] = true }, "game")
+		[1] = "FF55FF",
+		[2] = "AAAAAA",
+	}, { [1] = true }, "game")
 end)
-
-print("[ChatController] Loaded ✓")

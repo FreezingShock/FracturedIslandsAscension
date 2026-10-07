@@ -41,6 +41,11 @@ local function new(class, props, parent)
 	return i
 end
 
+-- a constant-colour gradient the controller recolours per card (border / body / stroke / text / timer theme)
+local function gradient(parent, name, color, rotation, enabled)
+	return new("UIGradient", { Name = name, Color = ColorSequence.new(color), Rotation = rotation or 0, Enabled = enabled ~= false }, parent)
+end
+
 local function label(parent, name, text, color, size, extra)
 	local l = new("TextLabel", {
 		Name = name,
@@ -57,6 +62,7 @@ local function label(parent, name, text, color, size, extra)
 		AutomaticSize = Enum.AutomaticSize.Y,
 	}, parent)
 	new("UIStroke", { Thickness = 1, Color = Color3.new(0, 0, 0), Transparency = 0.45, ApplyStrokeMode = Enum.ApplyStrokeMode.Contextual }, l)
+	gradient(l, "TextGradient", Color3.new(1, 1, 1), 90, false) -- off until a card is themed
 	for k, v in pairs(extra or {}) do
 		l[k] = v
 	end
@@ -75,25 +81,28 @@ end
 local function card(parent, name, width, padX, padY)
 	local outer = new("Frame", {
 		Name = name,
-		BackgroundColor3 = hex("#4B4B4B"),
+		BackgroundColor3 = Color3.new(1, 1, 1), -- colour comes from BorderGradient
 		BackgroundTransparency = 0.35,
 		BorderSizePixel = 0,
 		Size = UDim2.fromOffset(width, 0),
 		AutomaticSize = Enum.AutomaticSize.Y,
 	}, parent)
+	gradient(outer, "BorderGradient", hex("#4B4B4B"), 45)
 	new("UICorner", { CornerRadius = UDim.new(0, 8) }, outer)
 	new("UIScale", { Name = "Pop" }, outer) -- the merge pop
 	new("UIPadding", { PaddingTop = UDim.new(0, 4), PaddingBottom = UDim.new(0, 4), PaddingLeft = UDim.new(0, 4), PaddingRight = UDim.new(0, 4) }, outer)
 	local body = new("Frame", {
 		Name = "Body",
-		BackgroundColor3 = Color3.new(0, 0, 0),
+		BackgroundColor3 = Color3.new(1, 1, 1), -- colour comes from BodyGradient (black by default)
 		BackgroundTransparency = 0.45,
 		BorderSizePixel = 0,
 		Size = UDim2.new(1, 0, 0, 0),
 		AutomaticSize = Enum.AutomaticSize.Y,
 	}, outer)
 	new("UICorner", { CornerRadius = UDim.new(0, 4) }, body)
-	new("UIStroke", { Thickness = 2, Color = hex("#AAAAAA"), ApplyStrokeMode = Enum.ApplyStrokeMode.Border }, body)
+	gradient(body, "BodyGradient", Color3.new(0, 0, 0), 45)
+	local stroke = new("UIStroke", { Thickness = 2, Color = Color3.new(1, 1, 1), ApplyStrokeMode = Enum.ApplyStrokeMode.Border }, body)
+	gradient(stroke, "StrokeGradient", hex("#AAAAAA"), 45)
 	new("UIPadding", { PaddingTop = UDim.new(0, padY), PaddingBottom = UDim.new(0, padY), PaddingLeft = UDim.new(0, padX), PaddingRight = UDim.new(0, padX) }, body)
 	list(body, Enum.FillDirection.Vertical, 5)
 	return outer, body
@@ -113,7 +122,8 @@ end
 local function timer(parent, height)
 	local t = new("Frame", { Name = "Timer", BackgroundColor3 = Color3.new(0, 0, 0), BackgroundTransparency = 0.5, BorderSizePixel = 0, Size = UDim2.new(1, 0, 0, height) }, parent)
 	new("UICorner", { CornerRadius = UDim.new(0, 1) }, t)
-	new("Frame", { Name = "Fill", BackgroundColor3 = hex("#FFFFFF"), BorderSizePixel = 0, Size = UDim2.fromScale(1, 1) }, t)
+	local fill = new("Frame", { Name = "Fill", BackgroundColor3 = hex("#FFFFFF"), BorderSizePixel = 0, Size = UDim2.fromScale(1, 1) }, t)
+	gradient(fill, "FillGradient", Color3.new(1, 1, 1), 0, false)
 	return t
 end
 

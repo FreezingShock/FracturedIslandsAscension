@@ -217,39 +217,59 @@ ChatConfig.Templates = {
 }
 
 -- ===================== VISUAL CONFIG =====================
+-- The look itself (strokes, fonts, corners) is the Studio template ReplicatedStorage.GUI.FIAChatGui (tools/studio/build_chat_gui.luau);
+-- these numbers are what the controller applies at runtime. Pixel sizes are for a 1080p screen and scale with the viewport.
 ChatConfig.Visual = {
 	-- Panel layout (bottom-left anchor)
-	PanelWidth = 480,
-	LogHeight = 200,
+	PanelWidth = 480, -- used until the HUD is found
+	PanelHeight = 300,
+	-- The width follows FIAHUD: the chat fills the gutter between the left margin and the HUD's left edge (never over the hotbar),
+	-- clamped to MinWidth / MaxWidth. HudGap = px kept clear of the HUD. Set FollowHud = false for a fixed PanelWidth.
+	FollowHud = true,
+	HudGap = 16,
+	MinWidth = 300,
+	MaxWidth = 640,
+	Margin = 16, -- px from the left / bottom edge
+	BaseHeight = 1080,
+	MinScale = 0.6,
+	MaxScale = 1.4,
 	InputBarHeight = 38,
-	PanelOffsetX = 8,
-	PanelOffsetY = 8,
 
-	-- Fonts
-	ChatFont = Font.new("rbxassetid://12187370747"),
+	-- Fonts: readable text uses the tooltip body font in Bold (Noto Sans once uploaded: put its asset id here)
+	ChatFont = Font.new("rbxassetid://12187370747", Enum.FontWeight.Bold),
 	FontSize = 20,
 	LineSpacing = 2,
 
-	-- Colors
-	PanelBackground = Color3.fromRGB(150, 150, 150),
-	PanelBackgroundAlpha = 0.85, -- unfocused (more transparent)
-	PanelFocusedAlpha = 0.40, -- focused / hovered (more opaque)
-	InputBackground = Color3.fromRGB(255, 255, 255),
-	InputBackgroundAlpha = 1,
-	SendButtonColor = Color3.fromRGB(100, 150, 255),
-	PlayerNameColor = Color3.fromRGB(255, 255, 255),
-	PlayerTextColor = Color3.fromRGB(220, 220, 220),
-	TimestampColor = Color3.fromRGB(100, 100, 100),
-	ScrollBarColor = Color3.fromRGB(80, 80, 80),
+	-- Transparency: both layers of the tooltip shell (4px outer border, black body). Idle = faint, active (focused / hovered) = solid.
+	BorderIdleAlpha = 0.85,
+	BorderActiveAlpha = 0.35,
+	BodyIdleAlpha = 0.8,
+	BodyActiveAlpha = 0.4,
+	InputActiveStroke = Color3.fromHex("#FFFFFF"),
+	InputIdleStroke = Color3.fromHex("#555555"),
 	TransitionTime = 0.2,
+	-- Animation (seconds): the whole chat sliding in / out when toggled with "/" or the topbar pill, a new line fading in, the log
+	-- scrolling to the newest line, and the input stroke flaring when it gets focus.
+	OpenTime = 0.4,
+	CloseTime = 0.3,
+	LineFadeTime = 0.25,
+	ScrollTime = 0.2,
+	FocusPulse = 4, -- px the input stroke flares to when focused (it settles back to 2)
 
-	-- Message fade (only when panel is NOT focused/hovered)
-	FadeStartAge = 10, -- seconds before fade begins
+	-- Colours (Minecraft palette)
+	PlayerTextColor = Color3.fromHex("#EEEEEE"),
+	TimestampColor = Color3.fromHex("#777777"),
+	SystemNameColor = Color3.fromHex("#FFFF55"),
+	NameColors = { "#FF5555", "#FFAA00", "#FFFF55", "#55FF55", "#55FFFF", "#5555FF", "#FF55FF", "#00AAAA" }, -- a player's name colour is picked from these by UserId
+	SelfNameColor = nil, -- e.g. "#55FFFF" to give your own name a fixed colour
+
+	-- Message fade (only when the chat is NOT focused / hovered)
+	FadeStartAge = 10, -- seconds before the fade begins
 	FadeEndAge = 14, -- fully transparent at this age
+	StrokeTransparency = 0.45, -- the UIStroke of every line (fades with the text)
 
 	-- Scroll
 	AutoScrollThreshold = 20,
-	NewMessageButtonText = "↓ New messages",
 }
 
 -- ===================== BEHAVIOUR CONFIG =====================
@@ -259,6 +279,10 @@ ChatConfig.Behaviour = {
 	SendRateLimit = 1.5, -- seconds between player messages (server enforced)
 	ShowTimestamps = false,
 	ShowJoinLeave = true,
+	SendHistory = 30, -- sent messages you can recall with Up / Down
+	-- server notices that only add noise (TextChatService "Roblox automatically translates ...")
+	HideNoticePatterns = { "automatically translates" },
+	TooFastNotice = "You are chatting too fast.",
 }
 
 -- Admin ids live in Modules/AdminConfig.

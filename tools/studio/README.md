@@ -26,6 +26,7 @@ restyling) unless you set `local FORCE = true` at the top.
 | `build_scoreboard.luau` | `StarterGui.FIAScoreboard` (Panel: Board > Lines, Template, Foldable > Chip / List / RowTemplate; tooltip look) | `ScoreboardController`, `GainFeedController` |
 | `build_actionbar.luau` | `FIAHUD.Root.ActionBar` (CanvasGroup > Label (+ Pop UIScale, Stroke), Sub (+ Stroke)); sizes from `HudTheme.actionBar` | `ActionBarClient` |
 | `build_notifications.luau` | `StarterGui.FIANotifications` (Stack + Templates: Slot, CardLevelUp, CardCollection, CardPickup, CardSystem, RewardLine; tooltip look from the Figma file "FIA Notifications") | `NotificationController` |
+| `build_chat_gui.luau` | `ReplicatedStorage.GUI.FIAChatGui` (Panel > Body > LogFrame, InputBar (InputBox, CharCount, SendBtn), NewMsgBtn; Templates: Entry, Line, Spacer; tooltip look) | `ChatController` |
 
 Rule: whenever Claude generates anything (Studio GUI / template / marker / rig, a Blender model or animation, an
 icon), the script that generated it is saved in `tools/` in the same turn (`tools/studio`, `tools/blender`, ...) and
