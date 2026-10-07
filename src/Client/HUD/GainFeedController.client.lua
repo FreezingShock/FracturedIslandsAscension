@@ -34,6 +34,34 @@ local pop = list:WaitForChild("Pop") :: UIScale
 local FOLD = TweenInfo.new(CONFIG.fold.time, Enum.EasingStyle[CONFIG.fold.style], Enum.EasingDirection[CONFIG.fold.direction])
 windowLabel.Text = CONFIG.window .. "s"
 
+-- ===================== LOOK (GainFeedConfig.look) =====================
+local LOOK = CONFIG.look
+local function applyLook()
+	chip.BackgroundTransparency = LOOK.borderTransparency
+	chip.Body.BackgroundTransparency = LOOK.bodyTransparency
+	list.BackgroundTransparency = LOOK.borderTransparency
+	list.Body.BackgroundTransparency = LOOK.bodyTransparency
+	for _, name in ipairs({ "Title", "Count", "Key" }) do
+		chip.Body[name].TextSize = LOOK.chipSize
+		chip.Body[name].Size = UDim2.fromOffset(0, LOOK.chipSize + 4)
+	end
+	local header = list.Body.Header
+	header.Size = UDim2.new(1, 0, 0, LOOK.headerSize + 4)
+	header.Title.TextSize = LOOK.headerSize
+	windowLabel.TextSize = LOOK.ageSize
+	emptyLabel.TextSize = LOOK.emptySize
+	emptyLabel.Size = UDim2.new(1, 0, 0, 0)
+	emptyLabel.AutomaticSize = Enum.AutomaticSize.Y
+	rowTemplate.Size = UDim2.new(1, 0, 0, LOOK.rowSize + 8)
+	rowTemplate.Gem.Position = UDim2.fromOffset(0, math.floor((LOOK.rowSize + 4 - 10) / 2))
+	rowTemplate.Label.TextSize = LOOK.rowSize
+	rowTemplate.Label.Position = UDim2.fromOffset(18, 0)
+	rowTemplate.Label.Size = UDim2.new(1, -(LOOK.ageWidth + 22), 0, LOOK.rowSize + 4)
+	rowTemplate.Age.TextSize = LOOK.ageSize
+	rowTemplate.Age.Size = UDim2.fromOffset(LOOK.ageWidth, LOOK.rowSize + 4)
+end
+applyLook()
+
 type Row = { key: string, frame: CanvasGroup, events: { { t: number, amount: number } }, label: string, color: string, last: number }
 local rows: { [string]: Row } = {}
 local open = false

@@ -25,6 +25,7 @@
 	  New zone:                 zones.mines = { name = "Deep Mines", color = "#55FFFF", bottom = { "hint" } }  (+ the zone in ZoneConfig.ZONES)
 	  Zone-only line:           zones.dummy_yard.lines.kills = { format = "..." } and put "kills" in its bottom
 	  Hide the whole board:     enabled = false
+	  Put the [J] hint back:    add "hint" at the end of order (the line still exists in the library)
 	  Move it:                  layout.yScale (fraction of the screen height) and layout.rightMargin (px at 1080p)
 	  Fainter / solid:          layout.bodyTransparency and layout.borderTransparency
 	The panel scales with the viewport (layout.baseHeight is the screen height it was designed for).
@@ -83,7 +84,6 @@ ScoreboardConfig.order = {
 	"objective",
 	"-",
 	"@bottom",
-	"hint",
 }
 
 ScoreboardConfig.zones = {

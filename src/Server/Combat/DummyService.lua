@@ -4,7 +4,7 @@
 
 	Training dummies to hit. One dummy stands on every Part in Workspace.DummySpawns (move, rotate or add markers in
 	Studio). Each is cloned from ServerStorage.Dummy (restyle the template freely; if it is missing a plain R6 rig is built),
-	tagged "Damageable" so DamageService can hit it, and respawns CombatConfig.dummy.respawnSeconds after dying. A dummy
+	tagged "Damageable" so DamageService can hit it, pays its killer through LootService.reward (Coins), and respawns CombatConfig.dummy.respawnSeconds after dying. A dummy
 	that was knocked away walks back to its marker once it has gone CombatConfig.dummy.returnHomeAfter seconds unhit.
 --]]
 
@@ -16,6 +16,7 @@ local ServerStorage = game:GetService("ServerStorage")
 
 local CombatConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("CombatConfig")) :: any
 local DamageService = require(ServerScriptService:WaitForChild("DamageService")) :: any
+local LootService = require(ServerScriptService:WaitForChild("LootService")) :: any
 
 local DUMMY = CombatConfig.dummy
 local DummyService = {}
@@ -70,6 +71,10 @@ local function spawnDummy(marker: BasePart)
 
 	humanoid.Died:Once(function()
 		dummies[dummy] = nil
+		local ok, err = pcall(LootService.reward, dummy, "dummy") -- Coins (CoinsConfig.enemies.dummy) for whoever killed it
+		if not ok then
+			warn("[DummyService] reward failed: " .. tostring(err))
+		end
 		task.delay(DUMMY.respawnSeconds, function()
 			dummy:Destroy()
 			if marker.Parent then
