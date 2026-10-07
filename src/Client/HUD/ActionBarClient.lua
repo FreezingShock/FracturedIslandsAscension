@@ -23,6 +23,7 @@ local TweenService = game:GetService("TweenService")
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local Config = require(Modules:WaitForChild("Config"):WaitForChild("ActionBarConfig")) :: any
 local SkillsConfig = require(Modules:WaitForChild("SkillsConfig")) :: any
+local EnemyFX = require(Modules:WaitForChild("EnemyFX")) :: any
 
 local ActionBarClient = {}
 
@@ -131,6 +132,55 @@ local function playXp()
 		ladder.n += 1
 		ladder.at = now
 	end
+end
+
+-- ===================== FX AT THE PLAYER =====================
+local lastGainFx = -1e9
+
+local function fxPoint(lift: number): Vector3?
+	local cfg = Config.library.default.fx
+	if not cfg.enabled or (cfg.hideInFirstPerson and player:GetAttribute("CameraMode") == "first") then
+		return nil
+	end
+	local character = player.Character
+	local root = character and character:FindFirstChild("HumanoidRootPart") :: BasePart?
+	return root and (root.Position + Vector3.new(0, lift, 0)) or nil
+end
+
+--- XP arrived (a new line or a stacked gain): a small green burst, throttled so a stream of gains stays calm.
+local function fxGain()
+	local cfg = Config.library.default.fx.gain
+	local now = os.clock()
+	if now - lastGainFx < cfg.minGap then
+		return
+	end
+	local point = fxPoint(cfg.lift)
+	if point then
+		lastGainFx = now
+		EnemyFX.play(cfg.preset, nil, nil, nil, point, Vector3.yAxis, "low")
+	end
+end
+
+--- A level ticked up: the grand burst now, the wide second wave a beat later. Several levels = this once per level.
+local function fxLevel()
+	local cfg = Config.library.default.fx.levelup
+	local point = fxPoint(cfg.lift)
+	if not point then
+		return
+	end
+	EnemyFX.play(cfg.preset, nil, nil, nil, point, Vector3.yAxis)
+	task.delay(cfg.waveDelay, function()
+		local again = fxPoint(cfg.lift) -- the player may have moved (or switched to first person) meanwhile
+		if again then
+			EnemyFX.play(cfg.wave, nil, nil, nil, again, Vector3.yAxis)
+		end
+	end)
+end
+
+--- XP sound + the small FX together.
+local function xpFeedback()
+	playXp()
+	fxGain()
 end
 
 --- The level number ticked up: the first tick is the level-up sound; every further level (two or more at once) is a blip of
@@ -349,6 +399,7 @@ local function startCycle()
 			render()
 			popLabel(cfg, cfg.tickPop)
 			playLevelTick(ticks)
+			fxLevel()
 			task.wait(cfg.tickStep)
 		end
 		if not alive() then
@@ -425,7 +476,7 @@ local function stack(cfg: any, msg: any)
 	state.typingId += 1 -- a half-typed line shows in full
 	;(label :: TextLabel).MaxVisibleGraphemes = -1
 	popLabel(cfg)
-	playXp()
+	xpFeedback()
 	if state.busy then
 		render() -- the cycle chases the new target itself
 		return
@@ -454,7 +505,7 @@ local function levelUp(msg: any)
 		state.levelShown = fromLevel
 		render()
 		popLabel(cfg)
-		playXp()
+		xpFeedback()
 		if state.busy then
 			l.MaxVisibleGraphemes = -1
 			startCycle()
@@ -474,7 +525,7 @@ local function levelUp(msg: any)
 	state.pctTarget = msg.pct
 	state.busy = true
 	local rich = render()
-	playXp()
+	xpFeedback()
 	begin(cfg, rich, cfg.hold, startCycle)
 end
 
@@ -502,7 +553,7 @@ local function onXp(msg: any)
 		state.kind, state.skill, state.total, state.pct = "xp", msg.skill, msg.gain, msg.pct
 		state.levelShown, state.levelTarget, state.busy = nil, nil, false
 		state.cycle += 1
-		playXp()
+		xpFeedback()
 		begin(cfg, xpLine(cfg, msg.skill, msg.gain, msg.pct, msg.level), cfg.hold)
 	end)
 end

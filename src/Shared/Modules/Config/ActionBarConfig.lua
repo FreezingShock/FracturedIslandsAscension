@@ -27,6 +27,7 @@
 	  Hold longer:               library.default.hold = 8
 	  Faster typing:             library.default.typeSpeed = 90
 	  Quieter / other sounds:    library.default.sounds.xp = { volume = 0.3 }   (or another id)
+	  No XP particles:           library.default.fx.enabled = false   (the look is EnemyConfig.fx.xp_gain / xp_levelup / xp_levelup_wave)
 	  Bigger entrance:           library.default.intro = { rise = 28, scale = 0.7 }   (any key you leave out keeps its value)
 	  Another colour for gains:  kinds.xp.pieces.gain.color = "#55FFFF"
 	  Combat level text red:     skills.Combat = { levelColor = "#FF5555" }
@@ -47,6 +48,15 @@ ActionBarConfig.library = {
 		replaceFade = 0.15, -- seconds the old line takes to fade before a different skill's line types in
 		pop = { scale = 1.14, time = 0.2 }, -- the number pop when a stacked gain arrives
 		pctTween = 0.25, -- seconds the % takes to move to its new value
+		-- FX at the player's centre (EnemyConfig.fx presets, played through EnemyFX): a small green burst when XP arrives, a grand
+		-- one on EVERY level tick (the level number ticking up), followed a beat later by a wide second wave. Skipped in first person
+		-- (player attribute CameraMode == "first", set by CameraController) so nothing covers the view.
+		fx = {
+			enabled = true,
+			hideInFirstPerson = true,
+			gain = { preset = "xp_gain", minGap = 0.3, lift = 0.4 }, -- lift = studs above the character's centre
+			levelup = { preset = "xp_levelup", wave = "xp_levelup_wave", waveDelay = 0.16, lift = 0.3 },
+		},
 		-- SOUNDS. One Sound per slot is reused, so a new play CUTS the old one (sounds never pile up), and minGap drops requests
 		-- that come too soon. xp = XP appearing / stacking (its pitch climbs a little with each consecutive gain, resets after
 		-- ladderReset seconds); levelup = the level number ticking up; ticker = the extra blips when SEVERAL levels tick at once

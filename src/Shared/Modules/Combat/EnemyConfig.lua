@@ -84,6 +84,10 @@ local CRIMSON = Color3.fromRGB(255, 70, 60)
 local BLOOD = Color3.fromRGB(190, 25, 25)
 local SALMON = Color3.fromRGB(255, 205, 190)
 local DUST = { Color3.fromRGB(215, 205, 190), Color3.fromRGB(120, 112, 100) }
+-- Minecraft XP greens: pale glint, green (#55FF55), dark green (#00AA00)
+local XPGLINT = Color3.fromRGB(215, 255, 205)
+local XPGREEN = Color3.fromRGB(85, 255, 85)
+local XPDARK = Color3.fromRGB(0, 170, 0)
 
 -- Parts of a preset (all optional): burst (flipbook impact star), flash (flare), ring (shockwave disc), slash (cut mark),
 -- sparks (streaks), shards (slivers), puff (smoke flipbook), motes (lingering dots), light (PointLight pop).
@@ -129,6 +133,37 @@ EnemyConfig.fx = {
 		flash = { count = 1, color = { WHITE, Color3.fromRGB(255, 215, 80) }, size = { 2, 3.5 }, life = 0.12, transparency = 0.2 },
 		sparks = { count = 8, color = { WHITE, Color3.fromRGB(255, 240, 150), Color3.fromRGB(255, 190, 40) }, speed = { 22, 50 }, spread = 45, life = { 0.14, 0.32 }, size = { 1.4, 0.5 }, drag = 4, gravity = 40 },
 		motes = { count = 6, color = { Color3.fromRGB(255, 240, 150), Color3.fromRGB(255, 190, 40) }, speed = { 2, 8 }, spread = 180, life = { 0.5, 0.9 }, size = { 0.45, 0.05 }, drag = 2, rise = 3 },
+	},
+
+	-- XP gained: a soft green flare, a ring that breathes out, motes drifting up and a few streaks (ActionBarClient plays it at the
+	-- player's centre; small and short so frequent gains stay calm)
+	xp_gain = {
+		flash = { count = 1, color = { XPGLINT, XPGREEN }, size = { 1.8, 3 }, life = 0.2, transparency = 0.3 },
+		ring = { count = 1, color = { XPGLINT, XPGREEN, XPDARK }, size = { 0.8, 4.2 }, life = 0.42, transparency = 0.4, speed = 0.5, horizontal = true },
+		sparks = { count = 7, color = { XPGLINT, XPGREEN, XPDARK }, speed = { 8, 18 }, spread = 55, life = { 0.3, 0.6 }, size = { 1.1, 0.3 }, drag = 3, rise = 8 },
+		motes = { count = 9, color = { XPGLINT, XPGREEN, XPDARK }, speed = { 2, 7 }, spread = 180, life = { 0.7, 1.2 }, size = { 0.4, 0.05 }, drag = 2, rise = 4 },
+		light = { color = XPGREEN, brightness = 1.6, range = 9, time = 0.22 },
+	},
+
+	-- a LEVEL tick: the crit / crash language in green: a spiked star, a big flare, a wide ground shockwave, a streak fountain,
+	-- shards, rising green smoke and a column of motes (played once per level, then xp_levelup_wave follows)
+	xp_levelup = {
+		burst = { count = 1, color = { XPGLINT, XPGREEN, XPDARK }, size = { 5, 9 }, life = 0.4 },
+		flash = { count = 1, color = { XPGLINT, XPGREEN }, size = { 4, 7.5 }, life = 0.2, transparency = 0.15 },
+		ring = { count = 1, color = { XPGLINT, XPGREEN, XPDARK }, size = { 1.5, 11 }, life = 0.55, transparency = 0.2, speed = 0.5, horizontal = true },
+		sparks = { count = 32, color = { XPGLINT, XPGREEN, XPDARK }, speed = { 18, 44 }, spread = 70, life = { 0.4, 0.9 }, size = { 1.8, 0.5 }, drag = 3, rise = 12 },
+		shards = { count = 8, color = { XPGREEN, XPDARK }, speed = { 12, 30 }, spread = 60, life = { 0.3, 0.6 }, size = { 1.2, 0.4 }, drag = 3, gravity = 30 },
+		puff = { count = 4, color = { XPGREEN, XPDARK }, speed = { 2, 8 }, spread = 180, life = 0.8, size = { 3, 5.5 }, transparency = 0.55, rise = 2 },
+		motes = { count = 26, color = { XPGLINT, XPGREEN, XPDARK }, speed = { 3, 12 }, spread = 180, life = { 1, 1.8 }, size = { 0.55, 0.05 }, drag = 2, rise = 5 },
+		light = { color = XPGREEN, brightness = 3.5, range = 17, time = 0.4 },
+	},
+
+	-- the second wave of a level tick (a beat later): a wider, slower ring and a gentle halo, so a level lands in two pulses
+	xp_levelup_wave = {
+		flash = { count = 1, color = { XPGREEN, XPDARK }, size = { 3, 6 }, life = 0.28, transparency = 0.35 },
+		ring = { count = 1, color = { XPGLINT, XPGREEN, XPDARK }, size = { 2, 17 }, life = 0.75, transparency = 0.3, speed = 0.5, horizontal = true },
+		sparks = { count = 14, color = { XPGREEN, XPDARK }, speed = { 10, 26 }, spread = 90, life = { 0.4, 0.8 }, size = { 1.3, 0.4 }, drag = 3, rise = 9 },
+		light = { color = XPDARK, brightness = 2.2, range = 14, time = 0.45 },
 	},
 
 	-- a kill: a big warm burst at the body's centre, a ground shockwave, smoke, then the body dissolves
