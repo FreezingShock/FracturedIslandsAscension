@@ -64,12 +64,19 @@ ActionBarConfig.kinds = {
 		},
 		order = { "gain", "sep", "pct" },
 	},
-	-- "+15 Combat XP - 100.0% - COMBAT LEVEL 12" then CONGRATULATIONS underneath
+	-- "+100 Combat XP - 100.0% - Combat Level 5", a couple of seconds at 100%, then the % drops to 0, the level TICKS UP
+	-- (5 -> 6) and the % climbs to where you really are: "+250 Combat XP - 25.0% - Combat Level 6", then CONGRATULATIONS.
+	-- More XP keeps stacking into the line the whole time.
 	levelup = {
 		hold = 3,
-		levelColor = "skill", -- colour of "COMBAT LEVEL 12" ("skill" = the skill's colour)
-		levelFormat = "{SKILL} LEVEL {level}",
-		levelTypeSpeed = 22, -- slower: this is the moment
+		levelColor = "skill", -- colour of "Combat Level 5" ("skill" = the skill's colour)
+		levelFormat = "{skill} Level {level}",
+		levelTypeSpeed = 22, -- the level text types in this slowly when it first appears
+		tickDelay = 2, -- seconds the line rests at 100% before the level ticks up
+		dropTime = 0.3, -- the % running down to 0
+		tickStep = 0.28, -- seconds per level while the number ticks up (several levels at once tick one by one)
+		tickPop = 1.18, -- the level text pops by this scale on every tick
+		fillTime = 0.6, -- the % climbing to the real progress in the new level
 		congrats = {
 			text = "CONGRATULATIONS",
 			color = "#FF55FF",

@@ -402,6 +402,7 @@ function SkillsDataManager.AddXP(player, skillName, amount, source)
 	end
 
 	local gain = math.floor(amount * (100 + SkillsDataManager.GetWisdom(player, skillName)) / 100 + 1e-9)
+	local levelBefore = skill.level
 	skill.xp += gain
 
 	-- Handle level-ups (loop in case of large XP grants)
@@ -425,7 +426,7 @@ function SkillsDataManager.AddXP(player, skillName, amount, source)
 		-- the action bar line: how far into the CURRENT level the skill now is (100% when a level was just finished)
 		local needed = SkillsDataManager.GetXPNeeded(skillName, skill.level)
 		local pct = (skill.level >= cap or needed <= 0) and 1 or math.clamp(skill.xp / needed, 0, 1)
-		ActionBarService.xp(player, skillName, gain, pct, skill.level, leveledUp)
+		ActionBarService.xp(player, skillName, gain, pct, skill.level, leveledUp, levelBefore)
 	end
 	return gain, leveledUp
 end

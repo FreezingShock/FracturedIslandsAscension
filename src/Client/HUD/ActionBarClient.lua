@@ -49,8 +49,12 @@ local state = {
 	skill = nil :: string?,
 	total = 0,
 	pct = 0, -- the % currently drawn (0-1)
+	pctTarget = 0, -- the real progress the % is heading for
+	levelShown = nil :: number?, -- the level number drawn (ticks up during a level-up)
+	levelTarget = nil :: number?,
+	cycle = 0, -- bumps whenever a level-up cycle starts / is cancelled
+	busy = false, -- a level-up cycle is running (other skills cannot replace the line)
 	visible = false,
-	lockedUntil = 0,
 }
 
 -- ===================== HELPERS =====================
@@ -149,6 +153,7 @@ local function scheduleHide(cfg: any, hold: number)
 			task.delay(cfg.fadeOut, function()
 				if state.token == token and not state.visible then
 					state.kind, state.skill, state.total = nil, nil, 0
+					state.levelShown, state.levelTarget, state.busy = nil, nil, false
 					;(label :: TextLabel).Text = ""
 					;(sub :: TextLabel).Text = ""
 				end
@@ -224,117 +229,201 @@ local function replace(cfg: any, thenDo: () -> ())
 end
 
 -- ===================== XP =====================
-local function stack(cfg: any, msg: any)
-	state.total += msg.gain
-	local from, to = state.pct, msg.pct
-	state.typingId += 1 -- a half-typed line shows in full
-	;(label :: TextLabel).MaxVisibleGraphemes = -1
-	-- the number pops once
-	local p = pop :: UIScale
-	p.Scale = cfg.pop.scale
-	TweenService:Create(p, info(cfg.pop.time), { Scale = 1 }):Play()
-	play(cfg.sounds.pop)
-	-- the % moves to its new value
-	state.pctId += 1
-	local id = state.pctId
-	local started = os.clock()
-	task.spawn(function()
-		while state.pctId == id do
-			local u = math.clamp((os.clock() - started) / cfg.pctTween, 0, 1)
-			u = 1 - (1 - u) * (1 - u)
-			state.pct = from + (to - from) * u
-			;(label :: TextLabel).Text = xpLine(cfg, msg.skill, state.total, state.pct, msg.level)
-			if u >= 1 then
-				return
-			end
-			RunService.Heartbeat:Wait()
-		end
-	end)
-	scheduleHide(cfg, cfg.hold)
+--- The line as it should read right now (XP total, % drawn, and the level piece while a level-up is on screen).
+local function render()
+	local l = label :: TextLabel
+	local xpCfg = Config.kind("xp", state.skill)
+	local rich = xpLine(xpCfg, state.skill :: string, state.total, state.pct, state.levelTarget)
+	if state.levelShown then
+		local cfg = Config.kind("levelup", state.skill)
+		local color = cfg.levelColor == "skill" and skillColor(state.skill :: string) or cfg.levelColor
+		local text = fill(cfg.levelFormat, { skill = state.skill, SKILL = (state.skill :: string):upper(), level = state.levelShown })
+		local sep = xpCfg.pieces.sep
+		rich ..= piece(sep.format, sep.color) .. piece(text, color)
+	end
+	l.Text = rich
+	return rich
 end
 
-local function levelUp(msg: any)
-	local cfg = Config.kind("levelup", msg.skill)
-	local xpCfg = Config.kind("xp", msg.skill)
-	local lvl = cfg.congrats
-	local color = cfg.levelColor == "skill" and skillColor(msg.skill) or cfg.levelColor
-	local base = xpLine(xpCfg, msg.skill, msg.gain, 1, msg.level)
-	local sepPiece = xpCfg.pieces.sep
-	local levelText = fill(cfg.levelFormat, { SKILL = msg.skill:upper(), skill = msg.skill, level = msg.level })
-	local rich = base .. piece(sepPiece.format, sepPiece.color) .. piece(levelText, color)
-	local baseLen = plainLen(base .. piece(sepPiece.format, sepPiece.color))
-	-- nothing may overwrite the sequence: lock for its whole length
-	local lockFor = plainLen(rich) / cfg.typeSpeed + (plainLen(levelText) / cfg.levelTypeSpeed) + (plainLen(lvl.text) / lvl.typeSpeed) + lvl.hold + 0.6
-	state.lockedUntil = os.clock() + lockFor
-	state.kind, state.skill, state.total, state.pct = "levelup", msg.skill, msg.gain, 1
-	local l, s = label :: TextLabel, sub :: TextLabel
-	state.token += 1
+--- Move the drawn % to `to` over `time` seconds (blocking: call from a task). Stops if `ok()` goes false.
+local function animatePct(to: number, time: number, ok: () -> boolean)
 	state.pctId += 1
-	state.holdId += 1
-	local token = state.token
-	l.Text = rich
-	l.MaxVisibleGraphemes = 0
-	s.Text = piece(lvl.text, lvl.color)
-	s.MaxVisibleGraphemes = 0
-	fadeIn(cfg)
-	play(cfg.sounds.levelup)
-	-- the XP line types at the normal speed, "COMBAT LEVEL 12" slower, then CONGRATULATIONS
-	typeInto(l, 0, function()
-		return baseLen
-	end, cfg.typeSpeed, cfg, function()
-		typeInto(l, baseLen, function()
-			return plainLen(rich)
-		end, cfg.levelTypeSpeed, cfg, function()
-			if state.token ~= token then
-				return
-			end
-			-- CONGRATULATIONS lands with an outline flash
-			local stroke = subStroke :: UIStroke
-			local original = stroke.Color
-			stroke.Color = Color3.fromHex(lvl.flash)
-			stroke.Thickness = baseStroke * 3
-			TweenService:Create(stroke, info(lvl.flashTime), { Color = original, Thickness = baseStroke }):Play()
-			typeInto(s, 0, function()
-				return plainLen(s.Text)
-			end, lvl.typeSpeed, cfg, function()
-				if state.token == token then
-					scheduleHide(cfg, lvl.hold)
-				end
-			end)
+	local id = state.pctId
+	local from = state.pct
+	local started = os.clock()
+	while state.pctId == id and ok() do
+		local u = math.clamp((os.clock() - started) / math.max(time, 0.001), 0, 1)
+		u = 1 - (1 - u) * (1 - u)
+		state.pct = from + (to - from) * u
+		render()
+		if u >= 1 then
+			return
+		end
+		RunService.Heartbeat:Wait()
+	end
+end
+
+local function popLabel(cfg: any, scale: number?)
+	local p = pop :: UIScale
+	p.Scale = scale or cfg.pop.scale
+	TweenService:Create(p, info(cfg.pop.time), { Scale = 1 }):Play()
+end
+
+--- The level-up cycle: % climbs to 100, rests a couple of seconds, drops to 0, the level ticks up one by one, CONGRATULATIONS
+--- types in, then the % climbs to the real progress. Restarts (from the level on screen) if another level-up arrives.
+local function startCycle()
+	local cfg = Config.kind("levelup", state.skill)
+	local lvl = cfg.congrats
+	state.cycle += 1
+	local id = state.cycle
+	state.busy = true
+	state.holdId += 1 -- no hide while the cycle runs
+	local function alive()
+		return state.cycle == id
+	end
+	task.spawn(function()
+		animatePct(1, cfg.pctTween, alive)
+		if not alive() then
+			return
+		end
+		local waited = 0
+		while alive() and waited < cfg.tickDelay do
+			waited += task.wait(0.05)
+		end
+		if not alive() then
+			return
+		end
+		animatePct(0, cfg.dropTime, alive)
+		while alive() and (state.levelShown :: number) < (state.levelTarget :: number) do
+			state.levelShown += 1
+			render()
+			popLabel(cfg, cfg.tickPop)
+			play(cfg.sounds.levelup)
+			task.wait(cfg.tickStep)
+		end
+		if not alive() then
+			return
+		end
+		-- CONGRATULATIONS lands with an outline flash
+		local s = sub :: TextLabel
+		s.Text = piece(lvl.text, lvl.color)
+		s.MaxVisibleGraphemes = 0
+		local stroke = subStroke :: UIStroke
+		local original = stroke.Color
+		stroke.Color = Color3.fromHex(lvl.flash)
+		stroke.Thickness = baseStroke * 3
+		TweenService:Create(stroke, info(lvl.flashTime), { Color = original, Thickness = baseStroke }):Play()
+		typeInto(s, 0, function()
+			return plainLen(s.Text)
+		end, lvl.typeSpeed, cfg, nil)
+		-- the % climbs to where you really are (more XP may arrive meanwhile: chase the newest target)
+		repeat
+			animatePct(state.pctTarget, cfg.fillTime, alive)
+		until not alive() or math.abs(state.pct - state.pctTarget) < 0.0005
+		if not alive() then
+			return
+		end
+		state.busy = false
+		scheduleHide(cfg, lvl.hold)
+	end)
+end
+
+local function stack(cfg: any, msg: any)
+	state.total += msg.gain
+	state.pctTarget = msg.pct
+	state.typingId += 1 -- a half-typed line shows in full
+	;(label :: TextLabel).MaxVisibleGraphemes = -1
+	popLabel(cfg)
+	play(cfg.sounds.pop)
+	if state.busy then
+		render() -- the cycle chases the new target itself
+		return
+	end
+	task.spawn(function()
+		animatePct(msg.pct, cfg.pctTween, function()
+			return true
 		end)
 	end)
+	scheduleHide(cfg, state.levelShown and Config.kind("levelup", state.skill).congrats.hold or cfg.hold)
+end
+
+--- XP that finished a level.
+local function levelUp(msg: any)
+	local cfg = Config.kind("levelup", msg.skill)
+	local fromLevel = state.levelShown or msg.fromLevel or (msg.level - 1)
+	if state.visible and state.skill == msg.skill then
+		-- the line is already up: more XP, and the level piece types in after it, then the cycle starts
+		state.total += msg.gain
+		state.pctTarget = msg.pct
+		state.levelTarget = msg.level
+		state.typingId += 1
+		local l = label :: TextLabel
+		local prevLen = plainLen(l.Text)
+		state.kind = "levelup"
+		state.levelShown = fromLevel
+		render()
+		popLabel(cfg)
+		play(cfg.sounds.pop)
+		if state.busy then
+			l.MaxVisibleGraphemes = -1
+			startCycle()
+			return
+		end
+		l.MaxVisibleGraphemes = math.min(prevLen, plainLen(l.Text))
+		typeInto(l, l.MaxVisibleGraphemes, function()
+			return plainLen(l.Text)
+		end, cfg.levelTypeSpeed, cfg, startCycle)
+		return
+	end
+	-- a fresh line: "+100 Combat XP - 100.0% - Combat Level 5" types in, then the cycle starts
+	state.kind, state.skill, state.total = "levelup", msg.skill, msg.gain
+	state.pct = 1
+	state.levelShown = fromLevel
+	state.levelTarget = msg.level
+	state.pctTarget = msg.pct
+	state.busy = true
+	local rich = render()
+	play(cfg.sounds.levelup)
+	begin(cfg, rich, cfg.hold, startCycle)
 end
 
 -- ===================== MESSAGES =====================
 local function onXp(msg: any)
-	if os.clock() < state.lockedUntil then
-		return -- a level-up is playing
+	if state.busy and state.skill ~= msg.skill then
+		return -- a level-up of another skill is playing
 	end
 	if msg.leveledUp then
-		replace(Config.kind("levelup", msg.skill), function()
+		if state.visible and state.skill == msg.skill then
 			levelUp(msg)
-		end)
+		else
+			replace(Config.kind("levelup", msg.skill), function()
+				levelUp(msg)
+			end)
+		end
 		return
 	end
 	local cfg = Config.kind("xp", msg.skill)
-	if state.visible and state.kind == "xp" and state.skill == msg.skill then
+	if state.visible and state.skill == msg.skill and (state.kind == "xp" or state.kind == "levelup") then
 		stack(cfg, msg)
 		return
 	end
 	replace(cfg, function()
 		state.kind, state.skill, state.total, state.pct = "xp", msg.skill, msg.gain, msg.pct
+		state.levelShown, state.levelTarget, state.busy = nil, nil, false
+		state.cycle += 1
 		begin(cfg, xpLine(cfg, msg.skill, msg.gain, msg.pct, msg.level), cfg.hold)
 	end)
 end
 
 function ActionBarClient.show(text: string, opts: any?)
-	if not group or os.clock() < state.lockedUntil or type(text) ~= "string" then
+	if not group or state.busy or type(text) ~= "string" then
 		return
 	end
 	local cfg = Config.kind("text")
 	local hold = opts and type(opts.hold) == "number" and opts.hold or cfg.hold
 	replace(cfg, function()
 		state.kind, state.skill, state.total = "text", nil, 0
+		state.levelShown, state.levelTarget, state.busy = nil, nil, false
 		begin(cfg, text, hold)
 	end)
 end

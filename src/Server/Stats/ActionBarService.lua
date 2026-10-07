@@ -4,10 +4,12 @@
 
 	Feeds the action bar (the centered line above the hotbar, ActionBarClient). Server-authoritative: the client only draws.
 	Remote "ActionBar" (RemoteEvent, server -> client) carries one of:
-	  { kind = "xp", skill, gain, pct, level, leveledUp }     skill XP (pct = 0-1 of the current level; level = the level now)
+	  { kind = "xp", skill, gain, pct, level, leveledUp, fromLevel }
+	                                                          skill XP (pct = 0-1 of the current level; level = the level now;
+	                                                          fromLevel = the level before the first gain of this batch)
 	  { kind = "text", text, hold?, color? }                  anything else (rich text allowed)
 
-	  ActionBarService.xp(player, skill, gain, pct, level, leveledUp)   called by SkillsDataManager.AddXP; gains of one skill
+	  ActionBarService.xp(player, skill, gain, pct, level, leveledUp, levelBefore)   called by SkillsDataManager.AddXP; gains of one skill
 	                                                                    that arrive within FLUSH seconds are summed into ONE message
 	  ActionBarService.show(player, text, opts?)                        opts = { hold = seconds }; shown for 5s by default
 --]]
@@ -29,7 +31,7 @@ end
 
 local pendingXp: { [Player]: { [string]: any } } = {}
 
-function ActionBarService.xp(player: Player, skill: string, gain: number, pct: number, level: number, leveledUp: boolean)
+function ActionBarService.xp(player: Player, skill: string, gain: number, pct: number, level: number, leveledUp: boolean, levelBefore: number?)
 	if typeof(player) ~= "Instance" or type(skill) ~= "string" or type(gain) ~= "number" or gain ~= gain or gain <= 0 then
 		return
 	end
@@ -40,7 +42,7 @@ function ActionBarService.xp(player: Player, skill: string, gain: number, pct: n
 	end
 	local entry = bySkill[skill]
 	if not entry then
-		entry = { kind = "xp", skill = skill, gain = 0, pct = 0, level = level, leveledUp = false }
+		entry = { kind = "xp", skill = skill, gain = 0, pct = 0, level = level, leveledUp = false, fromLevel = levelBefore or level }
 		bySkill[skill] = entry
 	end
 	entry.gain += gain
