@@ -84,19 +84,66 @@ local function fill(format: string, tokens: { [string]: any }): string
 	end))
 end
 
-local function play(sound: any, pitchOverride: number?)
-	if not sound or sound.id == "" then
+-- ===================== SOUND =====================
+-- One Sound per slot, reused: a new play cuts the old one, so sounds never pile up. minGap drops requests that come too soon.
+local voices: { [string]: Sound } = {}
+local lastAt: { [string]: number } = {}
+local ladders: { [string]: { n: number, at: number } } = { xp = { n = 0, at = -1e9 }, ticker = { n = 0, at = -1e9 } }
+
+local function playSound(name: string, pitch: number?, volumeMul: number?): boolean
+	local cfg = Config.library.default.sounds[name]
+	if not cfg or cfg.id == "" then
+		return false
+	end
+	local now = os.clock()
+	if cfg.minGap and now - (lastAt[name] or -1e9) < cfg.minGap then
+		return false
+	end
+	local s = voices[name]
+	if not s then
+		s = Instance.new("Sound")
+		s.Name = "ActionBar_" .. name
+		s.SoundId = cfg.id
+		s.Parent = SoundService -- UI cue for this player only, not positional
+		voices[name] = s
+	end
+	s.Volume = (cfg.volume or 0.5) * (volumeMul or 1)
+	s.PlaybackSpeed = pitch or cfg.pitch or 1
+	s.TimePosition = 0
+	s:Play()
+	lastAt[name] = now
+	return true
+end
+
+--- XP appeared or stacked: the xp sound, a little higher for every consecutive gain (a ladder that resets when it goes quiet).
+local function playXp()
+	local cfg = Config.library.default.sounds
+	if os.clock() - (lastAt.levelup or -1e9) < cfg.duckXp then
+		return -- the level-up sound owns this moment
+	end
+	local ladder = ladders.xp
+	local now = os.clock()
+	if now - ladder.at > cfg.xp.ladderReset then
+		ladder.n = 0
+	end
+	local pitch = math.min(cfg.xp.pitch + ladder.n * cfg.xp.ladderStep, cfg.xp.ladderMax)
+	if playSound("xp", pitch) then
+		ladder.n += 1
+		ladder.at = now
+	end
+end
+
+--- The level number ticked up: the first tick is the level-up sound; every further level (two or more at once) is a blip of
+--- the xp sound one step higher, so a multi-level jump reads as a rising ladder.
+local function playLevelTick(index: number)
+	if index <= 1 then
+		playSound("levelup")
+		ladders.ticker.n = 0
 		return
 	end
-	local s = Instance.new("Sound")
-	s.SoundId = sound.id
-	s.Volume = sound.volume or 0.5
-	s.PlaybackSpeed = pitchOverride or sound.pitch or 1
-	s.Parent = SoundService
-	s.Ended:Once(function()
-		s:Destroy()
-	end)
-	s:Play()
+	local cfg = Config.library.default.sounds.ticker
+	local pitch = math.min(cfg.pitch + (index - 2) * cfg.ladderStep, cfg.ladderMax)
+	playSound("ticker", pitch)
 end
 
 local function info(seconds: number, style: Enum.EasingStyle?, dir: Enum.EasingDirection?)
@@ -176,7 +223,7 @@ local function typeInto(target: TextLabel, from: number, to: () -> number, speed
 			target.MaxVisibleGraphemes = shown
 			if shown - lastTick >= 3 then
 				lastTick = shown
-				play(cfg.sounds.tick)
+				playSound("tick")
 			end
 			if shown >= goal then
 				target.MaxVisibleGraphemes = -1
@@ -295,11 +342,13 @@ local function startCycle()
 			return
 		end
 		animatePct(0, cfg.dropTime, alive)
+		local ticks = 0
 		while alive() and (state.levelShown :: number) < (state.levelTarget :: number) do
 			state.levelShown += 1
+			ticks += 1
 			render()
 			popLabel(cfg, cfg.tickPop)
-			play(cfg.sounds.levelup)
+			playLevelTick(ticks)
 			task.wait(cfg.tickStep)
 		end
 		if not alive() then
@@ -348,7 +397,6 @@ local function startCycle()
 				s.Text = congrats(step)
 				s.MaxVisibleGraphemes = -1
 				flash()
-				play(cfg.sounds.pop, 1 + 0.15 * step)
 				if subPop then
 					subPop.Scale = lvl.marks.pop
 					TweenService:Create(subPop, info(0.25, Enum.EasingStyle.Back), { Scale = 1 }):Play()
@@ -377,7 +425,7 @@ local function stack(cfg: any, msg: any)
 	state.typingId += 1 -- a half-typed line shows in full
 	;(label :: TextLabel).MaxVisibleGraphemes = -1
 	popLabel(cfg)
-	play(cfg.sounds.pop)
+	playXp()
 	if state.busy then
 		render() -- the cycle chases the new target itself
 		return
@@ -406,7 +454,7 @@ local function levelUp(msg: any)
 		state.levelShown = fromLevel
 		render()
 		popLabel(cfg)
-		play(cfg.sounds.pop)
+		playXp()
 		if state.busy then
 			l.MaxVisibleGraphemes = -1
 			startCycle()
@@ -426,7 +474,7 @@ local function levelUp(msg: any)
 	state.pctTarget = msg.pct
 	state.busy = true
 	local rich = render()
-	play(cfg.sounds.levelup)
+	playXp()
 	begin(cfg, rich, cfg.hold, startCycle)
 end
 
@@ -454,6 +502,7 @@ local function onXp(msg: any)
 		state.kind, state.skill, state.total, state.pct = "xp", msg.skill, msg.gain, msg.pct
 		state.levelShown, state.levelTarget, state.busy = nil, nil, false
 		state.cycle += 1
+		playXp()
 		begin(cfg, xpLine(cfg, msg.skill, msg.gain, msg.pct, msg.level), cfg.hold)
 	end)
 end

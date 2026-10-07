@@ -26,6 +26,7 @@
 	RECIPES
 	  Hold longer:               library.default.hold = 8
 	  Faster typing:             library.default.typeSpeed = 90
+	  Quieter / other sounds:    library.default.sounds.xp = { volume = 0.3 }   (or another id)
 	  Bigger entrance:           library.default.intro = { rise = 28, scale = 0.7 }   (any key you leave out keeps its value)
 	  Another colour for gains:  kinds.xp.pieces.gain.color = "#55FFFF"
 	  Combat level text red:     skills.Combat = { levelColor = "#FF5555" }
@@ -46,10 +47,16 @@ ActionBarConfig.library = {
 		replaceFade = 0.15, -- seconds the old line takes to fade before a different skill's line types in
 		pop = { scale = 1.14, time = 0.2 }, -- the number pop when a stacked gain arrives
 		pctTween = 0.25, -- seconds the % takes to move to its new value
+		-- SOUNDS. One Sound per slot is reused, so a new play CUTS the old one (sounds never pile up), and minGap drops requests
+		-- that come too soon. xp = XP appearing / stacking (its pitch climbs a little with each consecutive gain, resets after
+		-- ladderReset seconds); levelup = the level number ticking up; ticker = the extra blips when SEVERAL levels tick at once
+		-- (the xp sound, pitched up one step per level); tick = typewriter characters. "" = silent.
 		sounds = {
-			tick = { id = "", volume = 0.25, pitch = 1.6 }, -- every few typed characters
-			pop = { id = "", volume = 0.4, pitch = 1 }, -- a stacked gain
-			levelup = { id = "", volume = 0.7, pitch = 1 }, -- the level-up line
+			xp = { id = "rbxassetid://106742416285496", volume = 0.55, pitch = 1, minGap = 0.45, ladderStep = 0.045, ladderMax = 1.35, ladderReset = 2.5 },
+			levelup = { id = "rbxassetid://82373959251026", volume = 0.85, pitch = 1, minGap = 1 },
+			ticker = { id = "rbxassetid://106742416285496", volume = 0.45, pitch = 1.15, minGap = 0.1, ladderStep = 0.12, ladderMax = 1.9 },
+			tick = { id = "", volume = 0.25, pitch = 1.6 },
+			duckXp = 1.1, -- seconds after the level-up sound starts in which stacked XP stays quiet (the fanfare owns the moment)
 		},
 	},
 }
