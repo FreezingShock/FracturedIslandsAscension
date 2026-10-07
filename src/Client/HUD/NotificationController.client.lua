@@ -291,13 +291,40 @@ end
 
 local show: (payload: any) -> ()
 
+local function priorityOf(kind: string): number
+	local def = Config.kinds[kind]
+	return def and def.priority or 0
+end
+
+local leave: (entry: Entry) -> ()
+
+--- Shows waiting cards while there is room. When the stack is full and the next card matters MORE than a showing one, the least
+--- important (then oldest) showing card is pushed out to make room: level-ups never wait behind a flood of pickups.
 local function pump()
-	while #waiting > 0 and visibleCount() < DEFAULT.maxVisible do
-		show(table.remove(waiting, 1))
+	while #waiting > 0 do
+		if visibleCount() < DEFAULT.maxVisible then
+			show(table.remove(waiting, 1))
+		else
+			local need = priorityOf(waiting[1].kind)
+			local victim: Entry? = nil
+			if DEFAULT.evictLower then
+				for _, entry in ipairs(active) do -- oldest first
+					local p = priorityOf(entry.kind)
+					if not entry.leaving and not entry.dead and p < need and (not victim or p < priorityOf(victim.kind)) then
+						victim = entry
+					end
+				end
+			end
+			if not victim then
+				break
+			end
+			leave(victim :: Entry) -- its slot frees, leave() pumps again and the waiting card takes the bottom
+			return
+		end
 	end
 end
 
-local function leave(entry: Entry)
+leave = function(entry: Entry)
 	if entry.leaving or entry.dead then
 		return
 	end
@@ -391,16 +418,28 @@ end
 
 -- ===================== INCOMING =====================
 local function insertWaiting(payload: any)
-	local priority = Config.kinds[payload.kind] and Config.kinds[payload.kind].priority or 0
+	local priority = priorityOf(payload.kind)
 	local at = #waiting + 1
 	for i, queued in ipairs(waiting) do
-		local other = Config.kinds[queued.kind] and Config.kinds[queued.kind].priority or 0
-		if other < priority then
+		if priorityOf(queued.kind) < priority then
 			at = i
 			break
 		end
 	end
 	table.insert(waiting, at, payload)
+	-- a flood never builds a long backlog: the oldest card of the least important kind is dropped
+	while #waiting > DEFAULT.maxQueue do
+		local lowest = math.huge
+		for _, queued in ipairs(waiting) do
+			lowest = math.min(lowest, priorityOf(queued.kind))
+		end
+		for i, queued in ipairs(waiting) do
+			if priorityOf(queued.kind) == lowest then
+				table.remove(waiting, i)
+				break
+			end
+		end
+	end
 end
 
 local function merge(payload: any): boolean

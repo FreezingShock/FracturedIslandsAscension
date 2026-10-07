@@ -125,7 +125,7 @@ end
 
 local gui = new("ScreenGui", { Name = "FIANotifications", ResetOnSpawn = false, IgnoreGuiInset = true, DisplayOrder = 6, ZIndexBehavior = Enum.ZIndexBehavior.Sibling }, StarterGui)
 
-local stack = new("Frame", { Name = "Stack", BackgroundTransparency = 1, AnchorPoint = Vector2.new(0, 1), Position = UDim2.new(0, 16, 1, -190), Size = UDim2.fromOffset(440, 0), AutomaticSize = Enum.AutomaticSize.Y }, gui)
+local stack = new("Frame", { Name = "Stack", BackgroundTransparency = 1, AnchorPoint = Vector2.new(0, 1), Position = UDim2.new(0, 16, 1, -16), Size = UDim2.fromOffset(440, 0), AutomaticSize = Enum.AutomaticSize.Y }, gui)
 list(stack, Enum.FillDirection.Vertical, 6, { VerticalAlignment = Enum.VerticalAlignment.Bottom })
 new("UIScale", { Name = "Scale" }, stack)
 

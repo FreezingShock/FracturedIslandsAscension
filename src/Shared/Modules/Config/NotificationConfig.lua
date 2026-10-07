@@ -20,7 +20,9 @@
 
 	MERGING: a pickup with the same key as a card that is still showing (or waiting in the queue) adds into it: "x8" counter, the timer
 	restarts, the card pops. The amount is summed, the label stays ("+11 Rotten Flesh  x4" = four pickups).
-	QUEUE: at most `maxVisible` cards show at once; the rest wait first-in-first-out, a kind with a higher `priority` jumps the queue.
+	QUEUE: at most `maxVisible` cards show at once; the rest wait first-in-first-out, a kind with a higher `priority` jumps the queue AND,
+	when the stack is full (evictLower), pushes the least important showing card out so it appears at once at the bottom (level-up 3 >
+	collection 3 > system 2 > pickup 1). The queue is capped at maxQueue (oldest least-important dropped).
 
 	RECIPES
 	  Hold longer:                 library.default.hold = 10   (or kinds.levelup.hold = 12 for one kind)
@@ -43,12 +45,14 @@ NotificationConfig.fonts = {
 NotificationConfig.library = {
 	default = {
 		maxVisible = 5,
+		evictLower = true, -- a full stack pushes its least important (then oldest) card out when a MORE important one arrives
+		maxQueue = 12, -- waiting cards beyond this drop the oldest of the least important kind
 		hold = 7, -- seconds a card stays
 		baseHeight = 1080, -- the screen height the pixel sizes are designed for (UIScale = screen height / baseHeight, clamped)
 		minScale = 0.6,
 		maxScale = 1.4,
 		margin = 16, -- px from the left edge at baseHeight
-		bottomOffset = 190, -- px from the bottom of the screen to the bottom of the stack (clears the chat box)
+		bottomOffset = 16, -- px from the bottom of the screen to the bottom of the stack (the chat is the native one, top-left)
 		gap = 6, -- px between cards
 		slideIn = { time = 0.35, style = "Quint", direction = "Out" },
 		slideOut = { time = 0.3, style = "Quint", direction = "In" },
