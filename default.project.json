@@ -82,6 +82,9 @@
       "MovementService": {
         "$path": "src/Server/Stats/MovementService.lua"
       },
+      "NotifyService": {
+        "$path": "src/Server/Stats/NotifyService.lua"
+      },
       "ProfileService": {
         "$path": "src/Server/Data/ProfileService.luau"
       },
@@ -344,6 +347,9 @@
         },
         "LiquidGlassBootstrap": {
           "$path": "src/Client/Menu/LiquidGlassBootstrap.client.lua"
+        },
+        "NotificationController": {
+          "$path": "src/Client/HUD/NotificationController.client.lua"
         },
         "ResourceBarsController": {
           "$path": "src/Client/HUD/ResourceBarsController.client.lua"

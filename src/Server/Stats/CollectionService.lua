@@ -27,6 +27,7 @@ local CollectionMath = require(Modules:WaitForChild("CollectionMath")) :: any
 local CollectionRewards = require(Modules:WaitForChild("CollectionRewards")) :: any
 local StatisticsDataManager = require(ServerScriptService:WaitForChild("StatisticsDataManager")) :: any
 local AttributeStatManager = require(ServerScriptService:WaitForChild("AttributeStatManager")) :: any
+local NotifyService = require(ServerScriptService:WaitForChild("NotifyService")) :: any
 require(ServerScriptService:WaitForChild("RewardBehaviors")) -- registers derive/apply on the shared reward types
 
 local CollectionService = {}
@@ -118,9 +119,11 @@ local function grantTiers(player: Player, data, collections, skill: string, key:
 		collections.claimed[skill] = byStat
 	end
 	byStat[key] = to -- high-water mark first: whatever happens below, a tier is never paid twice
+	local described = {} -- every reward of the new tiers, for the notification card
 	for tier = from + 1, to do
 		for index, reward in ipairs(Config.getRewards(skill, key, tier)) do
 			local spec = CollectionRewards.get(reward.type)
+			table.insert(described, { reward = reward, ctx = { skill = skill, key = key, tier = tier } })
 			if spec and spec.apply then
 				local ok, err = pcall(spec.apply, reward, {
 					player = player,
@@ -139,6 +142,7 @@ local function grantTiers(player: Player, data, collections, skill: string, key:
 			end
 		end
 	end
+	return described
 end
 
 function CollectionService.sync(player: Player)
@@ -161,8 +165,8 @@ function CollectionService.sync(player: Player)
 			local highest = CollectionMath.highestTier(entry and entry.lifetime or 0)
 			local claimedTier = collections.claimed[skill] and collections.claimed[skill][item.key] or 0
 			if highest > claimedTier then
-				grantTiers(player, data, collections, skill, item.key, claimedTier, highest)
-				table.insert(unlocked, { skill = skill, key = item.key, tier = highest, count = highest - claimedTier })
+				local described = grantTiers(player, data, collections, skill, item.key, claimedTier, highest)
+				table.insert(unlocked, { skill = skill, key = item.key, tier = highest, count = highest - claimedTier, described = described, name = item.name })
 			end
 		end
 	end
@@ -173,7 +177,9 @@ function CollectionService.sync(player: Player)
 	building[player] = nil
 
 	for _, info in ipairs(unlocked) do
-		TierUnlocked:FireClient(player, info)
+		TierUnlocked:FireClient(player, { skill = info.skill, key = info.key, tier = info.tier, count = info.count })
+		local statConfig = Config.statConfigLookup[info.skill] and Config.statConfigLookup[info.skill][info.key]
+		NotifyService.collection(player, info.skill, statConfig and statConfig.name or tostring(info.key), info.tier - info.count, info.tier, NotifyService.describeRewards(info.described))
 	end
 	if again[player] then
 		again[player] = nil

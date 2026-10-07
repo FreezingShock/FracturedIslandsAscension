@@ -26,6 +26,7 @@ local SkillsConfig = require(Modules:WaitForChild("SkillsConfig")) :: any
 local CollectionRewards = require(Modules:WaitForChild("CollectionRewards")) :: any
 local SkillsDataManager = require(ServerScriptService:WaitForChild("SkillsDataManager")) :: any
 local StatisticsDataManager = require(ServerScriptService:WaitForChild("StatisticsDataManager")) :: any
+local NotifyService = require(ServerScriptService:WaitForChild("NotifyService")) :: any
 local AttributeStatManager = require(ServerScriptService:WaitForChild("AttributeStatManager")) :: any
 require(ServerScriptService:WaitForChild("RewardBehaviors")) -- registers derive/apply on the shared reward types
 
@@ -111,9 +112,11 @@ end
 
 local function grantLevels(player: Player, data, rewards, skill: string, from: number, to: number)
 	rewards.claimed[skill] = to -- high-water mark first: a level is never paid twice
+	local described = {} -- every reward of the new levels, for the notification card
 	for level = from + 1, to do
 		for index, reward in ipairs(SkillsConfig.getRewards(skill, level)) do
 			local spec = CollectionRewards.get(reward.type)
+			table.insert(described, { reward = reward, ctx = { skill = skill, level = level } })
 			if spec and spec.apply then
 				local ok, err = pcall(spec.apply, reward, {
 					player = player,
@@ -129,6 +132,7 @@ local function grantLevels(player: Player, data, rewards, skill: string, from: n
 			end
 		end
 	end
+	return described
 end
 
 function SkillRewardService.sync(player: Player)
@@ -148,9 +152,9 @@ function SkillRewardService.sync(player: Player)
 		local level = data[skill] and data[skill].level or 1
 		local claimed = rewards.claimed[skill] or 0
 		if level > claimed then
-			grantLevels(player, data, rewards, skill, claimed, level)
+			local described = grantLevels(player, data, rewards, skill, claimed, level)
 			if not (claimed == 0 and level == 1) then -- a brand-new character does not get six toasts
-				table.insert(reached, { skill = skill, level = level, count = level - claimed })
+				table.insert(reached, { skill = skill, level = level, count = level - claimed, described = described })
 			end
 		end
 	end
@@ -161,7 +165,8 @@ function SkillRewardService.sync(player: Player)
 	building[player] = nil
 
 	for _, info in ipairs(reached) do
-		LevelUp:FireClient(player, info)
+		LevelUp:FireClient(player, { skill = info.skill, level = info.level, count = info.count })
+		NotifyService.levelUp(player, info.skill, info.level - info.count, info.level, NotifyService.describeRewards(info.described))
 	end
 	if again[player] then
 		again[player] = nil

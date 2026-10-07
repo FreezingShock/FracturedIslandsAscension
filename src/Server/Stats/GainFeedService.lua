@@ -12,11 +12,15 @@
 	      amount a positive number
 	  Remote "GainFeed" (RemoteEvent, server -> client): a list of { key, label, amount, color }.
 
+	Every non-XP gain is also sent to NotifyService.pickup (a notification card replaces the old "You picked up" chat line).
+
 	Called from: SkillsDataManager.AddXP, WalletService.add, InventoryDataManager.AddItem, LootService (stat drops).
 --]]
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local NotifyService = require(script.Parent:WaitForChild("NotifyService")) :: any
 
 local GainFeedService = {}
 
@@ -35,6 +39,9 @@ local pending: { [Player]: { any } } = {}
 function GainFeedService.Push(player: Player, key: string, label: string, amount: number, color: string?)
 	if typeof(player) ~= "Instance" or type(key) ~= "string" or type(amount) ~= "number" or amount ~= amount or amount <= 0 then
 		return
+	end
+	if not key:match("^xp:") then -- XP has the action bar; everything else also gets a notification card
+		NotifyService.pickup(player, key, label, amount, color)
 	end
 	local list = pending[player]
 	if not list then

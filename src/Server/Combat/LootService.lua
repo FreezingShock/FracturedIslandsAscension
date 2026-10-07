@@ -8,7 +8,7 @@
 	  LootService.spawnDrop(position, drop, ownerId?)
 
 	XP: EnemyConfig.enemies[type].xp = { skill, amount } through SkillsDataManager.AddXP(killer, skill, amount, "Kill"),
-	with a chat line. Drops: each entry rolls its own chance (the killer's MagicFind multiplies it); pools pick by weight.
+	(shown by the action bar). Drops: each entry rolls its own chance (the killer's MagicFind multiplies it); pools pick by weight.
 
 	DropTooltipController (client) shows a dot / folded tag / card over every drop tagged "DropTooltip" (attributes DropKind,
 	ItemId, Count, Rarity, DropColor, DropSkill, DropName) and DropFXController (client) draws its glow and particles from the
@@ -33,7 +33,7 @@ local AttributeStatManager = require(ServerScriptService:WaitForChild("Attribute
 local SkillsDataManager = require(ServerScriptService:WaitForChild("SkillsDataManager")) :: any
 local InventoryDataManager = require(ServerScriptService:WaitForChild("InventoryDataManager")) :: any
 local StatisticsDataManager = require(ServerScriptService:WaitForChild("StatisticsDataManager")) :: any
-local ChatService = require(ServerScriptService:WaitForChild("ChatService")) :: any
+local NotifyService = require(ServerScriptService:WaitForChild("NotifyService")) :: any
 local WalletService = require(ServerScriptService:WaitForChild("WalletService")) :: any
 local GainFeedService = require(ServerScriptService:WaitForChild("GainFeedService")) :: any
 local CoinsConfig = require(Modules:WaitForChild("Config"):WaitForChild("CoinsConfig")) :: any
@@ -49,10 +49,6 @@ local LootService = {}
 
 type Drop = { part: BasePart, drop: any, ownerId: number?, ownerUntil: number, expiresAt: number, fullNoticeAt: number }
 local drops: { [BasePart]: Drop } = {}
-
-local function chat(player: Player, text: string, color: Color3)
-	ChatService.BroadcastRaw({ text }, { [1] = color:ToHex() }, nil, "game", player)
-end
 
 local function randomCount(count: any): number
 	if type(count) == "table" then
@@ -200,10 +196,7 @@ function LootService.reward(model: Model, enemyType: string?)
 	end
 	local entry = EnemyConfig.get(enemyType)
 	if entry.xp then
-		local gained = SkillsDataManager.AddXP(killer, entry.xp.skill, entry.xp.amount, "Kill")
-		if gained and gained > 0 then
-			chat(killer, ("  +%d %s XP  (%s)"):format(gained, entry.xp.skill, entry.name), Color3.fromHex("#55FFFF"))
-		end
+		SkillsDataManager.AddXP(killer, entry.xp.skill, entry.xp.amount, "Kill") -- the action bar shows it
 	end
 	local root = model:FindFirstChild("HumanoidRootPart") :: BasePart?
 	if not root then
@@ -247,12 +240,11 @@ local function collect(player: Player, state: Drop): boolean
 		if added <= 0 then
 			if os.clock() - state.fullNoticeAt > 3 then
 				state.fullNoticeAt = os.clock()
-				chat(player, "  Your inventory is full!", Color3.fromHex("#FF5555"))
+				NotifyService.system(player, "Your inventory is full!", "#FF5555", "Drop or stash items to pick up more.")
 			end
 			return false
 		end
 	end
-	chat(player, ("  You picked up %s%s"):format(drop.count > 1 and ("%dx "):format(drop.count) or "", drop.name), drop.color)
 	return true
 end
 
