@@ -22,6 +22,10 @@ local TweenService = game:GetService("TweenService")
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local Config = require(Modules:WaitForChild("Config"):WaitForChild("NotificationConfig")) :: any
 local SkillsConfig = require(Modules:WaitForChild("SkillsConfig")) :: any
+local ItemIcons = require(Modules:WaitForChild("ItemIcons")) :: any
+local ItemIconData = require(Modules:WaitForChild("ItemIconData")) :: { [string]: string }
+local Items = require(Modules:WaitForChild("Items")) :: any
+local CollectionsConfig = require(Modules:WaitForChild("CollectionsConfig")) :: any
 
 local player = Players.LocalPlayer
 local gui = player:WaitForChild("PlayerGui"):WaitForChild("FIANotifications")
@@ -241,7 +245,50 @@ RunService.Heartbeat:Connect(function(dt) -- the chat can open, close or move
 end)
 
 -- ===================== FILLING A CARD =====================
-local function setIcon(card: Frame, image: string?, tint: string)
+local statIcons: { [string]: string }? = nil
+
+--- The icon of a pickup: the key's own override, the payload's icon, the item's ItemIcons icon ("item:<toolName>") or the statistic's
+--- icon ("stat:<id>"). nil = no icon known: the card keeps its tinted diamond gem.
+local function pickupIcon(key: string, payload: any, override: any): any?
+	local function content(value: any): any?
+		if type(value) ~= "string" or value == "" then
+			return nil
+		end
+		if value:find("rbxasset", 1, true) or value:sub(1, 4) == "http" then
+			return { image = value }
+		end
+		return ItemIconData[value] and { image = ItemIconData[value] } or nil
+	end
+	local found = content(override and override.icon) or content(payload.icon)
+	if found then
+		return found
+	end
+	local prefix, id = key:match("^(%a+):(.+)$")
+	if prefix == "item" then
+		local def = Items.getByToolName(id) or Items.get(id)
+		if def then
+			local spec = ItemIcons.resolve(def)
+			if not spec.placeholder then
+				return spec
+			end
+		end
+	elseif prefix == "stat" then
+		if not statIcons then
+			statIcons = {}
+			for _, byKey in pairs(CollectionsConfig.statConfigLookup) do
+				for statKey, stat in pairs(byKey) do
+					if stat.icon and stat.icon ~= "" and not (statIcons :: any)[statKey] then
+						(statIcons :: any)[statKey] = stat.icon
+					end
+				end
+			end
+		end
+		return content((statIcons :: any)[id])
+	end
+	return nil
+end
+
+local function setIcon(card: Frame, image: any, tint: string)
 	local icon = card:FindFirstChild("Icon", true) :: Frame?
 	if not icon then
 		return
@@ -250,11 +297,18 @@ local function setIcon(card: Frame, image: string?, tint: string)
 	local img = icon:FindFirstChild("Image") :: ImageLabel?
 	if gem then
 		gem.BackgroundColor3 = hex(tint)
-		gem.Visible = not (image and image ~= "")
+		local spec = type(image) == "table" and image or { image = image }
+		gem.Visible = not (type(spec.image) == "string" and spec.image ~= "")
 	end
 	if img then
-		img.Image = image or ""
-		img.Visible = image ~= nil and image ~= ""
+		local spec = type(image) == "table" and image or { image = image }
+		local has = type(spec.image) == "string" and spec.image ~= ""
+		img.ResampleMode = Enum.ResamplerMode.Pixelated
+		img.Image = has and spec.image or ""
+		img.ImageRectOffset = spec.rectOffset or Vector2.zero
+		img.ImageRectSize = spec.rectSize or Vector2.zero
+		img.ImageColor3 = spec.tint or Color3.new(1, 1, 1)
+		img.Visible = has
 	end
 end
 
@@ -354,7 +408,7 @@ local function fillPickup(entry: Entry)
 		count.Visible = false
 	end
 	body.Timer.Fill.BackgroundColor3 = hex(color)
-	setIcon(card, cfg.icon or payload.icon, color)
+	setIcon(card, pickupIcon(payload.key, payload, Config.items[payload.key]), color)
 end
 
 local function fillSystem(entry: Entry)

@@ -36,6 +36,7 @@ ICONS = {
     "coal": "Coal",
     "iron_ingot": "Iron_Ingot",
     "gold_ingot": "Gold_Ingot",
+    "gold_nugget": "Gold_Nugget",  # the Coins notification icon
     "iron_helmet": "Iron_Helmet",
     "iron_chestplate": "Iron_Chestplate",
     "iron_leggings": "Iron_Leggings",

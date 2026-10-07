@@ -31,7 +31,9 @@
 	  New pickup colour / icon:    items["item:Oak Wood"] = { color = "#55FF55", icon = "rbxassetid://123" }
 	  Sounds:                      kinds.levelup.sounds.show = { id = "rbxassetid://...", volume = 0.8, pitch = 1 }   ("" = silent)
 	  New skill icon:              skills.Combat.icon = "rbxassetid://..."
-	  Fully themed item:           items["item:Gold Ingot"] = { color = "#FFD700", theme = { bodyTint = 0.3, labelTint = true } }   (see library.default.theme)
+	  Pickup icon:                 items.<key>.icon = "gold_nugget" (ItemIconData key) or "rbxassetid://..."; otherwise items use their ItemIcons icon,
+	                             stats their StatisticsConfig icon, anything else the diamond gem
+	Fully themed item:           items["item:Gold Ingot"] = { color = "#FFD700", theme = { bodyTint = 0.3, labelTint = true } }   (see library.default.theme)
 	  No sheen / pop:              library.default.intro = { sheenStrength = 0, popFrom = 1 }
 	  Fainter / solid cards:       library.default.bodyTransparency / borderTransparency
 ]]
@@ -153,6 +155,7 @@ NotificationConfig.items = {
 	-- Coins: the whole card is gold (border, body, stroke, label, bar)
 	coins = {
 		color = "#FFAA00",
+		icon = "gold_nugget", -- an ItemIconData key (tools/fetch_icons.py -> gen_icon_data.py) or an rbxassetid
 		theme = { borderMix = 0.25, strokeLight = 0.45, bodyTint = 0.34, labelTint = true, textShade = 0.45 },
 		intro = { sheenStrength = 0.5 },
 	},

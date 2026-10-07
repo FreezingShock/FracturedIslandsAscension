@@ -7,6 +7,7 @@ return {
 	diamond_sword = "rbxassetid://110695255017546",
 	elytra = "rbxassetid://126692464644815",
 	gold_ingot = "rbxassetid://109009223465102",
+	gold_nugget = "rbxassetid://84132202054262",
 	golden_helmet = "rbxassetid://94699988609681",
 	golden_sword = "rbxassetid://88777917975073",
 	iron_boots = "rbxassetid://130630401131957",
