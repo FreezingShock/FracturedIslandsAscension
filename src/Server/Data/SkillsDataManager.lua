@@ -24,6 +24,7 @@ local ProfileService = require(ServerScriptService:WaitForChild("ProfileService"
 local SkillsDataManager = {}
 
 local GainFeedService = require(ServerScriptService:WaitForChild("GainFeedService")) :: any
+local ActionBarService = require(ServerScriptService:WaitForChild("ActionBarService")) :: any
 
 -- ===================== CONFIG =====================
 -- Skills, level caps, the XP curve (Hypixel) and the Roman numerals live in SkillsConfig.
@@ -421,6 +422,10 @@ function SkillsDataManager.AddXP(player, skillName, amount, source)
 	markDirty(player)
 	if gain > 0 then
 		GainFeedService.Push(player, "xp:" .. skillName, skillName .. " XP", gain, SkillsConfig.skills[skillName].color)
+		-- the action bar line: how far into the CURRENT level the skill now is (100% when a level was just finished)
+		local needed = SkillsDataManager.GetXPNeeded(skillName, skill.level)
+		local pct = (skill.level >= cap or needed <= 0) and 1 or math.clamp(skill.xp / needed, 0, 1)
+		ActionBarService.xp(player, skillName, gain, pct, skill.level, leveledUp)
 	end
 	return gain, leveledUp
 end

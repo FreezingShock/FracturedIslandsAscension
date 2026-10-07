@@ -161,6 +161,18 @@ HudTheme.name = {
 	pos = Vector2.new(544, -48),
 }
 
+-- Action bar (ActionBarClient / Config/ActionBarConfig): the centered line above the held-item name. Anchored bottom-centre at
+-- `pos` (Root pixels, so it scales with the HUD); Label is the main line, Sub (CONGRATULATIONS) sits above it.
+HudTheme.actionBar = {
+	pos = Vector2.new(544, -56),
+	size = Vector2.new(1000, 84),
+	labelSize = 34,
+	labelHeight = 44,
+	subSize = 24,
+	subHeight = 32,
+	stroke = "textStroke", -- colour key: the 2 px outline (HudTheme.colors)
+}
+
 HudTheme.icons = {
 	heart = {
 		cell = 3,

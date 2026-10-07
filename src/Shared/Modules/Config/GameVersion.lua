@@ -7,5 +7,5 @@
 --]]
 
 return {
-	version = "3.61.1",
+	version = "3.62.0",
 }

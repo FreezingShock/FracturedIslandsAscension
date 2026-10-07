@@ -10,6 +10,9 @@
       "AbilityService": {
         "$path": "src/Server/Combat/AbilityService.lua"
       },
+      "ActionBarService": {
+        "$path": "src/Server/Stats/ActionBarService.lua"
+      },
       "AttributeStatManager": {
         "$path": "src/Server/Data/AttributeStatManager.lua"
       },
@@ -278,6 +281,12 @@
         "$className": "StarterPlayerScripts",
         "AbilityController": {
           "$path": "src/Client/Combat/AbilityController.client.lua"
+        },
+        "ActionBarClient": {
+          "$path": "src/Client/HUD/ActionBarClient.lua"
+        },
+        "ActionBarController": {
+          "$path": "src/Client/HUD/ActionBarController.client.lua"
         },
         "AdminCommandsClient": {
           "$path": "src/Client/Admin/AdminCommandsClient.client.lua"
