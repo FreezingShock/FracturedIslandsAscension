@@ -241,7 +241,7 @@ local function think(mob: Mob, now: number)
 	local humanoid = mob.humanoid
 	local fromHome = flatDistance(position, mob.home)
 	if target and targetPlayer and fromHome <= cfg.leashRange then
-		humanoid.WalkSpeed = cfg.chaseSpeed
+		mob.baseSpeed = cfg.chaseSpeed
 		local distance = flatDistance(position, target.Position)
 		local option, attack = pickAttack(mob, distance, now)
 		if option and attack then
@@ -252,14 +252,19 @@ local function think(mob: Mob, now: number)
 			humanoid:MoveTo(position) -- arrived: stand still
 		end
 	elseif fromHome > cfg.leashRange then
-		humanoid.WalkSpeed = cfg.chaseSpeed
+		mob.baseSpeed = cfg.chaseSpeed
 		humanoid:MoveTo(Vector3.new(mob.home.X, position.Y, mob.home.Z))
 	elseif now >= mob.nextWander then
-		humanoid.WalkSpeed = cfg.walkSpeed
+		mob.baseSpeed = cfg.walkSpeed
 		local angle, radius = math.random() * math.pi * 2, math.sqrt(math.random()) * cfg.wanderRadius
 		humanoid:MoveTo(Vector3.new(mob.home.X + math.cos(angle) * radius, position.Y, mob.home.Z + math.sin(angle) * radius))
 		mob.nextWander = now + cfg.wanderEvery[1] + math.random() * (cfg.wanderEvery[2] - cfg.wanderEvery[1])
 	end
+
+	-- a slow from an ability (AbilityService sets SlowMult / SlowUntil on the model) scales whatever the AI chose
+	local slowUntil = model:GetAttribute("SlowUntil")
+	local slow = (type(slowUntil) == "number" and os.clock() < slowUntil) and (model:GetAttribute("SlowMult") or 1) or 1
+	humanoid.WalkSpeed = (mob.baseSpeed or cfg.walkSpeed) * slow
 end
 
 function EnemyService.start()

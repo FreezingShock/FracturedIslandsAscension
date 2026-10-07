@@ -5,8 +5,9 @@
 	Everything the player sees and hears of a key ability (AbilityConfig). The server decides and casts; every client
 	hears about it on the AbilityCast remote and shows it here:
 	  * caster's own client: the cast animation (AbilityConfig `animation` -> CombatConfig.animations; replicates to others)
-	  * everyone: the 3D sound at the caster and the effect (`fx`): an expanding ring ("nova") or embers over the area
-	    that follow the caster for the zone's duration ("zone"). Numbers live in AbilityConfig.fx / .sounds.
+	  * everyone nearby: at the hit frame the server sends AbilityFx (origin, chain / dash points); the 3D sound and the effect
+	    (`fx`) play from it: nova ring, embers (zone), ground frost, dash streak, chain bolts. Numbers live in AbilityConfig.fx /
+	    .sounds. Parts and emitters are pooled and capped (AbilityConfig.fxLimits); one Heartbeat runs all zone effects.
 	  * the cooldown / mana HUD: one slot per ability of the held weapon, cloned from the hand-made template
 	    ReplicatedStorage.GUI.AbilitySlot into StarterGui.AbilityMenu.Slots (restyle both in Studio; this script only fills
 	    in text, colours and the cooldown bar, it creates no UI).
@@ -28,6 +29,7 @@ local CombatAnimator = require(Modules:WaitForChild("CombatAnimator")) :: any
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 local CastEvent = ReplicatedStorage:WaitForChild("AbilityCast")
+local FxEvent = ReplicatedStorage:WaitForChild("AbilityFx")
 local template = ReplicatedStorage:WaitForChild("GUI"):WaitForChild("AbilitySlot") :: CanvasGroup
 
 local MANA_OK = Color3.fromRGB(85, 255, 255)
@@ -36,7 +38,74 @@ local NAME_READY = Color3.fromRGB(255, 255, 255)
 local NAME_BUSY = Color3.fromRGB(150, 150, 150)
 
 -- ===================== EFFECTS =====================
-local function anchorAt(position: Vector3): Part
+-- Every effect part comes from a small pool (acquire / release) and the total is capped (AbilityConfig.fxLimits), so a busy
+-- fight reuses the same parts instead of creating and destroying instances. One Heartbeat serves all running zones.
+local Limits = AbilityConfig.fxLimits
+local pools: { [string]: { BasePart } } = { ring = {}, bolt = {}, area = {} }
+local liveParts = 0
+local liveEmitters = 0
+
+local function makePart(kind: string): BasePart
+	local part = Instance.new("Part")
+	part.Anchored = true
+	part.CanCollide = false
+	part.CanQuery = false
+	part.CanTouch = false
+	part.CastShadow = false
+	if kind == "ring" then
+		part.Shape = Enum.PartType.Cylinder
+		part.Material = Enum.Material.Neon
+	elseif kind == "bolt" then
+		part.Material = Enum.Material.Neon
+	else -- area: invisible box that carries the particle emitter
+		part.Transparency = 1
+		local emitter = Instance.new("ParticleEmitter")
+		emitter.Name = "Emitter"
+		emitter.Texture = "rbxasset://textures/particles/sparkles_main.dds"
+		emitter.LightEmission = 1
+		emitter.Lifetime = NumberRange.new(1.2, 2.2)
+		emitter.EmissionDirection = Enum.NormalId.Bottom
+		emitter.Shape = Enum.ParticleEmitterShape.Box
+		emitter.Enabled = false
+		emitter.Parent = part
+	end
+	return part
+end
+
+local function acquire(kind: string): BasePart?
+	if liveParts >= Limits.maxParts then
+		return nil
+	end
+	liveParts += 1
+	local part = table.remove(pools[kind]) or makePart(kind)
+	part.Parent = workspace.CurrentCamera
+	return part
+end
+
+local function release(kind: string, part: BasePart)
+	liveParts = math.max(0, liveParts - 1)
+	part.Parent = nil
+	if kind == "area" then
+		local emitter = part:FindFirstChild("Emitter") :: ParticleEmitter
+		emitter.Enabled = false
+		emitter:Clear()
+	end
+	if #pools[kind] < Limits.poolSize then
+		table.insert(pools[kind], part)
+	else
+		part:Destroy()
+	end
+end
+
+local function tooFar(position: Vector3): boolean
+	local camera = workspace.CurrentCamera
+	return camera ~= nil and (camera.CFrame.Position - position).Magnitude > Limits.maxDistance
+end
+
+local function playSound(position: Vector3, entry: any)
+	if not (entry and entry.id and entry.id ~= "") then
+		return
+	end
 	local anchor = Instance.new("Part")
 	anchor.Anchored = true
 	anchor.CanCollide = false
@@ -46,14 +115,6 @@ local function anchorAt(position: Vector3): Part
 	anchor.Size = Vector3.one * 0.2
 	anchor.Position = position
 	anchor.Parent = workspace.CurrentCamera
-	return anchor
-end
-
-local function playSound(position: Vector3, entry: any)
-	if not (entry and entry.id and entry.id ~= "") then
-		return
-	end
-	local anchor = anchorAt(position)
 	local sound = Instance.new("Sound")
 	sound.SoundId = entry.id
 	sound.Volume = entry.volume or 0.8
@@ -67,88 +128,217 @@ local function playSound(position: Vector3, entry: any)
 	Debris:AddItem(anchor, 6)
 end
 
-local function feetOf(root: BasePart): Vector3
-	return root.Position - Vector3.new(0, 2.8, 0)
+local function feetOf(position: Vector3): Vector3
+	return position - Vector3.new(0, 2.8, 0)
 end
 
-local function novaRing(root: BasePart, fx: any, radius: number)
-	local ring = Instance.new("Part")
-	ring.Shape = Enum.PartType.Cylinder
-	ring.Anchored = true
-	ring.CanCollide = false
-	ring.CanQuery = false
-	ring.CanTouch = false
-	ring.Material = Enum.Material.Neon
-	ring.Color = fx.color
+--- A flat ring on the ground at `position`; returns the part (nil at the part cap). The caller tweens and releases it.
+local function groundRing(position: Vector3, color: Color3, height: number): BasePart?
+	local ring = acquire("ring")
+	if not ring then
+		return nil
+	end
+	ring.Color = color
 	ring.Transparency = 0.25
-	ring.Size = Vector3.new(fx.height or 0.6, 2, 2)
-	ring.CFrame = CFrame.new(feetOf(root)) * CFrame.Angles(0, 0, math.rad(90)) -- a cylinder's axis is X: lay it flat
-	ring.Parent = workspace.CurrentCamera
-	local info = TweenInfo.new(fx.time or 0.45, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
-	TweenService:Create(ring, info, { Size = Vector3.new(fx.height or 0.6, radius * 2, radius * 2), Transparency = 1 }):Play()
-	Debris:AddItem(ring, (fx.time or 0.45) + 0.1)
+	ring.Size = Vector3.new(height, 2, 2)
+	ring.CFrame = CFrame.new(feetOf(position)) * CFrame.Angles(0, 0, math.rad(90)) -- a cylinder's axis is X: lay it flat
+	return ring
 end
 
-local function emberZone(root: BasePart, fx: any, radius: number, duration: number)
-	local area = Instance.new("Part")
-	area.Anchored = true
-	area.CanCollide = false
-	area.CanQuery = false
-	area.CanTouch = false
-	area.Transparency = 1
-	area.Size = Vector3.new(radius * 2, 1, radius * 2)
-	area.Parent = workspace.CurrentCamera
+local function novaRing(position: Vector3, fx: any, radius: number)
+	local ring = groundRing(position, fx.color, fx.height or 0.6)
+	if not ring then
+		return
+	end
+	local time = fx.time or 0.45
+	TweenService:Create(ring, TweenInfo.new(time, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+		Size = Vector3.new(fx.height or 0.6, radius * 2, radius * 2),
+		Transparency = 1,
+	}):Play()
+	task.delay(time + 0.05, release, "ring", ring)
+end
 
-	local emitter = Instance.new("ParticleEmitter")
-	emitter.Texture = "rbxasset://textures/particles/sparkles_main.dds"
-	emitter.Color = fx.color
-	emitter.LightEmission = 1
-	emitter.Rate = fx.rate or 90
-	emitter.Lifetime = NumberRange.new(1.2, 2.2)
-	emitter.Speed = NumberRange.new(fx.speed or 8)
-	emitter.EmissionDirection = Enum.NormalId.Bottom
-	emitter.Size = NumberSequence.new({ NumberSequenceKeypoint.new(0, fx.size or 0.5), NumberSequenceKeypoint.new(1, 0) })
-	emitter.Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0), NumberSequenceKeypoint.new(1, 1) })
-	emitter.Shape = Enum.ParticleEmitterShape.Box
-	emitter.Parent = area
+--- One straight neon piece from a to b.
+local function boltPiece(a: Vector3, b: Vector3, color: Color3, width: number, time: number)
+	local bolt = acquire("bolt")
+	if not bolt then
+		return
+	end
+	local length = math.max((b - a).Magnitude, 0.1)
+	bolt.Color = color
+	bolt.Transparency = 0
+	bolt.Size = Vector3.new(width, width, length)
+	bolt.CFrame = CFrame.lookAt((a + b) / 2, b)
+	TweenService:Create(bolt, TweenInfo.new(time, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+		Transparency = 1,
+		Size = Vector3.new(width * 0.2, width * 0.2, length),
+	}):Play()
+	task.delay(time + 0.05, release, "bolt", bolt)
+end
 
-	local connection
-	connection = RunService.Heartbeat:Connect(function()
-		if root.Parent then
-			area.CFrame = CFrame.new(root.Position + Vector3.new(0, 22, 0))
-		end
-	end)
-	task.delay(duration, function()
-		connection:Disconnect()
+local function dashTrail(points: { Vector3 }, fx: any)
+	local a, b = points[1], points[2]
+	if not (a and b) then
+		return
+	end
+	boltPiece(a, b, fx.color, fx.width or 3, fx.time or 0.35)
+	local burst = fx.burst or fx.color
+	novaRing(a, { color = burst, time = 0.3, height = 0.5 }, 5)
+	novaRing(b, { color = burst, time = 0.3, height = 0.5 }, 5)
+end
+
+local function chainBolts(points: { Vector3 }, fx: any)
+	local segments = fx.segments or 5
+	local jitter = fx.jitter or 1.5
+	for link = 1, #points - 1 do
+		local a, b = points[link], points[link + 1]
+		task.delay((link - 1) * (fx.linkDelay or 0.06), function()
+			local previous = a
+			for piece = 1, segments do
+				local nextPoint = b
+				if piece < segments then
+					local offset = Vector3.new(math.random() - 0.5, math.random() - 0.5, math.random() - 0.5) * 2 * jitter
+					nextPoint = a:Lerp(b, piece / segments) + offset
+				end
+				boltPiece(previous, nextPoint, fx.color, fx.width or 0.5, fx.time or 0.3)
+				previous = nextPoint
+			end
+		end)
+	end
+end
+
+-- running zones: a ground ring (frost) and / or an emitter area, ended by time, by the server's "end" message, or when the
+-- caster is gone
+type ZoneFx = { key: string, root: BasePart?, follow: boolean, area: BasePart?, ring: BasePart?, endsAt: number, height: number }
+local zonesFx: { ZoneFx } = {}
+local zoneConnection: RBXScriptConnection? = nil
+
+local function stopZoneFx(zone: ZoneFx)
+	local index = table.find(zonesFx, zone)
+	if index then
+		table.remove(zonesFx, index)
+	end
+	if zone.area then
+		local area = zone.area
+		liveEmitters = math.max(0, liveEmitters - 1)
+		local emitter = area:FindFirstChild("Emitter") :: ParticleEmitter
 		emitter.Enabled = false
-		Debris:AddItem(area, 2.5) -- the last embers finish falling
-	end)
+		task.delay(2.5, release, "area", area) -- the last particles finish falling
+	end
+	if zone.ring then
+		local ring = zone.ring
+		TweenService:Create(ring, TweenInfo.new(0.4), { Transparency = 1 }):Play()
+		task.delay(0.45, release, "ring", ring)
+	end
+	if #zonesFx == 0 and zoneConnection then
+		zoneConnection:Disconnect()
+		zoneConnection = nil
+	end
 end
 
+local function zoneStep()
+	local now = os.clock()
+	for index = #zonesFx, 1, -1 do
+		local zone = zonesFx[index]
+		local root = zone.root
+		local humanoid = root and root.Parent and root.Parent:FindFirstChildOfClass("Humanoid")
+		if now >= zone.endsAt or (zone.follow and not (root and root.Parent and humanoid and humanoid.Health > 0)) then
+			stopZoneFx(zone)
+		elseif zone.follow and zone.area and root then
+			zone.area.CFrame = CFrame.new(root.Position + Vector3.new(0, zone.height, 0))
+		end
+	end
+end
+
+local function startZoneFx(key: string, root: BasePart?, origin: Vector3, fx: any, radius: number, duration: number)
+	local zone: ZoneFx = { key = key, root = root, follow = fx.kind == "zone", area = nil, ring = nil, endsAt = os.clock() + duration, height = 22 }
+
+	if fx.kind == "frost" then
+		local ring = groundRing(origin, fx.color, 0.3)
+		if ring then
+			zone.ring = ring
+			TweenService:Create(ring, TweenInfo.new(fx.time or 0.5, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+				Size = Vector3.new(0.3, radius * 2, radius * 2),
+				Transparency = 0.65,
+			}):Play()
+		end
+		zone.height = 14
+	end
+
+	if liveEmitters < Limits.maxEmitters then
+		local area = acquire("area")
+		if area then
+			liveEmitters += 1
+			local emitter = area:FindFirstChild("Emitter") :: ParticleEmitter
+			emitter.Color = typeof(fx.color) == "Color3" and ColorSequence.new(fx.color) or fx.color
+			emitter.Rate = fx.rate or 90
+			emitter.Speed = NumberRange.new(fx.speed or 8)
+			emitter.Size = NumberSequence.new({ NumberSequenceKeypoint.new(0, fx.size or 0.5), NumberSequenceKeypoint.new(1, 0) })
+			emitter.Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0), NumberSequenceKeypoint.new(1, 1) })
+			area.Size = Vector3.new(radius * 2, 1, radius * 2)
+			area.CFrame = CFrame.new(origin + Vector3.new(0, zone.height, 0))
+			emitter.Enabled = true
+			zone.area = area
+		end
+	end
+
+	if not (zone.area or zone.ring) then
+		return
+	end
+	table.insert(zonesFx, zone)
+	if not zoneConnection then
+		zoneConnection = RunService.Heartbeat:Connect(zoneStep)
+	end
+end
+
+local function endZoneByKey(key: string)
+	for index = #zonesFx, 1, -1 do
+		if zonesFx[index].key == key then
+			stopZoneFx(zonesFx[index])
+		end
+	end
+end
+
+local function zoneKey(caster: Player, abilityId: string): string
+	return caster.UserId .. "/" .. abilityId
+end
+
+--- The cast was accepted: the caster's own client plays the animation (it replicates to everyone else).
 local function showCast(data: any)
 	local caster = data.caster :: Player
 	local ability = AbilityConfig.get(data.abilityId, data.weaponId)
 	local character = caster and caster.Character
-	local root = character and character:FindFirstChild("HumanoidRootPart") :: BasePart?
-	if not (ability and root) then
-		return
-	end
-	if caster == player then
+	if ability and character and caster == player then
 		CombatAnimator.playKey(character, ability.animation)
 	end
-	task.delay(ability.hitFrame or 0.25, function()
-		if not root.Parent then
-			return
-		end
-		playSound(root.Position, ability.sound and AbilityConfig.sounds[ability.sound])
-		local fx = ability.fx and AbilityConfig.fx[ability.fx]
-		local radius = ability.shape and (ability.shape.radius or ability.shape.reach or ability.shape.length) or 10
-		if fx and fx.kind == "nova" then
-			novaRing(root, fx, radius)
-		elseif fx and fx.kind == "zone" and ability.zone then
-			emberZone(root, fx, radius, ability.zone.duration)
-		end
-	end)
+end
+
+--- The hit frame: sound + visuals from the server's origin / points.
+local function showFx(data: any)
+	local caster = data.caster :: Player
+	local ability = AbilityConfig.get(data.abilityId, data.weaponId)
+	local root = caster.Character and caster.Character:FindFirstChild("HumanoidRootPart") :: BasePart?
+	local origin = data.origin :: Vector3
+	if not ability or tooFar(origin) then
+		return
+	end
+	playSound(origin, ability.sound and AbilityConfig.sounds[ability.sound])
+	local fx = ability.fx and AbilityConfig.fx[ability.fx]
+	if not fx then
+		return
+	end
+	local radius = ability.shape and (ability.shape.radius or ability.shape.reach or ability.shape.length) or 10
+	if fx.kind == "nova" then
+		novaRing(origin, fx, radius)
+	elseif (fx.kind == "zone" or fx.kind == "frost") and ability.zone then
+		local key = zoneKey(caster, data.abilityId)
+		endZoneByKey(key) -- a recast replaces the old effect
+		startZoneFx(key, root, origin, fx, radius, data.duration or ability.zone.duration)
+	elseif fx.kind == "dash" and data.points then
+		dashTrail(data.points, fx)
+	elseif fx.kind == "chain" and data.points then
+		chainBolts(data.points, fx)
+	end
 end
 
 -- ===================== HUD =====================
@@ -251,6 +441,39 @@ CastEvent.OnClientEvent:Connect(function(data)
 		readyAt[data.abilityId] = data.readyAt
 	end
 	showCast(data)
+end)
+
+local MAX_POINTS = 12
+FxEvent.OnClientEvent:Connect(function(data)
+	if type(data) ~= "table" or typeof(data.caster) ~= "Instance" or not data.caster:IsA("Player") or type(data.abilityId) ~= "string" then
+		return
+	end
+	if data.kind == "end" then
+		endZoneByKey(zoneKey(data.caster, data.abilityId))
+		return
+	end
+	if data.kind ~= "start" or typeof(data.origin) ~= "Vector3" then
+		return
+	end
+	if data.points ~= nil then
+		if type(data.points) ~= "table" or #data.points > MAX_POINTS then
+			return
+		end
+		for _, point in ipairs(data.points) do
+			if typeof(point) ~= "Vector3" then
+				return
+			end
+		end
+	end
+	showFx(data)
+end)
+
+Players.PlayerRemoving:Connect(function(leaving)
+	for index = #zonesFx, 1, -1 do
+		if zonesFx[index].key:match("^" .. leaving.UserId .. "/") then
+			stopZoneFx(zonesFx[index])
+		end
+	end
 end)
 
 RunService.Heartbeat:Connect(refresh)

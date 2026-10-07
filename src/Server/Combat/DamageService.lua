@@ -24,6 +24,8 @@
 	  DamageService.swing(player, stepIndex, weaponId, weaponStats, crash?)  a combo step (cone from CombatConfig)
 	  DamageService.strike(player, ability, weaponId, weaponStats) -> n    an ability hit (circle / cone / line, AbilityConfig)
 	  DamageService.query(character, origin, facing, shape) -> hits        the shared target query
+	  DamageService.strikeHits(player, hits, hitInfo, weaponId, weaponStats, from) -> n   hit a ready list (chain jumps, burn ticks)
+	  DamageService.hitFor(model, from) -> hit      a query-style hit entry for one Damageable model (nil when dead / not a target)
 	  DamageService.compute(player, weaponStats, weaponId, step, forceCrit?, crash?, tier?) -> amount, isCrit
 	  DamageService.hurtPlayer(player, amount, source?) -> damage dealt     an enemy hits a player (Defense applies)
 	  DamageService.TAG
@@ -251,6 +253,23 @@ function DamageService.hurtPlayer(player: Player, amount: number, source: Instan
 		source = source,
 	})
 	return dealt
+end
+
+--- Hit a ready list of query hits (from query, or hitFor) with `hitInfo` = { damageMult, knockback, maxTargets }.
+function DamageService.strikeHits(player: Player, hits: { any }, hitInfo: any, weaponId: string, weaponStats: any, from: Vector3): number
+	local _, _, facing = casterFrame(player)
+	return applyHits(player, hits, hitInfo, facing or Vector3.zAxis, weaponId, weaponStats, from)
+end
+
+--- One Damageable model as a query hit measured from `from` (nil when it is dead or not a target).
+function DamageService.hitFor(model: Model, from: Vector3): any?
+	local humanoid = model:FindFirstChildOfClass("Humanoid")
+	local root = (model.PrimaryPart or model:FindFirstChild("HumanoidRootPart")) :: BasePart?
+	if not (humanoid and root) or humanoid.Health <= 0 or not CollectionService:HasTag(model, DamageService.TAG) then
+		return nil
+	end
+	local flat = Vector3.new(root.Position.X - from.X, 0, root.Position.Z - from.Z)
+	return { model = model, humanoid = humanoid, root = root, distance = flat.Magnitude, flat = flat }
 end
 
 function DamageService.swing(player: Player, stepIndex: number, weaponId: string, weaponStats: any, crash: boolean?, tier: any?)
