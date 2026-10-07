@@ -35,7 +35,14 @@ ItemModels.MODELS = {
 	sword_basic = { template = "SwordIron", grip = PIXEL_SWORD_GRIP }, -- Iron Sword (iron_sword icon)
 	solar_blade = { template = "SwordGold", grip = PIXEL_SWORD_GRIP }, -- Solar Blade (golden_sword icon)
 	sword_legendary = { template = "SwordDiamond", grip = PIXEL_SWORD_GRIP }, -- Excalibur (diamond_sword icon)
+	blink_blade = { template = "SwordGold", grip = PIXEL_SWORD_GRIP }, -- golden_sword icon
+	stormcaller = { template = "SwordDiamond", grip = PIXEL_SWORD_GRIP }, -- diamond_sword icon
+	frostbrand = { template = "SwordIron", grip = PIXEL_SWORD_GRIP }, -- iron_sword icon
 }
+
+-- Any sword (item.weapon.weaponType == "sword") without its own MODELS entry still gets a 3D model, picked by rarity,
+-- so a new sword is never a flat sprite. Add a MODELS entry to choose a specific template.
+ItemModels.SWORD_BY_RARITY = { [0] = "SwordWood", "SwordStone", "SwordIron", "SwordGold", "SwordDiamond", "SwordDiamond" }
 
 --- Grip applied to sprite Handles (unless the def's entry sets its own).
 ItemModels.SPRITE_GRIP = { pos = Vector3.new(0, 0, 0) }
@@ -45,7 +52,13 @@ function ItemModels.get(def: any): any?
 		return nil
 	end
 	local key = type(def.model) == "string" and def.model or def.id
-	return ItemModels.MODELS[key]
+	local entry = ItemModels.MODELS[key]
+	if not entry and def.weapon and def.weapon.weaponType == "sword" then
+		local template = ItemModels.SWORD_BY_RARITY[def.rarity or 0] or "SwordIron"
+		entry = { template = template, grip = PIXEL_SWORD_GRIP }
+		ItemModels.MODELS[key] = entry
+	end
+	return entry
 end
 
 return ItemModels
