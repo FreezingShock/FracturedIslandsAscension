@@ -26,6 +26,7 @@
 	RECIPES
 	  Hold longer:               library.default.hold = 8
 	  Faster typing:             library.default.typeSpeed = 90
+	  Bigger entrance:           library.default.intro = { rise = 28, scale = 0.7 }   (any key you leave out keeps its value)
 	  Another colour for gains:  kinds.xp.pieces.gain.color = "#55FFFF"
 	  Combat level text red:     skills.Combat = { levelColor = "#FF5555" }
 	  New message from code:     ActionBarService.show(player, "<font color='#55FF55'>Saved!</font>", { hold = 3 })
@@ -36,9 +37,10 @@ local ActionBarConfig = {}
 ActionBarConfig.library = {
 	default = {
 		hold = 5, -- seconds a message stays after it finished typing / was last updated
-		fadeIn = 0.18, -- the first frame fades in while rising
+		-- the entrance: the line fades in while it springs up into place (Back easing overshoots a little), grows from `scale`
+		-- to full size, and its outline flares to `strokePulse` px before settling back
+		intro = { time = 0.5, fade = 0.3, rise = 18, scale = 0.86, style = "Back", strokePulse = 4 },
 		fadeOut = 0.4,
-		rise = 6, -- px it rises into place
 		sink = 6, -- px it sinks while fading out
 		typeSpeed = 70, -- characters per second of the typewriter (about 0.4s for a normal XP line)
 		replaceFade = 0.15, -- seconds the old line takes to fade before a different skill's line types in

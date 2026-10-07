@@ -33,8 +33,11 @@ local group: CanvasGroup?
 local label: TextLabel?
 local sub: TextLabel?
 local pop: UIScale?
+local intro: UIScale?
+local labelStroke: UIStroke?
 local subStroke: UIStroke?
 local basePos: UDim2 = UDim2.new()
+local baseStroke = 1.5 -- the Stroke thickness in the template (read when binding)
 
 -- state of the line on screen
 local state = {
@@ -111,9 +114,21 @@ end
 -- ===================== SHOW / HIDE =====================
 local function fadeIn(cfg: any)
 	local g = group :: CanvasGroup
-	g.Position = basePos + UDim2.fromOffset(0, cfg.rise)
+	local i = cfg.intro
+	local style = Enum.EasingStyle[i.style] or Enum.EasingStyle.Back
+	g.Position = basePos + UDim2.fromOffset(0, i.rise)
 	g.GroupTransparency = 1
-	TweenService:Create(g, info(cfg.fadeIn), { GroupTransparency = 0, Position = basePos }):Play()
+	TweenService:Create(g, info(i.fade), { GroupTransparency = 0 }):Play()
+	TweenService:Create(g, TweenInfo.new(i.time, style, Enum.EasingDirection.Out), { Position = basePos }):Play()
+	if intro then
+		intro.Scale = i.scale
+		TweenService:Create(intro, TweenInfo.new(i.time, style, Enum.EasingDirection.Out), { Scale = 1 }):Play()
+	end
+	-- the outline flares and settles: it reads as the text "landing"
+	if labelStroke then
+		labelStroke.Thickness = i.strokePulse
+		TweenService:Create(labelStroke, info(i.time, Enum.EasingStyle.Quint), { Thickness = baseStroke }):Play()
+	end
 	state.visible = true
 end
 
@@ -277,8 +292,8 @@ local function levelUp(msg: any)
 			local stroke = subStroke :: UIStroke
 			local original = stroke.Color
 			stroke.Color = Color3.fromHex(lvl.flash)
-			stroke.Thickness = 5
-			TweenService:Create(stroke, info(lvl.flashTime), { Color = original, Thickness = 2 }):Play()
+			stroke.Thickness = baseStroke * 3
+			TweenService:Create(stroke, info(lvl.flashTime), { Color = original, Thickness = baseStroke }):Play()
 			typeInto(s, 0, function()
 				return plainLen(s.Text)
 			end, lvl.typeSpeed, cfg, function()
@@ -348,6 +363,9 @@ local function bind(gui: Instance)
 	sub = g:WaitForChild("Sub") :: TextLabel
 	pop = label:WaitForChild("Pop") :: UIScale
 	subStroke = sub:WaitForChild("Stroke") :: UIStroke
+	labelStroke = label:FindFirstChild("Stroke") :: UIStroke?
+	intro = group:FindFirstChild("Intro") :: UIScale?
+	baseStroke = subStroke.Thickness
 	basePos = group.Position
 	group.GroupTransparency = 1
 	label.Text = ""

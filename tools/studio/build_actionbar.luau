@@ -41,6 +41,7 @@ local group = new("CanvasGroup", {
 	GroupTransparency = 1,
 	ZIndex = 15,
 }, root)
+new("UIScale", { Name = "Intro" }, group) -- the entrance scale (ActionBarClient)
 
 local function line(name, size, height, anchorY)
 	local l = new("TextLabel", {
@@ -58,7 +59,7 @@ local function line(name, size, height, anchorY)
 		TextYAlignment = Enum.TextYAlignment.Center,
 		TextWrapped = false,
 	}, group)
-	new("UIStroke", { Name = "Stroke", Thickness = 2, Color = T.colors[A.stroke] or Color3.fromRGB(26, 18, 16), ApplyStrokeMode = Enum.ApplyStrokeMode.Contextual }, l)
+	new("UIStroke", { Name = "Stroke", Thickness = A.stroke.thickness, Color = A.stroke.color, LineJoinMode = Enum.LineJoinMode.Miter, ApplyStrokeMode = Enum.ApplyStrokeMode.Contextual }, l)
 	return l
 end
 

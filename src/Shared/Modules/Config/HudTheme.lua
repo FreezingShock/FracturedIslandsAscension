@@ -170,7 +170,7 @@ HudTheme.actionBar = {
 	labelHeight = 44,
 	subSize = 24,
 	subHeight = 32,
-	stroke = "textStroke", -- colour key: the 2 px outline (HudTheme.colors)
+	stroke = { thickness = 1.5, color = Color3.new(0, 0, 0) }, -- the UIStroke on Label and Sub (miter joins)
 }
 
 HudTheme.icons = {
