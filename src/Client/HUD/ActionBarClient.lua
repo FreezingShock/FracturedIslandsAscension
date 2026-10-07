@@ -34,6 +34,7 @@ local label: TextLabel?
 local sub: TextLabel?
 local pop: UIScale?
 local intro: UIScale?
+local subPop: UIScale?
 local labelStroke: UIStroke?
 local subStroke: UIStroke?
 local basePos: UDim2 = UDim2.new()
@@ -304,22 +305,64 @@ local function startCycle()
 		if not alive() then
 			return
 		end
-		-- CONGRATULATIONS lands with an outline flash
+		-- "! CONGRATULATIONS !" types in with an outline flash, then the marks grow on both sides: !! -> !!!
 		local s = sub :: TextLabel
-		s.Text = piece(lvl.text, lvl.color)
+		local function flash()
+			local stroke = subStroke :: UIStroke
+			local original = Color3.new(0, 0, 0)
+			stroke.Color = Color3.fromHex(lvl.flash)
+			stroke.Thickness = baseStroke * 3
+			TweenService:Create(stroke, info(lvl.flashTime), { Color = original, Thickness = baseStroke }):Play()
+		end
+		local function congrats(step: number): string
+			local m = lvl.marks
+			local bang = string.rep(m.char, m.steps[step])
+			local function bold(text: string, color: string, isBold: boolean?)
+				local t = piece(text, color)
+				return isBold and ("<b>" .. t .. "</b>") or t
+			end
+			local marks = bold(bang, m.color, m.bold)
+			return marks .. m.gap .. bold(lvl.text, lvl.color, lvl.bold) .. m.gap .. marks
+		end
+		s.Text = congrats(1)
 		s.MaxVisibleGraphemes = 0
-		local stroke = subStroke :: UIStroke
-		local original = stroke.Color
-		stroke.Color = Color3.fromHex(lvl.flash)
-		stroke.Thickness = baseStroke * 3
-		TweenService:Create(stroke, info(lvl.flashTime), { Color = original, Thickness = baseStroke }):Play()
+		flash()
+		local typed, marksDone = false, false
 		typeInto(s, 0, function()
 			return plainLen(s.Text)
-		end, lvl.typeSpeed, cfg, nil)
+		end, lvl.typeSpeed, cfg, function()
+			typed = true
+		end)
+		task.spawn(function()
+			while alive() and not typed do
+				task.wait(0.03)
+			end
+			for step = 2, #lvl.marks.steps do
+				if not alive() then
+					return
+				end
+				task.wait(lvl.marks.stepTime)
+				if not alive() then
+					return
+				end
+				s.Text = congrats(step)
+				s.MaxVisibleGraphemes = -1
+				flash()
+				play(cfg.sounds.pop, 1 + 0.15 * step)
+				if subPop then
+					subPop.Scale = lvl.marks.pop
+					TweenService:Create(subPop, info(0.25, Enum.EasingStyle.Back), { Scale = 1 }):Play()
+				end
+			end
+			marksDone = true
+		end)
 		-- the % climbs to where you really are (more XP may arrive meanwhile: chase the newest target)
 		repeat
 			animatePct(state.pctTarget, cfg.fillTime, alive)
 		until not alive() or math.abs(state.pct - state.pctTarget) < 0.0005
+		while alive() and not marksDone do
+			task.wait(0.05)
+		end
 		if not alive() then
 			return
 		end
@@ -452,6 +495,7 @@ local function bind(gui: Instance)
 	sub = g:WaitForChild("Sub") :: TextLabel
 	pop = label:WaitForChild("Pop") :: UIScale
 	subStroke = sub:WaitForChild("Stroke") :: UIStroke
+	subPop = sub:FindFirstChild("Pop") :: UIScale?
 	labelStroke = label:FindFirstChild("Stroke") :: UIStroke?
 	intro = group:FindFirstChild("Intro") :: UIScale?
 	baseStroke = subStroke.Thickness

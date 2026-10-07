@@ -66,6 +66,7 @@ end
 local label = line("Label", A.labelSize, A.labelHeight, 1)
 new("UIScale", { Name = "Pop" }, label)
 local sub = line("Sub", A.subSize, A.subHeight, 0)
+new("UIScale", { Name = "Pop" }, sub) -- the pop of each exclamation step (ActionBarClient)
 sub.Position = UDim2.new(0.5, 0, 1, -A.labelHeight)
 sub.AnchorPoint = Vector2.new(0.5, 1)
 

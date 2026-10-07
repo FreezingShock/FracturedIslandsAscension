@@ -77,12 +77,15 @@ ActionBarConfig.kinds = {
 		tickStep = 0.28, -- seconds per level while the number ticks up (several levels at once tick one by one)
 		tickPop = 1.18, -- the level text pops by this scale on every tick
 		fillTime = 0.6, -- the % climbing to the real progress in the new level
+		-- "! CONGRATULATIONS !" types in, then the marks grow on BOTH sides: !! -> !!! (each step pops and flashes the outline)
 		congrats = {
 			text = "CONGRATULATIONS",
-			color = "#FF55FF",
-			flash = "#FFD700", -- the outline flashes this colour when it lands
-			flashTime = 0.5,
-			typeSpeed = 18,
+			color = "#FFFF55", -- yellow
+			bold = true,
+			marks = { char = "!", color = "#55FFFF", bold = true, steps = { 1, 2, 3 }, stepTime = 0.22, gap = " ", pop = 1.16 },
+			flash = "#FFFFFF", -- the outline flashes this colour when it lands and on every step
+			flashTime = 0.45,
+			typeSpeed = 30,
 			hold = 2.5,
 		},
 	},
