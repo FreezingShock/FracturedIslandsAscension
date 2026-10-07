@@ -282,14 +282,14 @@ ProfileConfig.ATTRIBUTE_CATEGORIES = {
 		{
 			key = "FarmingWisdom",
 			name = "Farming Wisdom",
-			color = "#FFAA00",
+			color = "#00AAAA",
 			icon = { 2, 2 }, -- placeholder until the wisdom icons exist
 			description = "Increases the Farming XP you gain.",
 		},
 		{
 			key = "ForagingWisdom",
 			name = "Foraging Wisdom",
-			color = "#00AA00",
+			color = "#00AAAA",
 			icon = { 2, 2 }, -- placeholder until the wisdom icons exist
 			description = "Increases the Foraging XP you gain.",
 		},
@@ -303,21 +303,21 @@ ProfileConfig.ATTRIBUTE_CATEGORIES = {
 		{
 			key = "MiningWisdom",
 			name = "Mining Wisdom",
-			color = "#5555FF",
+			color = "#00AAAA",
 			icon = { 2, 2 }, -- placeholder until the wisdom icons exist
 			description = "Increases the Mining XP you gain.",
 		},
 		{
 			key = "CombatWisdom",
 			name = "Combat Wisdom",
-			color = "#FF5555",
+			color = "#00AAAA",
 			icon = { 2, 2 }, -- placeholder until the wisdom icons exist
 			description = "Increases the Combat XP you gain.",
 		},
 		{
 			key = "CarpentryWisdom",
 			name = "Carpentry Wisdom",
-			color = "#55FF55",
+			color = "#00AAAA",
 			icon = { 2, 2 }, -- placeholder until the wisdom icons exist
 			description = "Increases the Carpentry XP you gain.",
 		},
