@@ -212,12 +212,24 @@ EnemyConfig.dropTables = {
 			{ kind = "armor", id = "iron_boots", weight = 3 },
 		} },
 		{ kind = "item", id = "gold_terrafruit", count = { 1, 1 }, chance = 0.05 },
+		{ kind = "item", id = "feather", count = { 1, 2 }, chance = 0.2 },
+		{ kind = "item", id = "copper_ingot", count = { 1, 2 }, chance = 0.12 },
+		{ kind = "item", id = "redstone", count = { 1, 3 }, chance = 0.12 },
+		{ kind = "item", id = "emerald", count = { 1, 1 }, chance = 0.02 },
+		{ kind = "pool", chance = 0.04, rolls = { 1, 1 }, entries = {
+			{ kind = "armor", id = "golden_chestplate", weight = 2 },
+			{ kind = "armor", id = "golden_leggings", weight = 3 },
+			{ kind = "armor", id = "golden_boots", weight = 3 },
+			{ kind = "armor", id = "diamond_helmet", weight = 1 },
+		} },
 	},
 
 	-- five placeholder mobs, each with its own loot identity (stats go to the Combat statistics, items / armor to the inventory)
 	slime_drops = {
 		{ kind = "stat", skill = "Combat", id = "Slimeball", name = "Slimeball", color = "#55FF55", count = { 1, 3 }, chance = 0.9 },
 		{ kind = "item", id = "coal_terrafruit", count = { 1, 2 }, chance = 0.25 },
+		{ kind = "item", id = "slime_ball", count = { 1, 3 }, chance = 0.5 },
+		{ kind = "item", id = "frostbrand", count = { 1, 1 }, chance = 0.02 },
 	},
 	skeleton_drops = {
 		{ kind = "stat", skill = "Combat", id = "Bone", name = "Bone", color = "#FFFFFF", count = { 1, 3 }, chance = 0.9 },
@@ -229,17 +241,27 @@ EnemyConfig.dropTables = {
 			{ kind = "armor", id = "iron_boots", weight = 3 },
 		} },
 		{ kind = "item", id = "iron_terrafruit", count = { 1, 1 }, chance = 0.1 },
+		{ kind = "item", id = "bone", count = { 1, 3 }, chance = 0.6 },
+		{ kind = "item", id = "flint", count = { 1, 2 }, chance = 0.25 },
+		{ kind = "item", id = "blink_blade", count = { 1, 1 }, chance = 0.02 },
 	},
 	spider_drops = {
 		{ kind = "stat", skill = "Combat", id = "String", name = "String", color = "#D9CDB8", count = { 1, 3 }, chance = 0.9 },
 		{ kind = "stat", skill = "Combat", id = "SpiderEye", name = "Spider Eye", color = "#AA0000", count = { 1, 2 }, chance = 0.5 },
 		{ kind = "item", id = "swift_gloves", count = { 1, 1 }, chance = 0.04 },
+		{ kind = "item", id = "string", count = { 1, 3 }, chance = 0.6 },
+		{ kind = "item", id = "spider_eye", count = { 1, 1 }, chance = 0.3 },
+		{ kind = "item", id = "rabbit_foot", count = { 1, 1 }, chance = 0.03 },
+		{ kind = "item", id = "phantom_membrane", count = { 1, 1 }, chance = 0.02 },
 	},
 	imp_drops = {
 		{ kind = "stat", skill = "Combat", id = "Gunpowder", name = "Gunpowder", color = "#AAAAAA", count = { 1, 3 }, chance = 0.8 },
 		{ kind = "stat", skill = "Combat", id = "BlazeRod", name = "Blaze Rod", color = "#FFAA00", count = { 1, 1 }, chance = 0.3 },
 		{ kind = "stat", skill = "Combat", id = "MagmaCream", name = "Magma Cream", color = "#FF5555", count = { 1, 1 }, chance = 0.15 },
 		{ kind = "item", id = "warriors_belt", count = { 1, 1 }, chance = 0.04 },
+		{ kind = "item", id = "gunpowder", count = { 1, 2 }, chance = 0.5 },
+		{ kind = "item", id = "blaze_rod", count = { 1, 1 }, chance = 0.2 },
+		{ kind = "item", id = "glowstone_dust", count = { 1, 2 }, chance = 0.15 },
 	},
 	wisp_drops = {
 		{ kind = "stat", skill = "Combat", id = "EnderPearl", name = "Ender Pearl", color = "#00AAAA", count = { 1, 2 }, chance = 0.4 },
@@ -247,6 +269,10 @@ EnemyConfig.dropTables = {
 		{ kind = "stat", skill = "Combat", id = "ShulkerShell", name = "Shulker Shell", color = "#FF55FF", count = { 1, 1 }, chance = 0.05 },
 		{ kind = "item", id = "gold_terrafruit", count = { 1, 1 }, chance = 0.1 },
 		{ kind = "item", id = "sapphire_amulet", count = { 1, 1 }, chance = 0.05 },
+		{ kind = "item", id = "ender_pearl", count = { 1, 1 }, chance = 0.2 },
+		{ kind = "item", id = "diamond", count = { 1, 1 }, chance = 0.02 },
+		{ kind = "item", id = "nautilus_shell", count = { 1, 1 }, chance = 0.03 },
+		{ kind = "item", id = "stormcaller", count = { 1, 1 }, chance = 0.02 },
 	},
 }
 

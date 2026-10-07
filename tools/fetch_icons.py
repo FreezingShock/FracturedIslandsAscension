@@ -48,6 +48,27 @@ ICONS = {
     "lead": "Lead",
     "amethyst_shard": "Amethyst_Shard",
     "nether_star": "Nether_Star",  # the Nexus Star (hotbar slot 9)
+    "string": "String",
+    "bone": "Bone",
+    "flint": "Flint",
+    "feather": "Feather",
+    "slime_ball": "Slimeball",
+    "spider_eye": "Spider_Eye",
+    "gunpowder": "Gunpowder",
+    "redstone": "Redstone_Dust",
+    "copper_ingot": "Copper_Ingot",
+    "glowstone_dust": "Glowstone_Dust",
+    "blaze_rod": "Blaze_Rod",
+    "ender_pearl": "Ender_Pearl",
+    "emerald": "Emerald",
+    "diamond": "Diamond",
+    "golden_chestplate": "Golden_Chestplate",
+    "golden_leggings": "Golden_Leggings",
+    "golden_boots": "Golden_Boots",
+    "diamond_helmet": "Diamond_Helmet",
+    "rabbit_foot": "Rabbit's_Foot",
+    "phantom_membrane": "Phantom_Membrane",
+    "nautilus_shell": "Nautilus_Shell",
 }
 
 

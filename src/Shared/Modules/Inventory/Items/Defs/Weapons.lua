@@ -71,6 +71,70 @@ return {
 		},
 	},
 
+	blink_blade = {
+		name = "Blink Blade",
+		description = "Cuts the space between you and your target.",
+		rarity = 2,
+		toolName = "BlinkBlade",
+		skillTag = "Combat",
+		weapon = { weaponType = "sword", attackSpeed = 1.4, knockback = 12, range = 20 },
+		stats = { Damage = 80, Strength = 15, CritChance = 20, CritIncrease = 50 },
+		abilities = {
+			{
+				name = "Blink Dash",
+				ability = "blink_dash", -- AbilityConfig library entry
+				key = "RMB",
+				cooldown = 5,
+				text = 'Dash <font color="#55FF55" family="rbxassetid://12187371840">22 studs</font> forward, slicing every enemy on the way for <font color="#FF5555" family="rbxassetid://12187371840">220% damage</font>.',
+			},
+		},
+	},
+
+	stormcaller = {
+		name = "Stormcaller",
+		description = "The sky answers when it is swung.",
+		rarity = 3,
+		toolName = "Stormcaller",
+		skillTag = "Combat",
+		weapon = { weaponType = "sword", attackSpeed = 1.1, knockback = 15, range = 22 },
+		stats = { Damage = 160, Strength = 30, CritChance = 12, CritIncrease = 70 },
+		abilities = {
+			{
+				name = "Chain Lightning",
+				ability = "chain_lightning",
+				key = "RMB",
+				cooldown = 7,
+				text = 'Strike the nearest enemy for <font color="#FF5555" family="rbxassetid://12187371840">200% damage</font>, then jump to <font color="#55FF55" family="rbxassetid://12187371840">4 more</font> enemies nearby, each hit 20% weaker.',
+			},
+			{
+				name = "Thunder Clap",
+				ability = "thunder_clap",
+				key = "Z",
+				cooldown = 9,
+				text = 'Shock every enemy within <font color="#55FF55" family="rbxassetid://12187371840">14 studs</font> for <font color="#FF5555" family="rbxassetid://12187371840">150% damage</font>, slowing and burning them.',
+			},
+		},
+	},
+
+	frostbrand = {
+		name = "Frostbrand",
+		description = "Cold enough to stop a charge.",
+		rarity = 2,
+		toolName = "Frostbrand",
+		skillTag = "Combat",
+		weapon = { weaponType = "sword", attackSpeed = 1.2, knockback = 15, range = 20 },
+		stats = { Damage = 70, Strength = 20, Defense = 15, CritChance = 8, CritIncrease = 50 },
+		abilities = {
+			{
+				name = "Frost Nova",
+				ability = "frost_nova",
+				key = "RMB",
+				cooldown = 12,
+				text = 'Freeze the ground in <font color="#55FF55" family="rbxassetid://12187371840">20 studs</font> for 6 seconds, hitting enemies inside every 1.5 seconds for <font color="#FF5555" family="rbxassetid://12187371840">120% damage</font> and slowing them.',
+			},
+		},
+	},
+
 	spear_basic = {
 		name = "Wooden Spear",
 		description = "A nimble polearm weapon.",

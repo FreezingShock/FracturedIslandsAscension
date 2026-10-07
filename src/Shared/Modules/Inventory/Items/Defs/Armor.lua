@@ -55,4 +55,36 @@ return {
 		},
 		footer = "Set bonuses coming soon.",
 	},
+
+	golden_chestplate = {
+		name = "Golden Chestplate",
+		description = "Shiny, soft, and surprisingly stubborn.",
+		rarity = 2,
+		slot = "Chestplate",
+		stats = { Defense = 45, Health = 30 },
+	},
+
+	golden_leggings = {
+		name = "Golden Leggings",
+		description = "A king's idea of practical.",
+		rarity = 2,
+		slot = "Leggings",
+		stats = { Defense = 30, Health = 20 },
+	},
+
+	golden_boots = {
+		name = "Golden Boots",
+		description = "Every step announces you.",
+		rarity = 2,
+		slot = "Boots",
+		stats = { Defense = 15, Speed = 2 },
+	},
+
+	diamond_helmet = {
+		name = "Diamond Helmet",
+		description = "Clear-headed protection.",
+		rarity = 3,
+		slot = "Helmet",
+		stats = { Defense = 40, Health = 40, Strength = 10 },
+	},
 }

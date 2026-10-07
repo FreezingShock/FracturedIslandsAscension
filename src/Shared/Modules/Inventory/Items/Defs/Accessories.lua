@@ -38,4 +38,28 @@ return {
 		slot = "Belt",
 		stats = { Strength = 10 },
 	},
+
+	rabbit_foot = {
+		name = "Rabbit's Foot",
+		description = "Luck you can carry.",
+		rarity = 2,
+		slot = "Necklace",
+		stats = { MagicFind = 8 },
+	},
+
+	phantom_membrane = {
+		name = "Phantom Cloak",
+		description = "Woven from something that should not be solid.",
+		rarity = 3,
+		slot = "Cloak",
+		stats = { Speed = 3, CritChance = 3 },
+	},
+
+	nautilus_shell = {
+		name = "Nautilus Belt",
+		description = "You can hear the tide in it.",
+		rarity = 2,
+		slot = "Belt",
+		stats = { Health = 25, Defense = 5 },
+	},
 }
