@@ -33,6 +33,11 @@ CoinsConfig.library = {
 CoinsConfig.enemies = {
 	dummy = { amount = { 1, 3 } },
 	placeholder_mob = { amount = { 2, 6 } },
+	slime_blob = { amount = { 1, 3 } },
+	skeleton_grunt = { amount = { 3, 7 } },
+	spider_scout = { amount = { 2, 5 }, drops = { 1, 2 }, chance = 0.7 },
+	cinder_imp = { amount = { 4, 9 } },
+	void_wisp = { amount = { 8, 18 }, chance = 0.8 },
 }
 
 -- documentation of the planned income sources (not read by code yet)
