@@ -1166,6 +1166,27 @@ function InventoryDataManager.EnsurePinned(player)
 end
 
 -- ===================== SAVE INVENTORY TO PROFILE =====================
+-- The weapon in hand lives in the Character, and on a quit the engine can tear the Character down before the final save
+-- runs: that save then misses the held Tool and it is gone for good. A snapshot of the counts (with the held names) is
+-- kept fresh while the Character is alive; a save that finds the held Tool missing right after a snapshot restores it.
+local liveSnapshot: { [Player]: { at: number, counts: any, held: { string } } } = {}
+local SNAPSHOT_SECONDS = 1
+local SNAPSHOT_MAX_AGE = 2.5
+
+local function takeSnapshot(player)
+	local character = player.Character
+	if not (player.Parent and character and character.Parent and playerState[player.UserId]) then
+		return
+	end
+	local held = {}
+	for _, child in ipairs(character:GetChildren()) do
+		if child:IsA("Tool") then
+			table.insert(held, child.Name)
+		end
+	end
+	liveSnapshot[player] = { at = os.clock(), counts = countTools(player), held = held }
+end
+
 local function saveInventoryToProfile(player)
 	local invData = SkillsDataManager.GetInventoryData(player)
 	if not invData then
@@ -1179,6 +1200,16 @@ local function saveInventoryToProfile(player)
 
 	-- Serialize current Tool instances → items array
 	local toolCounts = countTools(player)
+	local snap = liveSnapshot[player]
+	if snap and os.clock() - snap.at <= SNAPSHOT_MAX_AGE then
+		for _, name in ipairs(snap.held) do
+			local was = snap.counts[name]
+			local now = toolCounts[name]
+			if was and (not now or now.count < was.count) then
+				toolCounts[name] = { count = was.count, rarity = was.rarity } -- the held Tool vanished with the Character
+			end
+		end
+	end
 	local items = {}
 	for name, info in pairs(toolCounts) do
 		-- Store by Tool.Name so we can re-spawn them on load
@@ -1400,6 +1431,9 @@ end
 local function onPlayerLeaving(player)
 	readyPlayers[player] = nil
 	saveInventoryToProfile(player) -- no-op if SkillsDataManager already released the profile (its hook saved first)
+	task.delay(15, function()
+		liveSnapshot[player] = nil
+	end)
 	playerState[player.UserId] = nil
 	trashBin[player.UserId] = nil
 	task.delay(10, function() -- after the profile hook has saved
@@ -1414,6 +1448,14 @@ end
 -- The inventory slice of the profile is only a snapshot of the Tools. Write it before the profile is
 -- released (leave) and every AUTOSAVE_SECONDS, so a server crash loses seconds, not the whole session.
 local AUTOSAVE_SECONDS = 25
+task.spawn(function()
+	while true do
+		task.wait(SNAPSHOT_SECONDS)
+		for _, player in ipairs(Players:GetPlayers()) do
+			pcall(takeSnapshot, player)
+		end
+	end
+end)
 SkillsDataManager.OnBeforeRelease(saveInventoryToProfile)
 task.spawn(function()
 	while true do
