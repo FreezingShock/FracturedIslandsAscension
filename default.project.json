@@ -37,6 +37,9 @@
       "DamageTracker": {
         "$path": "src/Server/Combat/DamageTracker.lua"
       },
+      "DeathService": {
+        "$path": "src/Server/Combat/DeathService.lua"
+      },
       "DummyInit": {
         "$path": "src/Server/Combat/DummyInit.server.lua"
       },
@@ -192,6 +195,9 @@
         "Config": {
           "$path": "src/Shared/Modules/Config"
         },
+        "DeathFX": {
+          "$path": "src/Shared/Modules/Combat/DeathFX.lua"
+        },
         "EnemyConfig": {
           "$path": "src/Shared/Modules/Combat/EnemyConfig.lua"
         },
@@ -323,6 +329,9 @@
         },
         "DamageNumberController": {
           "$path": "src/Client/Combat/DamageNumberController.client.lua"
+        },
+        "DeathController": {
+          "$path": "src/Client/Combat/DeathController.client.lua"
         },
         "DropFXController": {
           "$path": "src/Client/Inventory/DropFXController.client.lua"

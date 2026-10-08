@@ -12,7 +12,7 @@
 
 	  EnemyFX.hit(data)                     data = the WeaponHit payload (point, dir, isCrit, crash, killed, target, enemyType, weaponType, weaponId)
 	  EnemyFX.play(preset, enemyType, weaponType, weaponId, point, dir, priority?)   one preset at a point; dir = spray direction
-	  EnemyFX.death(model, enemyType, weaponType, weaponId)                          burst at the body's centre + dissolve
+	  EnemyFX.death(model, ...)                                                      no-op: deaths are DeathService + DeathFX now
 	  EnemyFX.liveCount() -> number                                                   rigs currently playing (for tests)
 --]]
 
@@ -276,35 +276,9 @@ function EnemyFX.play(presetName: string, enemyType: string?, weaponType: string
 	fire(preset, point, direction)
 end
 
-local function dissolve(model: Model, spec: any)
-	local delay, time = spec.delay or 0.3, spec.time or 0.8
-	task.delay(delay, function()
-		if not model.Parent then
-			return
-		end
-		local info = TweenInfo.new(time, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
-		for _, item in ipairs(model:GetDescendants()) do
-			if item:IsA("BasePart") and item.Name ~= "HumanoidRootPart" and item.Transparency < 1 then
-				TweenService:Create(item, info, { Transparency = 1 }):Play()
-			elseif item:IsA("Decal") or item:IsA("Texture") then
-				TweenService:Create(item, info, { Transparency = 1 }):Play()
-			end
-		end
-	end)
-end
-
-function EnemyFX.death(model: Model, enemyType: string?, weaponType: string?, weaponId: string?)
-	local center = model:GetBoundingBox().Position
-	EnemyFX.play("death", enemyType, weaponType, weaponId, center, Vector3.yAxis, "high")
-	local entry = EnemyConfig.sound(enemyType, weaponType, weaponId, "death")
-	if entry then
-		CombatFX.playAt(center, entry)
-	end
-	local preset = EnemyConfig.resolve(enemyType, weaponType, weaponId, "death")
-	if preset and preset.dissolve then
-		dissolve(model, preset.dissolve)
-	end
-end
+--- Deaths are no longer drawn here: DeathService tells the clients (EntityDeath) and DeathFX plays the glitch + triangle burst
+--- (Config/DeathConfig), for every cause of death. Kept so old callers do nothing instead of erroring.
+function EnemyFX.death(_model: Model, _enemyType: string?, _weaponType: string?, _weaponId: string?) end
 
 --- A WeaponHit payload: the hit effect (normal or crit), its sound, and the death effect on a kill.
 function EnemyFX.hit(data: any)

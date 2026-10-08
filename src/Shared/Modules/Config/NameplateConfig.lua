@@ -55,25 +55,12 @@ NameplateConfig.hp = {
 	ghostDelay = 0.35, -- the trail waits, then follows
 	ghostSeconds = 0.5,
 	countSeconds = 0.25, -- the HP number counts toward the new value
-	deathFadeSeconds = 0.3,
 	-- HP number: 1,234 -> "1234", 36,500 -> "36.5K", 1,250,000 -> "1.2M"
 	units = { { 1e9, "B" }, { 1e6, "M" }, { 1e3, "K" } },
 	showMax = true, -- "15.3K/36.5K" (false = only the current value)
 }
 
--- ===================== DEATH =====================
--- name + level: a white punch, then they drop, tilt and shrink away; the bar closes and the tags pop out one by one
-NameplateConfig.death = {
-	punchScale = 1.28,
-	punchSeconds = 0.09,
-	flashColor = "#FFFFFF",
-	dropPixels = 24, -- how far the name falls
-	tiltDegrees = 9, -- random left / right
-	endScale = 0.55,
-	fallSeconds = 0.5,
-	barCloseSeconds = 0.25,
-	tagStagger = 0.05, -- seconds between each tag popping out
-}
+-- Death (the glitch, the shards, the timing) is Modules/Config/DeathConfig.hud.
 
 -- ===================== LEVEL BADGE =====================
 -- tint = enemy level - the player's Combat level; the first row whose `upTo` is >= the difference wins.

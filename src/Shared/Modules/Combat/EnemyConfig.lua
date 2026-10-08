@@ -166,19 +166,6 @@ EnemyConfig.fx = {
 		sparks = { count = 14, color = { XPGREEN, XPDARK }, speed = { 10, 26 }, spread = 90, life = { 0.4, 0.8 }, size = { 1.3, 0.4 }, drag = 3, rise = 9 },
 		light = { color = XPDARK, brightness = 2.2, range = 14, time = 0.45 },
 	},
-
-	-- a kill: a big warm burst at the body's centre, a ground shockwave, smoke, then the body dissolves
-	death = {
-		burst = { count = 1, color = { WHITE, WARM, GOLD, EMBER }, size = { 5, 9 }, life = 0.35 },
-		flash = { count = 1, color = { WHITE, WARM }, size = { 3.5, 6 }, life = 0.18, transparency = 0.2 },
-		ring = { count = 1, color = { WHITE, WARM, GOLD }, size = { 1.5, 9 }, life = 0.45, transparency = 0.15, speed = 0.5, horizontal = true },
-		sparks = { count = 30, color = { WHITE, WARM, GOLD, EMBER }, speed = { 16, 50 }, spread = 90, life = { 0.3, 0.8 }, size = { 2, 0.6 }, drag = 3, gravity = 38 },
-		shards = { count = 8, color = { WARM, GOLD, EMBER }, speed = { 10, 26 }, spread = 120, life = { 0.4, 0.8 }, size = { 1.4, 0.5 }, drag = 2, gravity = 50 },
-		puff = { count = 6, color = DUST, speed = { 3, 12 }, spread = 180, life = { 0.6, 1.0 }, size = { 3.5, 6.5 }, transparency = 0.5 },
-		motes = { count = 22, color = { WARM, GOLD, EMBER }, speed = { 3, 12 }, spread = 180, life = { 1, 1.7 }, size = { 0.55, 0.05 }, drag = 2, rise = 4 },
-		light = { color = WARM, brightness = 4, range = 18, time = 0.3 },
-		dissolve = { delay = 0.35, time = 0.8 }, -- the body fades out (client side) after this long
-	},
 }
 
 -- ===================== 1b. LIBRARY: SOUNDS =====================

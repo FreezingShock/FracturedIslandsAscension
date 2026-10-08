@@ -30,6 +30,7 @@ local EnemyConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChi
 local DamageService = require(ServerScriptService:WaitForChild("DamageService")) :: any
 local LootService = require(ServerScriptService:WaitForChild("LootService")) :: any
 local EnemyTags = require(ServerScriptService:WaitForChild("EnemyTags")) :: any
+local DeathService = require(ServerScriptService:WaitForChild("DeathService")) :: any
 
 local STEP = 0.3
 local DEFAULT_TYPE = "placeholder_mob"
@@ -128,11 +129,15 @@ local function spawnMob(marker: BasePart)
 	}
 	humanoid.Died:Once(function()
 		mobs[model] = nil
-		local ok, err = pcall(LootService.reward, model, enemyType)
-		if not ok then
-			warn("[EnemyService] reward failed: " .. tostring(err))
-		end
-		task.delay(cfg.respawnSeconds, function()
+		-- the body glitches first (DeathService / DeathFX); loot pays out when the burst starts, the body goes after the sequence
+		local timeline = DeathService.timeline("enemy", entry)
+		task.delay(timeline.glitch, function()
+			local ok, err = pcall(LootService.reward, model, enemyType)
+			if not ok then
+				warn("[EnemyService] reward failed: " .. tostring(err))
+			end
+		end)
+		task.delay(timeline.total + cfg.respawnSeconds, function()
 			model:Destroy()
 			if marker.Parent then
 				spawnMob(marker)

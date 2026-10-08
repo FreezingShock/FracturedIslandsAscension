@@ -19,6 +19,7 @@ local DamageService = require(ServerScriptService:WaitForChild("DamageService"))
 local LootService = require(ServerScriptService:WaitForChild("LootService")) :: any
 local EnemyConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("EnemyConfig")) :: any
 local EnemyTags = require(ServerScriptService:WaitForChild("EnemyTags")) :: any
+local DeathService = require(ServerScriptService:WaitForChild("DeathService")) :: any
 
 local DUMMY = CombatConfig.dummy
 local DummyService = {}
@@ -75,11 +76,14 @@ local function spawnDummy(marker: BasePart)
 
 	humanoid.Died:Once(function()
 		dummies[dummy] = nil
-		local ok, err = pcall(LootService.reward, dummy, "dummy") -- Coins (CoinsConfig.enemies.dummy) for whoever killed it
-		if not ok then
-			warn("[DummyService] reward failed: " .. tostring(err))
-		end
-		task.delay(DUMMY.respawnSeconds, function()
+		local timeline = DeathService.timeline("dummy", EnemyConfig.get("dummy"))
+		task.delay(timeline.glitch, function() -- loot pays out when the burst starts
+			local ok, err = pcall(LootService.reward, dummy, "dummy") -- Coins (CoinsConfig.enemies.dummy) for whoever killed it
+			if not ok then
+				warn("[DummyService] reward failed: " .. tostring(err))
+			end
+		end)
+		task.delay(timeline.total + DUMMY.respawnSeconds, function()
 			dummy:Destroy()
 			if marker.Parent then
 				spawnDummy(marker)

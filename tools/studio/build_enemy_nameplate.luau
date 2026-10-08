@@ -11,7 +11,7 @@ local RS = game:GetService("ReplicatedStorage")
 local gui = RS:FindFirstChild("GUI") or Instance.new("Folder")
 gui.Name = "GUI"
 gui.Parent = RS
-for _, name in ipairs({ "EnemyNameplate", "EnemyNameplate_Tag", "EnemyNameplate_TagGroup" }) do
+for _, name in ipairs({ "EnemyNameplate", "EnemyNameplate_Tag", "EnemyNameplate_TagGroup", "EnemyNameplate_Shard" }) do
 	if gui:FindFirstChild(name) then
 		if not FORCE then
 			return name .. " exists (set FORCE = true to rebuild)"
@@ -330,4 +330,19 @@ local count = label({
 stroke(count, "#000000", 1.5)
 chip.Parent = gui
 
-return "built GUI.EnemyNameplate + EnemyNameplate_Tag + EnemyNameplate_TagGroup"
+-- ===================== DEATH SHARD =====================
+-- one glowing triangle; the controller clones about 24 of them when the plate breaks apart (DeathConfig.hud), picks a
+-- random cell of the 2x2 triangle sheet (ImageRectOffset 0 / 128) and a colour from DeathConfig.burst.colors
+new("ImageLabel", {
+	Name = "EnemyNameplate_Shard",
+	AnchorPoint = Vector2.new(0.5, 0.5),
+	Size = UDim2.fromOffset(14, 14),
+	BackgroundTransparency = 1,
+	Image = "rbxassetid://88874298201257", -- assets/death_fx/death_triangles.png (tools/fx/gen_death_textures.py)
+	ImageRectSize = Vector2.new(128, 128),
+	ImageRectOffset = Vector2.new(0, 0),
+	ImageColor3 = hex("#7FFFEA"),
+	ResampleMode = Enum.ResamplerMode.Default,
+}, gui)
+
+return "built GUI.EnemyNameplate + _Tag + _TagGroup + _Shard"

@@ -21,10 +21,12 @@ local TweenService = game:GetService("TweenService")
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local EnemyConfig = require(Modules:WaitForChild("EnemyConfig")) :: any
 local CFG = require(Modules:WaitForChild("Config"):WaitForChild("NameplateConfig")) :: any
+local DeathConfig = require(Modules:WaitForChild("Config"):WaitForChild("DeathConfig")) :: any
 local guiFolder = ReplicatedStorage:WaitForChild("GUI")
 local template = guiFolder:WaitForChild("EnemyNameplate") :: BillboardGui
 local tagTemplate = guiFolder:WaitForChild("EnemyNameplate_Tag") :: Frame
 local groupTemplate = guiFolder:WaitForChild("EnemyNameplate_TagGroup") :: Frame
+local shardTemplate = guiFolder:WaitForChild("EnemyNameplate_Shard") :: ImageLabel
 
 local TAG_PREFIX = "Tag_"
 local combatLevel = 1
@@ -70,6 +72,10 @@ local plates: { [Model]: Plate } = {}
 local counting: { [Plate]: boolean } = {}
 
 -- ===================== HELPERS =====================
+local function find(root: Instance, name: string): Instance?
+	return root:FindFirstChild(name, true)
+end
+
 local function play(plate: Plate, key: string, instance: Instance?, seconds: number, props: { [string]: any }, style: Enum.EasingStyle?, direction: Enum.EasingDirection?)
 	if not instance then
 		return nil
@@ -393,59 +399,135 @@ local function setFraction(plate: Plate)
 	return math.clamp(plate.humanoid.Health / math.max(plate.humanoid.MaxHealth, 1), 0, 1)
 end
 
+-- DEATH: the plate glitches for the same seconds as the body (DeathConfig.timeline.glitch), then breaks into small triangles
 local function playDeath(plate: Plate)
 	if plate.dead then
 		return
 	end
 	plate.dead = true
 	counting[plate] = nil
-	local d = CFG.death
-	-- bar closes, tags pop out one by one
-	setBar(plate, false, d.barCloseSeconds)
-	if plate.tagsGroup then
-		local delay = 0
-		for _, entry in pairs(plate.chips) do
-			local scale = entry.chip:FindFirstChildOfClass("UIScale")
-			if scale then
-				task.delay(delay, function()
-					if scale.Parent then
-						TweenService:Create(scale, TweenInfo.new(0.2, Enum.EasingStyle.Back, Enum.EasingDirection.In), { Scale = 0 }):Play()
-					end
-				end)
-				delay += d.tagStagger
+	for _, tween in pairs(plate.tweens) do
+		tween:Cancel()
+	end
+	local model, gui = plate.model, plate.gui
+	local stack = find(gui, "Stack") :: Frame?
+	local enemyType = model:GetAttribute("EnemyType")
+	local kind = enemyType == "dummy" and "dummy" or "enemy"
+	local cfg = DeathConfig.resolve(kind, type(enemyType) == "string" and EnemyConfig.get(enemyType) or nil)
+	local hud = cfg.hud
+	local glitchSeconds = cfg.timeline.glitch
+	if not (stack and gui.Parent) then
+		gui.Enabled = false
+		return
+	end
+
+	-- two tinted copies of the stack behind it: the double image
+	local echoes: { Frame } = {}
+	if hud.echo then
+		for index, color in ipairs({ Color3.fromRGB(255, 70, 220), hud.tint }) do
+			local copy = stack:Clone()
+			copy.Name = "DeathEcho" .. index
+			for _, item in ipairs(copy:GetDescendants()) do
+				if item:IsA("CanvasGroup") then
+					item.GroupColor3 = color
+					item.GroupTransparency = math.max(item.GroupTransparency, 0.15) + 0.4
+				end
 			end
+			copy.Parent = gui
+			table.insert(echoes, copy)
 		end
-		play(plate, "tagsFade", plate.tagsGroup, 0.25 + delay, { GroupTransparency = 1 })
 	end
-	-- name + level: a white punch, then fall, tilt and shrink away
-	plate.nameShown = false
-	local title, scale, pad = plate.title, plate.titleScale, plate.titlePad
-	local label = plate.nameLabel
-	local originalColor = label and label.TextColor3
-	if label then
-		label.TextColor3 = Color3.fromHex(d.flashColor)
+	local groups: { CanvasGroup } = {}
+	for _, item in ipairs(stack:GetDescendants()) do
+		if item:IsA("CanvasGroup") then
+			table.insert(groups, item)
+		end
 	end
-	title.GroupTransparency = 0
-	play(plate, "deathPunch", scale, d.punchSeconds, { Scale = d.punchScale }, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
-	task.delay(d.punchSeconds, function()
-		if not title.Parent then
+	local barRoot = find(stack, "BarRoot") :: Frame?
+	local titlePad = plate.titlePad
+	local tagsPad = plate.tagsPad
+	local titleLeft, tagsLeft = titlePad and titlePad.PaddingLeft or UDim.new(0, 0), tagsPad and tagsPad.PaddingLeft or UDim.new(0, 0)
+	local barBase = barRoot and barRoot.Position or UDim2.new()
+	local started = os.clock()
+	local connection: RBXScriptConnection
+	connection = RunService.RenderStepped:Connect(function()
+		local t = math.clamp((os.clock() - started) / math.max(glitchSeconds, 0.05), 0, 1)
+		local intensity = t ^ 1.3
+		stack.Position = UDim2.new(0.5, math.random(-100, 100) / 100 * hud.jitterPixels * intensity, 0.5, math.random(-100, 100) / 100 * hud.jitterPixels * 0.5 * intensity)
+		local alpha = math.clamp((t - 0.1) / 0.9, 0, 1)
+		local flicker = math.random() < math.clamp((t - hud.flickerStart) * 1.2, 0, 1) * 0.55
+		for _, group in ipairs(groups) do
+			group.GroupColor3 = Color3.new(1, 1, 1):Lerp(hud.tint, alpha)
+			group.GroupTransparency = (flicker and math.random() < 0.7) and 0.5 + math.random() * 0.45 or 0
+		end
+		-- slices: a part of the plate jumps sideways for a frame
+		local slice = t > 0.3 and math.random() < hud.sliceChance
+		local push = (math.random() < 0.5 and -1 or 1) * hud.slicePixels
+		if titlePad then
+			titlePad.PaddingLeft = slice and UDim.new(0, math.max(push, 0) * math.random()) or titleLeft
+			titlePad.PaddingTop = UDim.new(0, 0)
+		end
+		if tagsPad then
+			tagsPad.PaddingLeft = (slice and math.random() < 0.6) and UDim.new(0, math.max(-push, 0) * math.random()) or tagsLeft
+			tagsPad.PaddingTop = UDim.new(0, plate.tagsBase)
+		end
+		if barRoot then
+			barRoot.Position = (slice and math.random() < 0.6) and barBase + UDim2.fromOffset(push * math.random(), 0) or barBase
+		end
+		for index, copy in ipairs(echoes) do
+			local side = (index == 1 and -1 or 1) * hud.echoPixels * (0.4 + intensity) * (math.random() < 0.5 and 1 or -1)
+			copy.Position = UDim2.new(0.5, side, 0.5, math.random(-100, 100) / 100)
+		end
+		if t < 1 then
 			return
 		end
-		if label and originalColor then
-			TweenService:Create(label, TweenInfo.new(d.fallSeconds * 0.6, Enum.EasingStyle.Quad), { TextColor3 = originalColor }):Play()
+		connection:Disconnect()
+
+		-- BURST: the plate is gone, small triangles scatter, spin, shrink and fade
+		for _, copy in ipairs(echoes) do
+			copy:Destroy()
 		end
-		local tilt = (math.random() < 0.5 and -1 or 1) * d.tiltDegrees
-		play(plate, "deathPunch", scale, d.fallSeconds, { Scale = d.endScale }, Enum.EasingStyle.Quint, Enum.EasingDirection.In)
-		play(plate, "titleFade", title, d.fallSeconds, { GroupTransparency = 1 }, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
-		play(plate, "titlePos", pad, d.fallSeconds, { PaddingTop = UDim.new(0, d.dropPixels) }, Enum.EasingStyle.Quint, Enum.EasingDirection.In)
-		play(plate, "titleTilt", title, d.fallSeconds, { Rotation = tilt }, Enum.EasingStyle.Quint, Enum.EasingDirection.In)
+		stack.Visible = false
+		local halfW, halfH = 110, 34
+		local colors = cfg.burst.colors
+		for _ = 1, hud.shards do
+			local shard = shardTemplate:Clone()
+			local size = math.random(hud.shardSize[1], hud.shardSize[2])
+			local life = hud.shardLife[1] + math.random() * (hud.shardLife[2] - hud.shardLife[1])
+			local angle = math.random() * math.pi * 2
+			local distance = hud.shardDistance[1] + math.random() * (hud.shardDistance[2] - hud.shardDistance[1])
+			local from = UDim2.new(0.5, math.random(-halfW, halfW), 0.5, math.random(-halfH, halfH))
+			shard.Size = UDim2.fromOffset(size, size)
+			shard.Position = from
+			shard.Rotation = math.random(0, 360)
+			shard.ImageColor3 = colors[math.random(1, #colors)]
+			shard.ImageRectOffset = Vector2.new(math.random(0, 1) * 128, math.random(0, 1) * 128)
+			shard.ZIndex = 20
+			shard.Parent = gui
+			local to = from + UDim2.fromOffset(math.cos(angle) * distance, math.sin(angle) * distance * 0.6 - hud.shardRise)
+			local info = TweenInfo.new(life, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
+			TweenService:Create(shard, info, { Position = to, Rotation = shard.Rotation + (math.random() < 0.5 and -1 or 1) * math.random(180, 540) }):Play()
+			local fade = TweenService:Create(shard, TweenInfo.new(life, Enum.EasingStyle.Quad, Enum.EasingDirection.In), { Size = UDim2.fromOffset(0, 0), ImageTransparency = 1 })
+			fade.Completed:Connect(function()
+				shard:Destroy()
+			end)
+			fade:Play()
+		end
+		task.delay(hud.shardLife[2] + 0.2, function()
+			if gui.Parent then
+				gui.Enabled = false
+			end
+		end)
 	end)
 end
 
 local function onHealth(plate: Plate)
 	local humanoid = plate.humanoid
 	if humanoid.Health <= 0 then
-		playDeath(plate)
+		-- the EntityDeath message normally starts it a moment earlier (same timeline as the body); this is the fallback
+		task.delay(0.15, function()
+			playDeath(plate)
+		end)
 		return
 	end
 	local fraction = setFraction(plate)
@@ -487,10 +569,6 @@ local function stepCount(plate: Plate, now: number)
 end
 
 -- ===================== ATTACH =====================
-local function find(root: Instance, name: string): Instance?
-	return root:FindFirstChild(name, true)
-end
-
 local function attach(model: Instance)
 	if not model:IsA("Model") or plates[model] or model:FindFirstChild("EnemyNameplate") then
 		return
@@ -612,6 +690,19 @@ local function attach(model: Instance)
 	end)
 	gui.Parent = model
 end
+
+-- the server's EntityDeath message starts the plate's death in sync with the body's glitch
+task.spawn(function()
+	local remote = ReplicatedStorage:WaitForChild("EntityDeath", 30) :: RemoteEvent?
+	if remote then
+		remote.OnClientEvent:Connect(function(model)
+			local plate = typeof(model) == "Instance" and plates[model :: Model]
+			if plate then
+				playDeath(plate)
+			end
+		end)
+	end
+end)
 
 -- ===================== SHARED LOOP =====================
 local accumulator = 0
