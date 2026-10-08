@@ -56,6 +56,11 @@ function DeathService.timeline(kind: string?, enemyEntry: any?): { glitch: numbe
 end
 
 local function freeze(model: Model)
+	for _, child in ipairs(model:GetChildren()) do
+		if child:IsA("ForceField") then
+			child:Destroy() -- the spawn bubble must not stay around a body that is about to burst
+		end
+	end
 	local root = model:FindFirstChild("HumanoidRootPart") :: BasePart?
 	if root then
 		root.AssemblyLinearVelocity = Vector3.zero

@@ -278,6 +278,9 @@ local function updateCamera(dt: number)
 	if camera.CameraType ~= Enum.CameraType.Scriptable then
 		camera.CameraType = Enum.CameraType.Scriptable
 	end
+	if player:GetAttribute("DeathCam") then
+		return -- DeathController drives the camera while your own death plays
+	end
 
 	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
 	local root = character and character:FindFirstChild("HumanoidRootPart") :: BasePart?

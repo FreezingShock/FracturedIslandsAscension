@@ -49,6 +49,8 @@ local InventoryDataManager = {}
 local MAX_HOTBAR_SLOTS = 9
 local GRID_SLOTS = 27
 local MAX_STACK = 999
+local MAX_PAGES = 3 -- backpack pages (GRID_SLOTS stacks each, as the menu shows them): no more stacks than hotbar + 3 pages
+local MAX_STACKS = MAX_HOTBAR_SLOTS + MAX_PAGES * GRID_SLOTS
 local DROP_FORWARD_OFFSET = 5 -- studs in front of character when dropping
 
 -- ===================== REMOTES =====================
@@ -105,35 +107,74 @@ local function getStash(player, create: boolean?)
 end
 
 --- Park every Tool (Backpack + held) in the stash. Returns how many were moved.
+--- The Backpack INSTANCE is parked as one object (moving it is one operation), not Tool by Tool: with a big inventory
+--- (hundreds or thousands of Tools) reparenting each one froze the whole server for seconds on every death.
 local function stashTools(player): number
 	local stash = getStash(player, true)
+	local backpack = player:FindFirstChildOfClass("Backpack")
 	local moved = 0
-	for _, container in ipairs({ player:FindFirstChildOfClass("Backpack"), player.Character }) do
-		if container then
-			for _, child in ipairs(container:GetChildren()) do
-				if child:IsA("Tool") then
-					child.Parent = stash
-					moved += 1
-				end
+	if player.Character then
+		for _, child in ipairs(player.Character:GetChildren()) do
+			if child:IsA("Tool") then
+				child.Parent = backpack or stash -- the few held Tools join the Backpack that is about to be parked
+				moved += 1
+			end
+		end
+	end
+	if backpack and not stash:FindFirstChildOfClass("Backpack") then
+		moved += #backpack:GetChildren()
+		backpack.Parent = stash
+	end
+	return moved
+end
+
+--- Give the player back the parked Backpack (and any loose stashed Tools). Returns how many Tools came back (0 = nothing).
+local function restoreTools(player): number
+	local stash = getStash(player, false)
+	if not stash then
+		return 0
+	end
+	local moved = 0
+	local parked = stash:FindFirstChildOfClass("Backpack")
+	local current = player:FindFirstChildOfClass("Backpack")
+	if parked then
+		moved += #parked:GetChildren()
+		if current and current ~= parked then
+			local fresh = current:GetChildren()
+			current:Destroy() -- the engine's new, empty Backpack makes room for the old one
+			for _, tool in ipairs(fresh) do
+				tool.Parent = parked
+			end
+		end
+		parked.Parent = player
+		current = parked
+	end
+	local loose = stash:GetChildren()
+	if #loose > 0 and current then
+		for _, child in ipairs(loose) do
+			if child:IsA("Tool") then
+				child.Parent = current
+				moved += 1
 			end
 		end
 	end
 	return moved
 end
 
---- Move the stashed Tools into the current Backpack. Returns how many were moved (0 = nothing to restore).
-local function restoreTools(player): number
-	local stash = getStash(player, false)
-	local backpack = player:FindFirstChildOfClass("Backpack")
-	if not stash or not backpack then
-		return 0
+-- Moving hundreds of Tools (the stash on death, the restore on respawn) fires one ChildAdded / ChildRemoved per Tool; a full
+-- SendUpdate for each froze the game for seconds. The listeners ask for an update instead, and many asks in one frame become one.
+local updateQueued: { [Player]: boolean } = {}
+local function scheduleUpdate(player)
+	if updateQueued[player] then
+		return
 	end
-	local moved = 0
-	for _, child in ipairs(stash:GetChildren()) do
-		child.Parent = backpack
-		moved += 1
-	end
-	return moved
+	updateQueued[player] = true
+	task.defer(function()
+		updateQueued[player] = nil
+		if player.Parent then
+			InventoryDataManager.SendUpdate(player)
+		end
+	end)
 end
 
 --- Get all Tool-holding containers for a player (the stash counts: those Tools are still the player's).
@@ -149,6 +190,10 @@ local function getContainers(player)
 	local stash = getStash(player, false)
 	if stash then
 		table.insert(containers, stash)
+		local parked = stash:FindFirstChildOfClass("Backpack")
+		if parked then
+			table.insert(containers, parked)
+		end
 	end
 	return containers
 end
@@ -505,6 +550,19 @@ function InventoryDataManager.AddItem(player, toolName: string, count: number): 
 	local before = existing[toolName] and existing[toolName].count or 0
 	canAdd = math.min(canAdd, MAX_STACK - before)
 
+	if canAdd <= 0 then
+		return 0
+	end
+
+	-- Only MAX_PAGES pages of stacks: an item that needs a NEW stack is refused once they are all taken
+	local limit = stackLimit(toolName)
+	local stacksNow = 0
+	for name, info in pairs(existing) do
+		stacksNow += math.ceil(info.count / stackLimit(name))
+	end
+	local freeStacks = math.max(MAX_STACKS - stacksNow, 0)
+	local haveRoomIn = math.ceil(before / limit) * limit - before -- space left in the stack it already has
+	canAdd = math.min(canAdd, haveRoomIn + freeStacks * limit)
 	if canAdd <= 0 then
 		return 0
 	end
@@ -1226,15 +1284,20 @@ local function onPlayerReady(player)
 	task.wait(0.1)
 
 	-- Wire ChildAdded/Removed listeners for live updates (a respawn can hand the player a NEW Backpack)
+	local wiredBackpacks: { [Instance]: boolean } = {}
 	local function wireBackpack(backpack)
+		if wiredBackpacks[backpack] then
+			return -- a parked Backpack coming back is already wired
+		end
+		wiredBackpacks[backpack] = true
 		backpack.ChildAdded:Connect(function(child)
 			if child:IsA("Tool") then
-				InventoryDataManager.SendUpdate(player)
+				scheduleUpdate(player)
 			end
 		end)
 		backpack.ChildRemoved:Connect(function(child)
 			if child:IsA("Tool") then
-				InventoryDataManager.SendUpdate(player)
+				scheduleUpdate(player)
 			end
 		end)
 	end
@@ -1282,12 +1345,12 @@ local function onPlayerReady(player)
 		end
 		char.ChildAdded:Connect(function(child)
 			if child:IsA("Tool") then
-				InventoryDataManager.SendUpdate(player)
+				scheduleUpdate(player)
 			end
 		end)
 		char.ChildRemoved:Connect(function(child)
 			if child:IsA("Tool") then
-				InventoryDataManager.SendUpdate(player)
+				scheduleUpdate(player)
 			end
 		end)
 	end

@@ -45,9 +45,9 @@ DeathConfig.library = {
 		sliceStuds = 1.4,
 		sliceChance = 0.35, -- chance per frame (late in the glitch) of a slice
 		flickerStart = 0.1, -- flicker chance rises from this fraction of the glitch
-		echo = true, -- a second, magenta-tinted copy offset sideways (the double image)
-		echoStuds = 0.45,
-		highlight = true, -- an outline fill that pulses cyan
+		highlight = true, -- an outline fill that pulses cyan (only while 3 or fewer deaths are playing)
+		scanBars = 2, -- thin neon bars sweeping up and down the body
+		scanSweeps = 2.5, -- up-and-down passes during the glitch
 	},
 
 	burst = {
@@ -97,7 +97,22 @@ DeathConfig.library = {
 	},
 
 	player = {
-		respawnSeconds = 3, -- Players.RespawnTime (the view stays on the frozen body: CameraController follows it)
+		respawnSeconds = 3, -- Players.RespawnTime
+	},
+
+	-- when the dead one is YOU: the screen and camera go with the body (DeathController)
+	selfDeath = {
+		glitchTint = Color3.fromRGB(150, 215, 255), -- the screen cools to this during the glitch
+		glitchSaturation = -0.55,
+		glitchContrast = 0.18,
+		flash = 0.4, -- brightness kick as the triangles go off, easing back to 0
+		flashSeconds = 0.9,
+		bloom = 1.1, -- bloom pulse at the burst, fading over the burst time
+		shake = 0.45, -- studs of camera shake at the end of the glitch
+		pullBack = 7, -- studs the camera drifts away
+		rise = 4, -- and up
+		orbitDegrees = 35, -- a slow turn around the spot
+		fovBonus = 9,
 	},
 }
 
