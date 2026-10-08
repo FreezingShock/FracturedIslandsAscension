@@ -1,6 +1,6 @@
 {
   "name": "fia",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Fractured Islands: Ascension dev toolkit. Session connect/handoff across machines, Obsidian vault recall and logging, Studio GUI builders, Blender and Figma pipelines, config-driven content scaffolding, and the fia-* feature workflow.",
   "author": { "name": "Nate (FreezingShock)" },
   "repository": "https://github.com/FreezingShock/FracturedIslandsAscension",
