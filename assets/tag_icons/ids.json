@@ -1,0 +1,16 @@
+{
+	"fire": "rbxassetid://102117766495412",
+	"ice": "rbxassetid://129287916714928",
+	"earth": "rbxassetid://132840379929150",
+	"storm": "rbxassetid://99696933054046",
+	"nature": "rbxassetid://97187782220297",
+	"power": "rbxassetid://118056444083285",
+	"shield": "rbxassetid://103820293560489",
+	"empower": "rbxassetid://109814746839733",
+	"regen": "rbxassetid://97225490143648",
+	"enrage": "rbxassetid://84757432578478",
+	"poison": "rbxassetid://137492234467042",
+	"bleed": "rbxassetid://91561574594671",
+	"slow": "rbxassetid://87561563126080",
+	"burn": "rbxassetid://118952046941037"
+}

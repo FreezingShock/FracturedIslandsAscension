@@ -77,9 +77,9 @@ NameplateConfig.death = {
 -- top / bottom = badge gradient, stroke = border, text = level colour
 NameplateConfig.levelTints = {
 	{ upTo = -8, name = "trivial", top = "#8B8B8E", bottom = "#5A5A5E", stroke = "#2A2A2D", text = "#FFFFFF" },
-	{ upTo = -3, name = "easy", top = "#4E8F4E", bottom = "#2C5E2C", stroke = "#142B14", text = "#E8FFE8" },
-	{ upTo = 2, name = "even", top = "#B9A93A", bottom = "#7C6F1C", stroke = "#2E2808", text = "#FFFFE0" },
-	{ upTo = math.huge, name = "dangerous", top = "#B64A4A", bottom = "#7A2222", stroke = "#2E0C0C", text = "#FFE8E8" },
+	{ upTo = -3, name = "easy", top = "#4E8F4E", bottom = "#2C5E2C", stroke = "#142B14", text = "#FFFFFF" },
+	{ upTo = 2, name = "even", top = "#A8941F", bottom = "#6A5A0C", stroke = "#2E2808", text = "#FFFFFF" },
+	{ upTo = math.huge, name = "dangerous", top = "#B64A4A", bottom = "#7A2222", stroke = "#2E0C0C", text = "#FFFFFF" },
 }
 NameplateConfig.tintSeconds = 0.2
 
@@ -100,22 +100,26 @@ NameplateConfig.tagKinds = {
 	debuff = { top = "#FF9A9A", bottom = "#B02B2B" },
 }
 
--- kind = element | effect | debuff. color = placeholder tile. glyph = placeholder letter (until icon is set)
+-- kind = element | effect | debuff. color = tile colour shown only while icon is "" (glyph = its placeholder letter).
+-- Icons: assets/tag_icons/<id>.png, drawn by tools/gen_tag_icons.py (ids in assets/tag_icons/ids.json).
 NameplateConfig.tags = {
 	-- elements (permanent, from EnemyConfig.enemies.<key>.tags)
-	fire = { kind = "element", name = "Fire", color = "#FF8A2A", glyph = "F", icon = "" },
-	ice = { kind = "element", name = "Ice", color = "#7FE3FF", glyph = "I", icon = "" },
-	earth = { kind = "element", name = "Earth", color = "#A7824F", glyph = "E", icon = "" },
-	storm = { kind = "element", name = "Storm", color = "#C9A8FF", glyph = "S", icon = "" },
+	fire = { kind = "element", name = "Fire", color = "#FF8A2A", glyph = "F", icon = "rbxassetid://102117766495412" },
+	ice = { kind = "element", name = "Ice", color = "#7FE3FF", glyph = "I", icon = "rbxassetid://129287916714928" },
+	earth = { kind = "element", name = "Earth", color = "#A7824F", glyph = "E", icon = "rbxassetid://132840379929150" },
+	storm = { kind = "element", name = "Storm", color = "#C9A8FF", glyph = "S", icon = "rbxassetid://99696933054046" },
+	nature = { kind = "element", name = "Nature", color = "#3FBF4A", glyph = "N", icon = "rbxassetid://97187782220297" },
 	-- debuffs (EnemyTags.add, a duration and a stack count)
-	burn = { kind = "debuff", name = "Burn", color = "#FF5530", glyph = "B", icon = "" },
-	slow = { kind = "debuff", name = "Slow", color = "#8FB4FF", glyph = "S", icon = "" },
-	poison = { kind = "debuff", name = "Poison", color = "#6BDB4A", glyph = "P", icon = "" },
-	bleed = { kind = "debuff", name = "Bleed", color = "#C21E3A", glyph = "L", icon = "" },
+	burn = { kind = "debuff", name = "Burn", color = "#FF5530", glyph = "B", icon = "rbxassetid://118952046941037" },
+	slow = { kind = "debuff", name = "Slow", color = "#8FB4FF", glyph = "S", icon = "rbxassetid://87561563126080" },
+	poison = { kind = "debuff", name = "Poison", color = "#6BDB4A", glyph = "P", icon = "rbxassetid://137492234467042" },
+	bleed = { kind = "debuff", name = "Bleed", color = "#C21E3A", glyph = "L", icon = "rbxassetid://91561574594671" },
 	-- active effects
-	shield = { kind = "effect", name = "Shield", color = "#FFD24A", glyph = "D", icon = "" },
-	enrage = { kind = "effect", name = "Enrage", color = "#FF4C6A", glyph = "N", icon = "" },
-	regen = { kind = "effect", name = "Regen", color = "#55FF99", glyph = "R", icon = "" },
+	shield = { kind = "effect", name = "Shield", color = "#FFD24A", glyph = "D", icon = "rbxassetid://103820293560489" },
+	enrage = { kind = "effect", name = "Enrage", color = "#FF4C6A", glyph = "E", icon = "rbxassetid://84757432578478" },
+	regen = { kind = "effect", name = "Regen", color = "#55FF99", glyph = "R", icon = "rbxassetid://97225490143648" },
+	power = { kind = "effect", name = "Power", color = "#E8EEF5", glyph = "W", icon = "rbxassetid://118056444083285" },
+	empower = { kind = "effect", name = "Empower", color = "#FFD24A", glyph = "M", icon = "rbxassetid://109814746839733" },
 }
 
 return NameplateConfig

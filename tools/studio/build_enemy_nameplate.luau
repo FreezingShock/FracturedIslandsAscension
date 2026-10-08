@@ -55,7 +55,7 @@ end
 -- ===================== NAMEPLATE =====================
 local b = new("BillboardGui", {
 	Name = "EnemyNameplate",
-	Size = UDim2.fromOffset(260, 110),
+	Size = UDim2.fromOffset(400, 110), -- wide enough for a full tag row
 	StudsOffsetWorldSpace = Vector3.new(0, 2.6, 0),
 	AlwaysOnTop = false,
 	LightInfluence = 0,
@@ -133,7 +133,7 @@ local lv = label({
 	FontFace = SILK,
 	TextColor3 = hex("#FFFFFF"),
 }, badge)
-stroke(lv, "#000000", 1)
+stroke(lv, "#000000", 1.5)
 
 -- bar (a height of 0 hides it; the controller opens it between the title and the tags)
 local barGroup = new("CanvasGroup", {
@@ -197,12 +197,12 @@ local hp = label({
 	Name = "HpLabel",
 	Size = UDim2.fromScale(1, 1),
 	Text = "0/0",
-	TextSize = 10,
+	TextSize = 11,
 	FontFace = SILK,
 	TextColor3 = hex("#FFFFFF"),
 	ZIndex = 5,
 }, track)
-stroke(hp, "#000000", 1)
+stroke(hp, "#000000", 1.5)
 -- diamond ends: a rotated square, 2 studs-pixels outside each end of the bar, with a lighter gem
 for _, side in ipairs({ "L", "R" }) do
 	local edge = new("Frame", {
@@ -251,7 +251,7 @@ b.Parent = gui
 local group = new("Frame", {
 	Name = "EnemyNameplate_TagGroup",
 	AutomaticSize = Enum.AutomaticSize.X,
-	Size = UDim2.fromOffset(0, 22),
+	Size = UDim2.fromOffset(0, 26),
 	BackgroundColor3 = Color3.new(1, 1, 1),
 	BorderSizePixel = 0,
 }, nil)
@@ -273,7 +273,7 @@ group.Parent = gui
 local chip = new("Frame", {
 	Name = "EnemyNameplate_Tag",
 	AutomaticSize = Enum.AutomaticSize.X,
-	Size = UDim2.fromOffset(0, 18),
+	Size = UDim2.fromOffset(0, 20),
 	BackgroundTransparency = 1,
 	BorderSizePixel = 0,
 }, nil)
@@ -287,7 +287,7 @@ new("UIListLayout", {
 local icon = new("Frame", {
 	Name = "Icon",
 	LayoutOrder = 1,
-	Size = UDim2.fromOffset(16, 16),
+	Size = UDim2.fromOffset(18, 18),
 	BackgroundColor3 = hex("#FFFFFF"),
 	BorderSizePixel = 0,
 }, chip)
@@ -296,7 +296,7 @@ label({
 	Name = "Glyph",
 	Size = UDim2.fromScale(1, 1),
 	Text = "?",
-	TextSize = 11,
+	TextSize = 12,
 	FontFace = Font.new(SILK_PATH, Enum.FontWeight.Bold),
 	TextColor3 = hex("#1B1512"),
 }, icon)
@@ -305,6 +305,8 @@ new("ImageLabel", {
 	Size = UDim2.fromScale(1, 1),
 	BackgroundTransparency = 1,
 	Image = "",
+	ResampleMode = Enum.ResamplerMode.Pixelated, -- crisp pixel icons (assets/tag_icons, tools/gen_tag_icons.py)
+	ScaleType = Enum.ScaleType.Fit,
 	Visible = false,
 	ZIndex = 2,
 }, icon)
@@ -314,12 +316,12 @@ local count = label({
 	AutomaticSize = Enum.AutomaticSize.X,
 	Size = UDim2.new(0, 0, 1, 0),
 	Text = "",
-	TextSize = 13,
+	TextSize = 14,
 	FontFace = SILK,
 	TextColor3 = hex("#FFFFFF"),
 	Visible = false,
 }, chip)
-stroke(count, "#000000", 1)
+stroke(count, "#000000", 1.5)
 chip.Parent = gui
 
 return "built GUI.EnemyNameplate + EnemyNameplate_Tag + EnemyNameplate_TagGroup"
