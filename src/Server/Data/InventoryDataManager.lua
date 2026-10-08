@@ -1184,7 +1184,7 @@ local function saveInventoryToProfile(player)
 		-- Store by Tool.Name so we can re-spawn them on load
 		table.insert(items, {
 			toolName = name,
-			count = math.min(info.count, MAX_STACK),
+			count = info.count, -- never clamp: copies of an unstackable item are separate slots, a clamp silently deleted the rest
 			rarity = info.rarity,
 		})
 	end
@@ -1237,7 +1237,7 @@ local function loadInventoryFromProfile(player)
 	local backpack = player:WaitForChild("Backpack")
 	for _, entry in ipairs(invData.items) do
 		local toolName = entry.toolName
-		local count = math.min(entry.count or 1, MAX_STACK)
+		local count = math.clamp(math.floor(tonumber(entry.count) or 1), 0, 100000) -- sanity only; see the save
 		local tool = ItemTools.ensure(toolName)
 		if tool then
 			for _ = 1, count do
@@ -1267,7 +1267,15 @@ local function loadInventoryFromProfile(player)
 end
 
 -- ===================== PLAYER LIFECYCLE =====================
+local readyPlayers: { [Player]: boolean } = {}
+
 local function onPlayerReady(player)
+	-- The load must run ONCE per player: PlayerAdded and the "players already in the game" loop below can both see the same
+	-- player (deferred events), and a second load would clone every saved item a second time.
+	if readyPlayers[player] then
+		return
+	end
+	readyPlayers[player] = true
 	-- Wait for SkillsDataManager to load the profile first
 	local attempts = 0
 	while not SkillsDataManager.IsLoaded(player) and attempts < 100 do
@@ -1385,6 +1393,7 @@ local function onPlayerReady(player)
 end
 
 local function onPlayerLeaving(player)
+	readyPlayers[player] = nil
 	saveInventoryToProfile(player) -- no-op if SkillsDataManager already released the profile (its hook saved first)
 	playerState[player.UserId] = nil
 	trashBin[player.UserId] = nil
