@@ -449,6 +449,8 @@ local function buildHud()
 	level.TextYAlignment = Enum.TextYAlignment.Center
 	level.ZIndex = 20
 	stroke(level, 3)
+	-- (the layered Nexus XP badge - Stroke, Trough, XpClip > XpHex, shaded Face - is installed over these layers by
+	--  tools/studio/build_nexus_badge.luau; run it after this builder with FORCE = true)
 
 	-- Hotbar
 	local hotbarW = SL.count * SL.size + (SL.count - 1) * SL.gap

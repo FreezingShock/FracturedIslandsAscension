@@ -37,6 +37,7 @@ local MANA_PER_INTELLIGENCE = 2
 -- The level shown in the HUD badge is this Player attribute. The server publishes it (placeholder: no progression yet).
 ResourceConfig.nexusLevelAttribute = "NexusLevel"
 ResourceConfig.nexusLevelStart = 0
+ResourceConfig.nexusXpAttribute = "NexusXp" -- 0..1 progress inside the level (NexusService publishes it; the badge's XpClip follows it)
 ResourceConfig.TICK = 0.25 -- seconds between regeneration ticks (server); amounts scale with it
 
 ResourceConfig.resources = {

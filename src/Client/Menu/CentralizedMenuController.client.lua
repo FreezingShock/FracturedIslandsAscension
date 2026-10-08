@@ -91,6 +91,7 @@ local SettingsPageModule = safeRequire("SettingsPageModule", true)
 local StatisticsPageModule = safeRequire("StatisticsPageModule", true)
 local CollectionsPageModule = safeRequire("CollectionsPageModule", true)
 local AdminPageModule = safeRequire("AdminPageModule", false)
+local NexusLevelPageModule = safeRequire("NexusLevelPageModule", false)
 local MenuBridge = safeRequire("MenuBridge", true)
 
 -- Register MenuBridge callbacks IMMEDIATELY (before InventoryController tries to use them)
@@ -777,19 +778,58 @@ local function openProfileMenu3(skillName, attrConfig)
 	GridMenuModule.navigateToGrid("ProfileMenu3")
 end
 
+-- ===================== NEXUS LEVEL PAGE =====================
+-- The Profile button's tooltip: one table that TooltipModule reads when it shows, kept current from the Player attributes.
+local NEXUS_TOOLTIP = {
+	title = '<font color="#FF55FF"><b>Aetheric Nexus Level</b></font>',
+	desc = '<font color="#AAAAAA">Your account level, earned from skill level-ups and collections.</font>',
+	click = '<font color="#FFFF55">Click to view!</font>',
+}
+if NexusLevelPageModule then
+	local NexusConfig = require(Modules:WaitForChild("Config"):WaitForChild("NexusConfig")) :: any
+	local function refreshNexusTooltip()
+		local text = NexusLevelPageModule.tooltipText()
+		NEXUS_TOOLTIP.title, NEXUS_TOOLTIP.desc, NEXUS_TOOLTIP.click = text.title, text.desc, text.click
+	end
+	refreshNexusTooltip()
+	for _, attribute in ipairs({ NexusConfig.attributes.level, NexusConfig.attributes.progress, NexusConfig.attributes.total }) do
+		player:GetAttributeChangedSignal(attribute):Connect(refreshNexusTooltip)
+	end
+end
+
+local NEXUS_LEVEL_BUTTONS = {
+	BackButton = {
+		tooltipData = {
+			title = '<font color="#55FF55"><b>Go back</b></font>',
+			desc = '<font color="#AAAAAA">Return to the previous menu.</font>',
+			click = "",
+		},
+		action = "callback",
+		callback = function()
+			GridMenuModule.navigateBack()
+		end,
+	},
+	CloseSlot = {
+		tooltipData = { title = '<font color="#FF5555"><b>Close Menu</b></font>', desc = "", click = "" },
+		action = "close",
+	},
+}
+
 -- ===================== PROFILE GRID BUTTON CONFIGS =====================
 local PROFILE_BUTTONS = {
 	MyProfile = {
 		action = nil,
 	},
 	-- Helmet..Belt (equipment slots) are driven by ArmorAccessoriesController.
+	-- The Aetheric Nexus Level page. The tooltip is rewritten from the Player attributes (see NEXUS_TOOLTIP below).
 	AethericNexus = {
-		tooltipData = {
-			title = '<font color="#FF55FF"><b>Aetheric Nexus Level</b></font>',
-			desc = '<font color="#AAAAAA">Your combined power level across all skills.</font>',
-			click = '<font color="#555555">Coming Soon</font>',
-		},
-		action = nil,
+		tooltipData = NEXUS_TOOLTIP,
+		action = "callback",
+		callback = function()
+			if GridMenuModule.hasGrid("NexusLevelMenu") then
+				GridMenuModule.navigateToGrid("NexusLevelMenu") -- onPopulate fills it (and refills on Back)
+			end
+		end,
 	},
 	FarmingAttributes = {
 		action = "callback",
@@ -1612,6 +1652,22 @@ else
 	warn("[CMC] GridTemplates/StatisticsMenu2 not found — skipping registration (still legacy?)")
 end
 
+-- Aetheric Nexus Level page (NexusLevelPageModule): the badge, the xp and where it came from. Opened from the Profile grid's AethericNexus button.
+local NexusLevelTemplate = GridTemplates:FindFirstChild("NexusLevelMenu")
+if NexusLevelPageModule and NexusLevelTemplate then
+	GridMenuModule.registerPooledGrid("NexusLevelMenu", NexusLevelTemplate, NEXUS_LEVEL_BUTTONS, {
+		title = "Aetheric Nexus Level",
+		onPopulate = function(frame)
+			NexusLevelPageModule.populate(frame)
+		end,
+		onDepopulate = function()
+			NexusLevelPageModule.depopulate()
+		end,
+	})
+else
+	warn("[CMC] GridTemplates/NexusLevelMenu or NexusLevelPageModule missing: run tools/studio/build_nexus_page.luau")
+end
+
 -- Admin panel (built in code, see AdminPageModule). Only reachable from the admin-only Nexus button.
 if AdminPageModule then
 	AdminPageModule.init(sharedRefs) -- builds the template folder the grid needs
@@ -1693,6 +1749,9 @@ end)
 SettingsPageModule.init(sharedRefs, menuChildFrames["SettingsMenu"])
 StatisticsPageModule.init(sharedRefs)
 CollectionsPageModule.init(sharedRefs)
+if NexusLevelPageModule then
+	NexusLevelPageModule.init(sharedRefs)
+end
 ArmorAccessoriesController.init()
 
 sharedRefs.SkillsPageModule = SkillsPageModule

@@ -93,6 +93,7 @@ local view = {
 	bonusAmount = 10,
 	bonusDuration = 60,
 	cap = 100,
+	nexusXp = 100,
 }
 local status = { ok = true, msg = "Ready" }
 
@@ -816,6 +817,35 @@ local function buildTools()
 		tip = { title = rich("#FFAA00", "<b>Set capacity</b>"), desc = rich("#AAAAAA", "Applies the number to the left."), click = rich("#FFFF55", "Click!") },
 		onClick = function()
 			act("setCap", { cap = view.cap })
+		end,
+	})
+	-- Aetheric Nexus XP (dev testing): the amount, give it, or set the total
+	newInput(19, {
+		name = "NexusXpAmount",
+		color = "#FF55FF",
+		placeholder = "xp",
+		text = tostring(view.nexusXp),
+		tip = { title = rich("#FF55FF", "<b>Nexus XP</b>"), desc = rich("#AAAAAA", "Amount for the two buttons on the right (100 XP = 1 level)."), click = "" },
+		onChange = function(text)
+			view.nexusXp = math.max(0, math.floor(tonumber(text) or view.nexusXp))
+		end,
+	})
+	newSlot(20, {
+		name = "GiveNexusXp",
+		color = "#FF55FF",
+		label = "Give XP",
+		tip = { title = rich("#FF55FF", "<b>Give Nexus XP</b>"), desc = rich("#AAAAAA", "Adds the amount to the Aetheric Nexus Level (Misc)."), click = rich("#FFFF55", "Click!") },
+		onClick = function()
+			act("nexusXp", { amount = view.nexusXp })
+		end,
+	})
+	newSlot(21, {
+		name = "SetNexusXp",
+		color = "#FFAA00",
+		label = "Set total",
+		tip = { title = rich("#FFAA00", "<b>Set Nexus XP total</b>"), desc = rich("#AAAAAA", "Sets the total XP to the amount (changes Misc only, never below the other sources)."), click = rich("#FFFF55", "Click!") },
+		onClick = function()
+			act("nexusSet", { total = view.nexusXp })
 		end,
 	})
 end

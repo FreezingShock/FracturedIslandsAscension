@@ -156,6 +156,26 @@ HudTheme.badge = {
 	arrowPos = Vector2.new(520, 152), -- slot 5's position (under the badge tip); InventoryController slides the x with the selector
 }
 
+-- The badge's layers and the Nexus XP fill (the Figma "Level Badge" component set; tools/studio/build_nexus_badge.luau builds it).
+-- Bottom to top: outline, stroke, trough (the empty xp), XpClip > XpHex (the xp, a full-size hex clipped by a bottom-anchored
+-- ClipsDescendants frame whose height is the progress), face, Level. bands = a top-to-bottom pixel gradient (a checker dither between bands).
+-- Layers library -> badge -> override: change any value here and rerun the builder with FORCE.
+HudTheme.badge.xp = {
+	outline = hex("#3a2418"), -- dark brown: the outer outline AND the empty xp
+	stroke = hex("#9a6b45"), -- the thin light-brown ring (4px)
+	trough = hex("#3a2418"),
+	fillBands = { hex("#b9f58a"), hex("#93df5c"), hex("#6cc23a"), hex("#52a52d"), hex("#3c8624") }, -- the filled xp, top to bottom
+	faceBands = { hex("#fff1a8"), hex("#fde88a"), hex("#eccd6c"), hex("#d6ac52") }, -- the yellow face
+	faceRows = { 1, 1, 1, { 1, 2 }, 2, 2, 2, 2, 2, 2, 2, 2, 2, { 2, 3 }, 3, 3, { 3, 4 }, 4, 4, 4 }, -- band of each of the 20 face rows; { a, b } = a checker dither of two bands
+	tween = { time = 0.4, style = Enum.EasingStyle.Quint, direction = Enum.EasingDirection.Out },
+	hexSize = Vector2.new(96, 112), -- the xp hex (the trough): 8px inside the 112 x 128 badge
+	hexPos = Vector2.new(8, 8),
+	facePos = Vector2.new(20, 24),
+	faceSize = Vector2.new(72, 80),
+	strokePos = Vector2.new(4, 4),
+	strokeSize = Vector2.new(104, 120),
+}
+
 -- Held-item name (typewriter label group, auto-sized): top-centre anchor point, above the panels and the badge
 HudTheme.name = {
 	pos = Vector2.new(544, -48),

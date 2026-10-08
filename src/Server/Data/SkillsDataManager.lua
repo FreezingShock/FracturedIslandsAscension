@@ -58,6 +58,9 @@ PROFILE_TEMPLATE._Rewards = { claimed = {}, recipes = {}, unlocks = {} }
 -- The purse: Coins, the real money (WalletService owns it; completely separate from the Statistics). Reconcile backfills it.
 PROFILE_TEMPLATE._Wallet = { coins = 0 }
 
+-- The Aetheric Nexus Level (NexusService owns it): total XP, XP per category, and the keys of the tasks already paid. Reconcile backfills it.
+PROFILE_TEMPLATE._Nexus = { xp = 0, sources = { skills = 0, collections = 0, misc = 0 }, awarded = {} }
+
 -- ── Inventory data (structurally isolated under one key) ──
 -- items         : array of { itemId = string, count = number }
 -- hotbarSlots   : { [1] = itemId or nil, ..., [9] = itemId or nil }

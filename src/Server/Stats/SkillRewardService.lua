@@ -28,6 +28,7 @@ local SkillsDataManager = require(ServerScriptService:WaitForChild("SkillsDataMa
 local StatisticsDataManager = require(ServerScriptService:WaitForChild("StatisticsDataManager")) :: any
 local NotifyService = require(ServerScriptService:WaitForChild("NotifyService")) :: any
 local AttributeStatManager = require(ServerScriptService:WaitForChild("AttributeStatManager")) :: any
+local NexusService = require(ServerScriptService:WaitForChild("NexusService")) :: any
 require(ServerScriptService:WaitForChild("RewardBehaviors")) -- registers derive/apply on the shared reward types
 
 local SkillRewardService = {}
@@ -114,6 +115,7 @@ local function grantLevels(player: Player, data, rewards, skill: string, from: n
 	rewards.claimed[skill] = to -- high-water mark first: a level is never paid twice
 	local described = {} -- every reward of the new levels, for the notification card
 	for level = from + 1, to do
+		NexusService.onSkillLevel(player, skill, level) -- Aetheric Nexus XP, paid once per skill level
 		for index, reward in ipairs(SkillsConfig.getRewards(skill, level)) do
 			local spec = CollectionRewards.get(reward.type)
 			table.insert(described, { reward = reward, ctx = { skill = skill, level = level } })

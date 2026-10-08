@@ -28,6 +28,7 @@ local CollectionRewards = require(Modules:WaitForChild("CollectionRewards")) :: 
 local StatisticsDataManager = require(ServerScriptService:WaitForChild("StatisticsDataManager")) :: any
 local AttributeStatManager = require(ServerScriptService:WaitForChild("AttributeStatManager")) :: any
 local NotifyService = require(ServerScriptService:WaitForChild("NotifyService")) :: any
+local NexusService = require(ServerScriptService:WaitForChild("NexusService")) :: any
 require(ServerScriptService:WaitForChild("RewardBehaviors")) -- registers derive/apply on the shared reward types
 
 local CollectionService = {}
@@ -121,6 +122,7 @@ local function grantTiers(player: Player, data, collections, skill: string, key:
 	byStat[key] = to -- high-water mark first: whatever happens below, a tier is never paid twice
 	local described = {} -- every reward of the new tiers, for the notification card
 	for tier = from + 1, to do
+		NexusService.onCollectionTier(player, skill, key, tier) -- Aetheric Nexus XP, paid once per tier
 		for index, reward in ipairs(Config.getRewards(skill, key, tier)) do
 			local spec = CollectionRewards.get(reward.type)
 			table.insert(described, { reward = reward, ctx = { skill = skill, key = key, tier = tier } })
@@ -170,6 +172,8 @@ function CollectionService.sync(player: Player)
 			end
 		end
 	end
+
+	NexusService.backfillCollections(player, collections.claimed) -- Aetheric Nexus XP for tiers claimed before it existed (once per session)
 
 	if #unlocked > 0 or not derivedFor[player] then
 		rebuild(player, collections)

@@ -19,6 +19,7 @@ local EquipmentService = require(ServerScriptService:WaitForChild("EquipmentServ
 local AttributeStatManager = require(ServerScriptService:WaitForChild("AttributeStatManager")) :: any
 local SkillsDataManager = require(ServerScriptService:WaitForChild("SkillsDataManager")) :: any
 local StatisticsDataManager = require(ServerScriptService:WaitForChild("StatisticsDataManager")) :: any
+local NexusService = require(ServerScriptService:WaitForChild("NexusService")) :: any
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local Items = require(Modules:WaitForChild("Items")) :: any
 local Attributes = require(Modules:WaitForChild("Attributes")) :: any
@@ -410,6 +411,25 @@ ACTIONS.setCap = function(player, p)
 	end
 	COMMANDS.cap.run(player, { tostring(cap) })
 	return true, "Max capacity = " .. cap
+end
+
+-- Aetheric Nexus XP: add (misc category, no dedupe key: an admin grant can be repeated) or set the total (dev testing)
+ACTIONS.nexusXp = function(player, p)
+	local amount = wholeNumber(p.amount, 1, 100000)
+	if not amount then
+		return false, "Bad amount"
+	end
+	local gained = NexusService.award(player, "misc", nil, amount)
+	return gained > 0, gained > 0 and string.format("+%d Nexus XP", gained) or "Nexus level is maxed"
+end
+
+ACTIONS.nexusSet = function(player, p)
+	local total = wholeNumber(p.total, 0, 100000)
+	if not total then
+		return false, "Bad total"
+	end
+	local now = NexusService.adminSetTotal(player, total)
+	return now ~= nil, now and ("Nexus XP total = " .. now) or "No profile"
 end
 
 local AdminAction = ReplicatedStorage:FindFirstChild("AdminAction")

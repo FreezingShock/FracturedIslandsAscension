@@ -97,6 +97,9 @@
       "MovementService": {
         "$path": "src/Server/Stats/MovementService.lua"
       },
+      "NexusService": {
+        "$path": "src/Server/Stats/NexusService.lua"
+      },
       "NotifyService": {
         "$path": "src/Server/Stats/NotifyService.lua"
       },
@@ -248,6 +251,12 @@
         },
         "MovementConfig": {
           "$path": "src/Shared/Modules/Stats/MovementConfig.lua"
+        },
+        "NexusBadgeView": {
+          "$path": "src/Shared/Modules/Menu/NexusBadgeView.lua"
+        },
+        "NexusLevelPageModule": {
+          "$path": "src/Shared/Modules/Menu/Pages/NexusLevelPageModule.lua"
         },
         "ProfileConfig": {
           "$path": "src/Shared/Modules/Stats/ProfileConfig.lua"

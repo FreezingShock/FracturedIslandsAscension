@@ -12,7 +12,7 @@
 	                   one with a clipped Fill. The 16 segments are ONE strip filled from the left, so it drains from the far
 	                   right end toward the badge, then continues on the left half from the badge side outward. The segment
 	                   being emptied shrinks in HudTheme.strip.partialStep px steps.
-	  Badge            FIAHUD.Root.Badge.Level shows the Player attribute named by ResourceConfig.nexusLevelAttribute.
+	  Badge            FIAHUD.Root.Badge: NexusBadgeView shows Level (Player attribute ResourceConfig.nexusLevelAttribute) and grows XpClip to the progress (nexusXpAttribute).
 
 	The fills ease toward the real value. Stats and Strip (CanvasGroups) fade out while the Nexus Menu or the inventory is
 	open (MenuBridge.isOpen) and fade back in when it closes, together with the Wings, Badge and SelectorArrow groups. Root carries a UIScale that sizes the
@@ -28,6 +28,7 @@ local Modules = ReplicatedStorage:WaitForChild("Modules")
 local ResourceConfig = require(Modules:WaitForChild("ResourceConfig")) :: any
 local MenuBridge = require(Modules:WaitForChild("MenuBridge")) :: any
 local HudTheme = require(Modules:WaitForChild("Config"):WaitForChild("HudTheme")) :: any
+local NexusBadgeView = require(Modules:WaitForChild("NexusBadgeView")) :: any
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -158,19 +159,19 @@ local function collectSegmentFills(strip: Instance): { Frame }?
 	return fills
 end
 
+local badgeView: any = nil
+
+-- The Nexus Level badge: NexusBadgeView shows the level (tinted by NexusConfig.tiers) and grows XpClip to the xp progress
 local function bindBadge(root: Instance)
-	local level = root:FindFirstChild("Badge") and root.Badge:FindFirstChild("Level")
-	if not (level and level:IsA("TextLabel")) then
+	local badge = root:FindFirstChild("Badge")
+	if not (badge and badge:FindFirstChild("Level")) then
 		warn("[ResourceBars] FIAHUD.Root.Badge.Level (TextLabel) is missing")
 		return
 	end
-	local attribute = ResourceConfig.nexusLevelAttribute
-	local function update()
-		local value = player:GetAttribute(attribute)
-		level.Text = tostring(type(value) == "number" and math.floor(value) or ResourceConfig.nexusLevelStart)
+	if badgeView then
+		badgeView.destroy()
 	end
-	update()
-	player:GetAttributeChangedSignal(attribute):Connect(update)
+	badgeView = NexusBadgeView.bind(badge, player)
 end
 
 local function bind(gui: Instance)
