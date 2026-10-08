@@ -1002,7 +1002,38 @@ end
 CollectionService:GetInstanceAddedSignal(TAG):Connect(register)
 CollectionService:GetInstanceRemovedSignal(TAG):Connect(unregister)
 
+--- A respawn (ResetOnSpawn) wipes everything in the PlayerGui that is not a persistent ScreenGui: the DropTags folder and every tag
+--- gui in it died, while the pool and the entries still pointed at the dead ones, so no tag ever showed again. Rebuild the host and
+--- let every drop acquire fresh tags.
+local function recover()
+	host = Instance.new("Folder")
+	host.Name = "DropTags"
+	host.Parent = playerGui
+	for tag in pairs(activeTags) do
+		activeTags[tag] = nil
+		pcall(function()
+			tag.anchor:Destroy()
+		end)
+	end
+	for _, tag in ipairs(pool) do
+		pcall(function()
+			tag.anchor:Destroy()
+		end)
+	end
+	table.clear(pool)
+	table.clear(unfolded)
+	idleTarget = nil
+	for _, e in pairs(entries) do
+		e.tag = nil
+		e.stage = nil
+		e.hiddenGuis = nil
+	end
+end
+
 RunService.PreRender:Connect(function(dt)
+	if host.Parent ~= playerGui then
+		recover()
+	end
 	frameId += 1
 	local now = os.clock()
 	scanClock += dt
