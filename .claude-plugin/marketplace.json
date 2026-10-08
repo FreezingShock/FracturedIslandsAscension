@@ -1,0 +1,11 @@
+{
+  "name": "fia-marketplace",
+  "owner": { "name": "Nate (FreezingShock)" },
+  "plugins": [
+    {
+      "name": "fia",
+      "source": "./plugins/fia",
+      "description": "Fractured Islands: Ascension dev toolkit - Roblox Studio, Rojo, Blender, Figma and the Obsidian vault memory in one workflow."
+    }
+  ]
+}
