@@ -127,10 +127,6 @@
     "artifact-diagramming": "off",
     "artifact-capabilities": "off",
     "explain-usage": "off",
-    "setup-claude": "off",
-    "code-review": "off",
-    "simplify": "off",
-    "loop": "off",
-    "security-review": "off"
+    "setup-claude": "off"
   }
 }
