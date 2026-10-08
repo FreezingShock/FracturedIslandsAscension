@@ -33,6 +33,7 @@ local stack = gui:WaitForChild("Stack") :: Frame
 local scale = stack:WaitForChild("Scale") :: UIScale
 local list = stack:FindFirstChildOfClass("UIListLayout") :: UIListLayout
 local templates = gui:WaitForChild("Templates")
+templates.Parent = nil -- the templates are only clone sources: left in the gui they draw as blank cards in the top-left corner
 local remote = ReplicatedStorage:WaitForChild("Notify") :: RemoteEvent
 
 local DEFAULT = Config.library.default
