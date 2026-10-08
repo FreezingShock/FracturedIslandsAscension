@@ -46,8 +46,20 @@
       "DummyService": {
         "$path": "src/Server/Combat/DummyService.lua"
       },
+      "EnemyAI": {
+        "$path": "src/Server/Combat/EnemyAI.lua"
+      },
+      "EnemyAttacks": {
+        "$path": "src/Server/Combat/EnemyAttacks.lua"
+      },
       "EnemyInit": {
         "$path": "src/Server/Combat/EnemyInit.server.lua"
+      },
+      "EnemyLocomotion": {
+        "$path": "src/Server/Combat/EnemyLocomotion.lua"
+      },
+      "EnemyRig": {
+        "$path": "src/Server/Combat/EnemyRig.lua"
       },
       "EnemyService": {
         "$path": "src/Server/Combat/EnemyService.lua"
@@ -338,6 +350,9 @@
         },
         "DropTooltipController": {
           "$path": "src/Client/Inventory/DropTooltipController.client.lua"
+        },
+        "EnemyAttackFXController": {
+          "$path": "src/Client/Combat/EnemyAttackFXController.client.lua"
         },
         "EnemyNameplateController": {
           "$path": "src/Client/Combat/EnemyNameplateController.client.lua"

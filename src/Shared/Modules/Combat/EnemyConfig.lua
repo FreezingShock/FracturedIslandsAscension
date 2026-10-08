@@ -26,6 +26,18 @@
 	RECIPES
 	  New attack:       add EnemyConfig.attacks.<id> = { kind = "melee", range, windup, damage, arc, recover, telegraph }.
 	  New mob attack:   add the id to enemies.<key>.attacks (several entries = the mob picks by weight).
+	  New attack kind:  kinds are implemented in Server/Combat/EnemyAttacks.lua (melee, combo, lunge, slam, parry): add a runner there,
+	                    then any enemy can list it. Fields shared by all kinds: range (max studs), minRange, windup, damage, recover,
+	                    telegraph = { shape = "cone" | "line" | "circle" | "none", color }, animation (CombatConfig.animations key) or
+	                    animationId ("rbxassetid://..", wins over the key), hitMarker (animation marker that lands the hit, else the
+	                    timing numbers are used), soundId, minLevel (enemy level needed), condition ("targetSwung" = only right after the
+	                    target swung a weapon).
+	  AI numbers:       EnemyConfig.ai is the library (idle / alert / chase / engage / return); an enemy's mob table (legacy fields) and
+	                    mob.ai override it, per field: aggroRange, leashRange, spacing = { min, max } (hold this ring while attacks
+	                    recharge, nil = walk up and stand), flank = { chance, orbitSeconds = { a, b } } (circle the target on that ring),
+	                    returnHealSeconds (full heal while walking home after a leash), attackGap (min seconds between attacks).
+	  New enemy with its own sword: enemies.<key>.mob.weapon = { kind = "sword", bladeLength, bladeColor, ... } (EnemyRig), template = a
+	                    ServerStorage rig (R6) when you have custom modelling; phases = nil is RESERVED for bosses (not implemented).
 	  New drop table:   add EnemyConfig.dropTables.<name> = { entries... } and reference it with { table = "<name>" }.
 	  New enemy type:   add enemies.<key> = { name, nameplate, sounds, [fx], [mob] }; spawn it with a model attribute
 	                    EnemyType = "<key>" (EnemyService does that for a marker in Workspace.EnemySpawns).
@@ -184,6 +196,69 @@ EnemyConfig.sounds = {
 -- damage is the base before the player's Defense (DamageService.hurtPlayer).
 EnemyConfig.attacks = {
 	melee_swing = { kind = "melee", range = 5, leeway = 1.5, windup = 0.6, damage = 10, arc = 120, recover = 0.5 },
+
+	-- Rustblade Knight moveset (see header: kinds live in EnemyAttacks)
+	-- combo: plays the steps of CombatConfig[weaponType].steps (animation, hitFrame, duration, recovery of the player's sword combo), a
+	-- cone hit per step; it keeps swinging while the target stays inside range * chainReach. damage is per step, the last step x finisherMult.
+	knight_combo = {
+		kind = "combo", weaponType = "sword", range = 5.5, leeway = 1.5, arc = 110, damage = 14, finisherMult = 1.6,
+		windup = 0.5, chainWindup = 0.1, chainReach = 1.5, recover = 0.6, missChance = 0.15,
+		telegraph = { shape = "cone", color = Color3.fromRGB(255, 70, 50) },
+	},
+	-- lunge: the gap-closer. A line telegraph, then a fast dash `dash.distance` studs toward where the target stood.
+	knight_lunge = {
+		kind = "lunge", minRange = 9, range = 18, windup = 0.7, damage = 24, hitRadius = 4.5, recover = 0.7, missChance = 0.2, sound = "sword_atk3",
+		dash = { distance = 14, speed = 70 }, pose = "raise",
+		telegraph = { shape = "line", width = 4.5, color = Color3.fromRGB(255, 150, 40) },
+	},
+	-- slam: ground AoE around the knight.
+	knight_slam = {
+		kind = "slam", minRange = 0, range = 8, radius = 10, windup = 1.0, damage = 30, recover = 0.9, sound = "sword_crit4", pose = "raise",
+		telegraph = { shape = "circle", color = Color3.fromRGB(255, 60, 60) },
+	},
+	-- parry: a short guard. Hits the knight takes meanwhile do `damageTaken` of their damage; used right after the target swings.
+	knight_parry = {
+		kind = "parry", range = 9, windup = 0.1, duration = 0.9, damageTaken = 0.25, recover = 0.25, pose = "guard",
+		condition = "targetSwung", sound = "sword_equip", telegraph = { shape = "none", color = Color3.fromRGB(110, 170, 255) },
+	},
+}
+
+-- ===================== 1c. LIBRARY: AI =====================
+-- Defaults of every mob (legacy mob fields and mob.ai override them per field). Seconds / studs.
+EnemyConfig.ai = {
+	walkSpeed = 10, -- idle / holding the ring
+	chaseSpeed = 14, -- chasing
+	aggroRange = 28, -- a player this close is chased
+	leashRange = 60, -- studs from home: past it the mob gives up, walks home (ignoring everyone) and heals
+	stopDistance = 4, -- studs from the target where it stands still (legacy walk-up behaviour, spacing = nil)
+	hitAggroSeconds = 6, -- whoever last hit it is chased this long even outside aggroRange
+	loseRange = 1.35, -- an acquired target is kept until it is aggroRange * this far away
+	wanderRadius = 14,
+	wanderEvery = { 3, 7 },
+	alertSeconds = 0.45, -- the beat between seeing a target and chasing it (it turns to face the target)
+	attackGap = 0.5, -- min seconds between the end of one attack and the start of the next
+	returnHealSeconds = 3, -- time to heal from nothing to full while walking home
+	returnSpeedMult = 1.25,
+	arriveDistance = 4, -- studs from home that end the return
+	spacing = nil, -- { min, max }: the ring it holds around the target while its attacks recharge
+	flank = nil, -- { chance = 0..1, orbitSeconds = { a, b } }
+	repeatPenalty = 0.35, -- weight multiplier for the attack it used last (variety)
+}
+
+-- walking / running / idle: R6 locomotion animations played on the mob by EnemyLocomotion (Roblox's own R6 set; an enemy's
+-- mob.locomotion = { idle, walk, run } overrides them for custom animation). run plays above runAt studs/s.
+EnemyConfig.locomotion = {
+	idle = "rbxassetid://180435571",
+	walk = "rbxassetid://180426354",
+	run = "rbxassetid://180426354",
+	runAt = 12,
+	speedScale = 14.5, -- a track plays at speed / this
+}
+
+-- procedural poses (degrees added to the R6 shoulders while a move winds up; an animation id slot replaces them later)
+EnemyConfig.poses = {
+	raise = { rightShoulder = Vector3.new(-155, 0, 0), time = 0.35 }, -- sword overhead
+	guard = { rightShoulder = Vector3.new(-80, 0, 25), leftShoulder = Vector3.new(-60, 0, -25), time = 0.1 }, -- blade across the body
 }
 
 -- ===================== 1c. LIBRARY: ENEMY LEVELS =====================
@@ -329,6 +404,39 @@ EnemyConfig.enemies = {
 		},
 	},
 
+	rustblade_knight = {
+		name = "Rustblade Knight",
+		nameplate = true,
+		tags = { "shield" },
+		sounds = { hit = "enemy_hit", crit = "enemy_crit", crash = "enemy_crash", death = "enemy_death" },
+		-- weight picks among the attacks whose distance window fits; cooldown is per attack
+		attacks = {
+			{ attack = "knight_combo", weight = 5, cooldown = { 2.5, 4 } },
+			{ attack = "knight_lunge", weight = 3, cooldown = { 6, 9 } },
+			{ attack = "knight_slam", weight = 2, cooldown = { 8, 12 } },
+			{ attack = "knight_parry", weight = 6, cooldown = { 5, 8 } },
+		},
+		phases = nil, -- RESERVED: bosses get weighted sets per HP phase here; basic enemies never use it
+		xp = { skill = "Combat", amount = 90 },
+		drops = { { table = "mob_basic" } },
+		mob = {
+			template = "RustbladeKnight", -- ServerStorage R6 rig when it exists (custom model later); else a plain R6 rig
+			bodyColor = Color3.fromRGB(150, 120, 100),
+			weapon = { kind = "sword", bladeLength = 4.2, bladeColor = Color3.fromRGB(138, 96, 70), guardColor = Color3.fromRGB(70, 60, 55), gripColor = Color3.fromRGB(50, 35, 30) },
+			health = 1500,
+			walkSpeed = 10,
+			chaseSpeed = 15,
+			respawnSeconds = 8,
+			ai = {
+				aggroRange = 32,
+				leashRange = 55,
+				spacing = { min = 6, max = 10 },
+				flank = { chance = 0.55, orbitSeconds = { 1.2, 2.6 } },
+				attackGap = 0.12,
+			},
+		},
+	},
+
 	slime_blob = {
 		name = "Slime Blob",
 		nameplate = true,
@@ -465,6 +573,31 @@ end
 local resolved: { [string]: any } = {}
 
 --- The flat drop list of an enemy: its `drops` with every { table = "<name>" } expanded from EnemyConfig.dropTables.
+local aiCache: { [string]: any } = {}
+
+--- The merged AI numbers of an enemy type: EnemyConfig.ai < the mob table's legacy fields < mob.ai.
+function EnemyConfig.aiFor(enemyType: string): any
+	local cached = aiCache[enemyType]
+	if cached then
+		return cached
+	end
+	local merged = table.clone(EnemyConfig.ai)
+	local entry = EnemyConfig.enemies[enemyType]
+	local mob = entry and entry.mob
+	if mob then
+		for key in pairs(EnemyConfig.ai) do
+			if mob[key] ~= nil then
+				merged[key] = mob[key]
+			end
+		end
+		for key, value in pairs(mob.ai or {}) do
+			merged[key] = value
+		end
+	end
+	aiCache[enemyType] = merged
+	return merged
+end
+
 function EnemyConfig.dropsFor(enemyType: string?): { any }
 	local out = {}
 	for _, entry in ipairs(EnemyConfig.get(enemyType).drops or {}) do

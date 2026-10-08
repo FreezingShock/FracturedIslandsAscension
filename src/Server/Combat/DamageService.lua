@@ -207,6 +207,10 @@ local function applyHits(player: Player, hits: { any }, hitInfo: any, facing: Ve
 	for i = 1, count do
 		local hit = hits[i]
 		local amount, isCrit = DamageService.compute(player, weaponStats, weaponId, hitInfo, nil, crash, tier)
+		local taken = hit.model:GetAttribute("DamageTakenMult") -- a blocking enemy (EnemyAttacks parry) takes a share of the blow
+		if type(taken) == "number" then
+			amount *= taken
+		end
 		hit.humanoid:TakeDamage(amount)
 		DamageTracker.record(player, amount)
 		hit.model:SetAttribute("LastHit", os.clock())
