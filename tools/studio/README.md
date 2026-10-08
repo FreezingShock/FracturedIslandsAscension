@@ -31,3 +31,4 @@ restyling) unless you set `local FORCE = true` at the top.
 Rule: whenever Claude generates anything (Studio GUI / template / marker / rig, a Blender model or animation, an
 icon), the script that generated it is saved in `tools/` in the same turn (`tools/studio`, `tools/blender`, ...) and
 listed here. Hand-made GUI by Nate is not recorded (he owns it).
+| *(Figma, not Studio)* | **FIA HUD Design System** (https://www.figma.com/design/X4cTI05Lfoahh8sHQa3bB3): the one Figma file for designing new menus; Roblox stays the master. See `tools/figma/README.md` | `tools/figma/` |
