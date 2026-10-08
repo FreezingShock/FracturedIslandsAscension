@@ -35,19 +35,24 @@ DeathConfig.textures = {
 
 -- ===================== 1. LIBRARY =====================
 DeathConfig.library = {
-	timeline = { glitch = 0.6, burst = 1.8 }, -- seconds. Loot pays out when the burst starts; the body is removed after both
+	timeline = { glitch = 0.8, burst = 1.8 }, -- seconds. Loot pays out when the burst starts; the body is removed after both
 
 	glitch = {
-		tint = Color3.fromRGB(40, 190, 255), -- the body turns this blue
-		tintStart = 0.15, -- fraction of the glitch at which the blue begins (ramps to full)
+		tintStart = 0.04, -- fraction of the glitch at which the blue / purple / green flicker begins
+		tintRamp = 0.2, -- ... and how much of the glitch it takes to reach full colour
 		jitterStuds = 0.5, -- peak random offset of each part (grows over the glitch)
 		slices = 3, -- parts thrown sideways at once during a slice frame
 		sliceStuds = 1.4,
 		sliceChance = 0.35, -- chance per frame (late in the glitch) of a slice
 		flickerStart = 0.1, -- flicker chance rises from this fraction of the glitch
-		highlight = true, -- an outline fill that pulses cyan (only while 3 or fewer deaths are playing)
-		scanBars = 2, -- thin neon bars sweeping up and down the body
-		scanSweeps = 2.5, -- up-and-down passes during the glitch
+		highlight = true, -- an outline fill that flickers through the palette and brightens with the glow (only while 3 or fewer deaths are playing)
+		colors = { Color3.fromRGB(40, 160, 255), Color3.fromRGB(150, 70, 255), Color3.fromRGB(60, 255, 150) }, -- blue, purple, green
+		recolorChance = 0.28, -- per frame, per body part: jump to another colour of the palette
+		glowStart = 0.35, -- fraction of the glitch: each body part picks a random moment in [glowStart, glowEnd] to start glowing
+		glowEnd = 0.65, -- (+ glowRamp = every part is white-hot just before the burst)
+		glowRamp = 0.3, -- fraction of the glitch a part takes to go from its colour to white-hot
+		glowColor = Color3.fromRGB(215, 255, 255),
+		glowSwell = 0.12, -- a glowing part grows by this much
 	},
 
 	burst = {
@@ -126,7 +131,7 @@ DeathConfig.kinds = {
 -- ===================== 3. TYPES =====================
 DeathConfig.types = {
 	default = {},
-	fast = { timeline = { glitch = 0.35, burst = 1.2 }, burst = { count = 80 } },
+	fast = { timeline = { glitch = 0.5, burst = 1.2 }, burst = { count = 80 } },
 	boss = { timeline = { glitch = 1.0, burst = 2.8 }, burst = { count = 220, size = { 0.5, 2.4 } } },
 }
 

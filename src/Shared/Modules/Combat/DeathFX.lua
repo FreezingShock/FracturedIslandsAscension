@@ -10,7 +10,7 @@
 	  DeathFX.live() -> number                     death effects alive on this client (the caps in DeathConfig.caps)
 
 	GLITCH: a clone of the frozen body (the original is hidden locally) flickers, jitters, slices sideways and turns blue/neon,
-	with sweeping neon scan bars and a pulsing outline. BURST: the copy is removed and a few ParticleEmitters on an invisible
+	flickering between blue, purple and green; each body part then glows and swells until it is white-hot. BURST: the copy is removed and a few ParticleEmitters on an invisible
 	box the size of the body fire glowing triangles (flipbook of four shapes, random size / rotation / spin, outward then
 	floating up, shrinking), thin fast slivers, a soft glow disc and a point light pulse.
 --]]
@@ -78,7 +78,7 @@ end
 -- ===================== GHOST (the glitching copy) =====================
 -- A LIGHT copy: only the visible parts, each stripped of everything but its mesh / decals. Cloning a whole avatar (layered
 -- clothing, cages, accessories, scripts) twice froze the game for seconds, so this never clones the Model.
-type GhostPart = { part: BasePart, cf: CFrame, color: Color3, material: Enum.Material, transparency: number }
+type GhostPart = { part: BasePart, cf: CFrame, size: Vector3, color: Color3, material: Enum.Material, transparency: number, glowAt: number }
 
 local KEEP = { SpecialMesh = true, Decal = true, Texture = true, BlockMesh = true, CylinderMesh = true }
 
@@ -107,7 +107,7 @@ local function makeGhost(model: Model, maxParts: number): (Model?, { GhostPart }
 				copy.Massless = true
 				copy.CFrame = item.CFrame
 				copy.Parent = container
-				table.insert(parts, { part = copy, cf = item.CFrame, color = copy.Color, material = copy.Material, transparency = copy.Transparency })
+				table.insert(parts, { part = copy, cf = item.CFrame, size = copy.Size, color = copy.Color, material = copy.Material, transparency = copy.Transparency, glowAt = 0 })
 			end
 		end
 	end
@@ -119,39 +119,24 @@ local function makeGhost(model: Model, maxParts: number): (Model?, { GhostPart }
 	return container, parts
 end
 
--- thin neon bars that sweep up and down the body while it glitches (cheap, and reads as "scanning / deleting")
-local function makeScanBars(model: Model, cfg: any): { BasePart }
-	local bars: { BasePart } = {}
-	local boxCFrame, boxSize = model:GetBoundingBox()
-	for index = 1, cfg.glitch.scanBars do
-		local bar = Instance.new("Part")
-		bar.Name = "ScanBar"
-		bar.Anchored = true
-		bar.CanCollide = false
-		bar.CanQuery = false
-		bar.CanTouch = false
-		bar.Material = Enum.Material.Neon
-		bar.Color = cfg.glitch.tint
-		bar.Transparency = 0.35
-		bar.Size = Vector3.new(boxSize.X + 1.2, 0.12, boxSize.Z + 1.2)
-		bar.CFrame = boxCFrame
-		bar:SetAttribute("Phase", (index - 1) / math.max(cfg.glitch.scanBars, 1))
-		bar:SetAttribute("Base", boxCFrame.Position.Y)
-		bar:SetAttribute("Height", boxSize.Y)
-		bar.Parent = fxFolder()
-		table.insert(bars, bar)
-	end
-	return bars
-end
-
 --- Runs the glitch for `seconds` of RENDERED time: each frame advances at most 1/20 s, so a hitch cannot eat the whole glitch.
-local function runGlitch(ghost: Model, parts: { GhostPart }, bars: { BasePart }, cfg: any, seconds: number, rng: Random, withHighlight: boolean, onDone: () -> ())
+--- Phase 1: the body flickers between blue, purple and green, jitters and slices. Phase 2 (overlapping): every body part,
+--- one after another at random moments, starts to glow and swell until it is white-hot; then the burst.
+local function runGlitch(ghost: Model, parts: { GhostPart }, cfg: any, seconds: number, rng: Random, withHighlight: boolean, onDone: () -> ())
 	local glitch = cfg.glitch
+	local palette = glitch.colors
 	local elapsed = 0
+	for _, ghostPart in ipairs(parts) do
+		ghostPart.glowAt = rng:NextNumber(glitch.glowStart, glitch.glowEnd)
+	end
+	local picked: { Color3 } = {}
+	for index in ipairs(parts) do
+		picked[index] = palette[rng:NextInteger(1, #palette)]
+	end
 	local highlight: Highlight? = nil
 	if withHighlight then
 		highlight = Instance.new("Highlight")
-		highlight.FillColor = glitch.tint
+		highlight.FillColor = palette[1]
 		highlight.OutlineColor = Color3.new(1, 1, 1)
 		highlight.OutlineTransparency = 0.2
 		highlight.DepthMode = Enum.HighlightDepthMode.Occluded
@@ -162,36 +147,45 @@ local function runGlitch(ghost: Model, parts: { GhostPart }, bars: { BasePart },
 	connection = RunService.RenderStepped:Connect(function(dt)
 		elapsed += math.min(dt, 0.05)
 		local t = math.clamp(elapsed / math.max(seconds, 0.05), 0, 1)
-		local intensity = t ^ 1.4
-		local tintAlpha = math.clamp((t - glitch.tintStart) / math.max(1 - glitch.tintStart, 0.01), 0, 1)
-		local flickerChance = math.clamp((t - glitch.flickerStart) * 1.2, 0, 1) * 0.6
-		local whiten = math.clamp((t - 0.88) / 0.12, 0, 1)
+		local intensity = t ^ 1.3
+		local tintAlpha = math.clamp((t - glitch.tintStart) / math.max(glitch.tintRamp, 0.01), 0, 1)
+		local flickerChance = math.clamp((t - glitch.flickerStart) * 1.2, 0, 1) * 0.45
 		local count = #parts
 		local sliced: { [number]: number } = {}
-		if t > 0.3 and rng:NextNumber() < glitch.sliceChance then
+		if t > 0.2 and t < glitch.glowEnd and rng:NextNumber() < glitch.sliceChance then
 			for _ = 1, glitch.slices do
 				sliced[rng:NextInteger(1, math.max(count, 1))] = (rng:NextInteger(0, 1) == 0 and -1 or 1) * glitch.sliceStuds
 			end
 		end
 		local flickerHidden = rng:NextNumber() < flickerChance
+		local glowSum = 0
 		for index, ghostPart in ipairs(parts) do
 			local part = ghostPart.part
-			local jitter = Vector3.new(rng:NextNumber(-1, 1), rng:NextNumber(-0.5, 0.5), rng:NextNumber(-1, 1)) * glitch.jitterStuds * intensity
-			local slice = sliced[index] and Vector3.new(sliced[index], 0, 0) or Vector3.zero
+			-- the colour of a part jumps to another of the palette now and then (a glitching hologram)
+			if rng:NextNumber() < glitch.recolorChance then
+				picked[index] = palette[rng:NextInteger(1, #palette)]
+			end
+			local glow = math.clamp((t - ghostPart.glowAt) / glitch.glowRamp, 0, 1)
+			glowSum += glow
+			local calm = 1 - glow -- a glowing part stops glitching and just burns brighter
+			local jitter = Vector3.new(rng:NextNumber(-1, 1), rng:NextNumber(-0.5, 0.5), rng:NextNumber(-1, 1)) * glitch.jitterStuds * intensity * calm
+			local slice = sliced[index] and Vector3.new(sliced[index], 0, 0) * calm or Vector3.zero
 			part.CFrame = ghostPart.cf + jitter + slice
-			part.Color = ghostPart.color:Lerp(glitch.tint, tintAlpha):Lerp(Color3.new(1, 1, 1), whiten)
-			part.Material = tintAlpha > 0.5 and Enum.Material.Neon or ghostPart.material
-			part.Transparency = (flickerHidden and rng:NextNumber() < 0.7) and rng:NextNumber(0.5, 0.95) or ghostPart.transparency
-		end
-		for _, bar in ipairs(bars) do
-			local phase = bar:GetAttribute("Phase") :: number
-			local sweep = (math.sin((t * glitch.scanSweeps + phase) * math.pi * 2) + 1) / 2
-			local base, height = bar:GetAttribute("Base") :: number, bar:GetAttribute("Height") :: number
-			bar.Position = Vector3.new(bar.Position.X, base - height / 2 + height * sweep, bar.Position.Z)
-			bar.Transparency = 0.25 + (1 - intensity) * 0.4 + (flickerHidden and 0.3 or 0)
+			part.Size = ghostPart.size * (1 + glitch.glowSwell * glow)
+			local base = ghostPart.color:Lerp(picked[index], tintAlpha)
+			part.Color = base:Lerp(glitch.glowColor, glow)
+			part.Material = tintAlpha > 0.35 and Enum.Material.Neon or ghostPart.material
+			if glow > 0 then
+				part.Transparency = ghostPart.transparency
+			else
+				part.Transparency = (flickerHidden and rng:NextNumber() < 0.6) and rng:NextNumber(0.5, 0.9) or ghostPart.transparency
+			end
 		end
 		if highlight then
-			highlight.FillTransparency = 0.45 + rng:NextNumber(0, 0.4)
+			local meanGlow = glowSum / math.max(count, 1)
+			highlight.FillColor = palette[rng:NextInteger(1, #palette)]:Lerp(glitch.glowColor, meanGlow)
+			highlight.FillTransparency = 0.5 - 0.5 * meanGlow + rng:NextNumber(0, 0.25) * (1 - meanGlow)
+			highlight.OutlineTransparency = 0.2 * (1 - meanGlow)
 		end
 		if t >= 1 then
 			connection:Disconnect()
@@ -354,7 +348,6 @@ function DeathFX.play(model: Model, kind: string?, deathType: string?, seed: num
 	local rng = Random.new(seed or math.random(1, 1000000))
 
 	local ghost, parts = makeGhost(model, reduced and 24 or 40)
-	local bars = ghost and makeScanBars(model, cfg) or {}
 	DeathFX.hide(model)
 
 	local entrySound = cfg.sounds.glitch
@@ -373,16 +366,13 @@ function DeathFX.play(model: Model, kind: string?, deathType: string?, seed: num
 		if ghost then
 			ghost:Destroy()
 		end
-		for _, bar in ipairs(bars) do
-			bar:Destroy()
-		end
 		if model.Parent then
 			playBurst(model, cfg, reduced, rng)
 		end
 	end
 
 	if ghost and #parts > 0 then
-		runGlitch(ghost, parts, bars, cfg, timeline.glitch, rng, cfg.glitch.highlight and liveCount <= 3, burst)
+		runGlitch(ghost, parts, cfg, timeline.glitch, rng, cfg.glitch.highlight and liveCount <= 3, burst)
 	else
 		task.delay(timeline.glitch, burst)
 	end
