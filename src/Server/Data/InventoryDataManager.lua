@@ -1323,6 +1323,11 @@ local function onPlayerReady(player)
 	-- the Tools are parked when the character is removed (reset / LoadCharacter) or dies, and restored below
 	player.CharacterRemoving:Connect(function()
 		stashTools(player)
+		-- write the inventory while the held Tool is safely parked with the rest: a leave can never save a count that misses it
+		local ok, err = pcall(saveInventoryToProfile, player)
+		if not ok then
+			warn("[InventoryDataManager] save on CharacterRemoving failed: " .. tostring(err))
+		end
 	end)
 
 	-- Also listen on character for equip/unequip
