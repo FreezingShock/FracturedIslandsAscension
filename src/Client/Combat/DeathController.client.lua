@@ -263,14 +263,16 @@ player.CharacterAdded:Connect(function()
 	end)
 end)
 
-respawnRemote.OnClientEvent:Connect(function(model, seed)
+respawnRemote.OnClientEvent:Connect(function(model, seed, kind)
 	if typeof(model) ~= "Instance" or not model:IsA("Model") or not model:IsDescendantOf(workspace) then
 		return
 	end
-	if type(seed) ~= "number" then
+	if type(seed) ~= "number" or type(kind) ~= "string" then
 		return
 	end
-	DeathFX.playReverse(model, "player", seed, DeathConfig.resolve("player", nil).respawn.timeline.travel)
+	-- a player's reveal waits for the camera glide; mobs and dummies start at once
+	local delay = kind == "player" and DeathConfig.resolve("player", nil).respawn.timeline.travel or 0
+	DeathFX.playReverse(model, kind, seed, delay)
 	if model == player.Character then
 		selfRespawn(model)
 	end

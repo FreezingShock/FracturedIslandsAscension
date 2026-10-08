@@ -238,7 +238,7 @@ local function addEmitter(anchor: BasePart, cfg: any, texture: string, props: { 
 	return emitter
 end
 
-local function playBurst(model: Model, cfg: any, reduced: boolean, rng: Random)
+local function playBurst(model: Model, cfg: any, reduced: boolean, rng: Random, lod: boolean?)
 	local burst = cfg.burst
 	local boxCFrame, boxSize = model:GetBoundingBox()
 	local anchor = Instance.new("Part")
@@ -299,7 +299,7 @@ local function playBurst(model: Model, cfg: any, reduced: boolean, rng: Random)
 		Drag = 0,
 	})
 
-	local share = reduced and cfg.caps.reducedShare or 1
+	local share = lod and cfg.caps.lodShare or (reduced and cfg.caps.reducedShare or 1)
 	local total = math.max(8, math.floor(burst.count * share))
 	for _, wave in ipairs(burst.waves) do
 		local amount = math.max(1, math.floor(total * wave.share))
@@ -312,6 +312,13 @@ local function playBurst(model: Model, cfg: any, reduced: boolean, rng: Random)
 				end
 			end)
 		end
+	end
+	if lod then
+		-- far away: just the triangles
+		slivers:Destroy()
+		glow:Destroy()
+		Debris:AddItem(anchor, cfg.timeline.burst + burst.lingerSeconds)
+		return
 	end
 	slivers:Emit(math.max(2, math.floor(burst.slivers * share)))
 	glow:Emit(1)
@@ -395,7 +402,7 @@ end
 
 --- The reverse of the burst: triangles start small on a sphere around the body, fly inward and grow, a glow disc and a light
 --- pulse peak as they merge. Counts, colours, sizes and spin come from cfg.burst; the radius and light from cfg.respawn.
-local function playConverge(model: Model, cfg: any, reduced: boolean, rng: Random)
+local function playConverge(model: Model, cfg: any, reduced: boolean, rng: Random, lod: boolean)
 	local burst, respawn = cfg.burst, cfg.respawn
 	local converge = respawn.timeline.converge
 	local boxCFrame = model:GetBoundingBox()
@@ -483,7 +490,7 @@ local function playConverge(model: Model, cfg: any, reduced: boolean, rng: Rando
 	})
 
 	-- the waves in reverse order: the trickle leaves first and the dense wave last, so the cloud thickens as it closes in
-	local share = reduced and cfg.caps.reducedShare or 1
+	local share = lod and cfg.caps.lodShare or (reduced and cfg.caps.reducedShare or 1)
 	local total = math.max(8, math.floor(burst.count * share))
 	for _, wave in ipairs(burst.waves) do
 		local amount = math.max(1, math.floor(total * wave.share))
@@ -497,6 +504,13 @@ local function playConverge(model: Model, cfg: any, reduced: boolean, rng: Rando
 				end
 			end)
 		end
+	end
+	if lod then
+		-- far away: just the triangles (no streaks, glow disc, light pulse or sound)
+		slivers:Destroy()
+		glow:Destroy()
+		Debris:AddItem(anchor, converge + burst.lingerSeconds)
+		return
 	end
 	slivers:Emit(math.max(2, math.floor(burst.slivers * share)))
 	task.delay(math.max(0, converge - burst.glow.life), function()
@@ -529,12 +543,18 @@ function DeathFX.playReverse(model: Model, kind: string?, seed: number?, delay: 
 	if not (model and model.Parent) or reveals[model] then
 		return
 	end
-	local cfg = DeathConfig.resolve(kind or "player", nil)
+	local isPlayer = Players:GetPlayerFromCharacter(model) ~= nil
+	local enemyType = model:GetAttribute("EnemyType")
+	local entry = (not isPlayer and type(enemyType) == "string") and EnemyConfig.get(enemyType) or nil
+	local cfg = DeathConfig.resolve(kind or (isPlayer and "player" or "enemy"), entry)
 	local caps = cfg.caps
-	if liveCount >= caps.hardCap then
-		return -- too busy: the body just shows up
+	local camera = workspace.CurrentCamera
+	local distance = camera and (camera.CFrame.Position - model:GetPivot().Position).Magnitude or 0
+	if liveCount >= caps.hardCap or distance > caps.maxDistance then
+		return -- too busy or too far to see it: the body just shows up
 	end
-	local reduced = liveCount >= caps.reduceAt
+	local lod = distance > caps.lodDistance and not isPlayer -- your own and nearby bodies get the full look
+	local reduced = lod or liveCount >= caps.reduceAt
 	liveCount += 1
 	local holdSeconds = delay or 0
 	local timeline = cfg.respawn.timeline
@@ -569,7 +589,7 @@ function DeathFX.playReverse(model: Model, kind: string?, seed: number?, delay: 
 		if not alive then
 			return
 		end
-		playConverge(model, cfg, reduced, rng)
+		playConverge(model, cfg, reduced, rng, lod)
 		task.wait(timeline.converge)
 		if not alive then
 			return
@@ -582,14 +602,14 @@ function DeathFX.playReverse(model: Model, kind: string?, seed: number?, delay: 
 		if not alive then
 			return
 		end
-		local made, parts = makeGhost(model, reduced and 24 or 40, originals)
+		local made, parts = makeGhost(model, lod and 12 or (reduced and 24 or 40), originals)
 		if not made then
 			cancel()
 			return
 		end
 		ghost = made
 		playSound(parts[1].part, cfg.respawn.sounds.glitchIn, 90)
-		runGlitch(made, parts, cfg, timeline.solidify, rng, cfg.glitch.highlight and liveCount <= 3, cancel, true)
+		runGlitch(made, parts, cfg, timeline.solidify, rng, cfg.glitch.highlight and liveCount <= 3 and not lod, cancel, true)
 	end)
 end
 
@@ -621,7 +641,8 @@ function DeathFX.play(model: Model, kind: string?, deathType: string?, seed: num
 		DeathFX.hide(model)
 		return
 	end
-	local reduced = liveCount >= caps.reduceAt
+	local lod = camera ~= nil and (camera.CFrame.Position - origin).Magnitude > caps.lodDistance and not isPlayer
+	local reduced = lod or liveCount >= caps.reduceAt
 	liveCount += 1
 	local timeline = cfg.timeline
 	task.delay(timeline.glitch + timeline.burst + cfg.burst.lingerSeconds, function()
@@ -629,7 +650,7 @@ function DeathFX.play(model: Model, kind: string?, deathType: string?, seed: num
 	end)
 	local rng = Random.new(seed or math.random(1, 1000000))
 
-	local ghost, parts = makeGhost(model, reduced and 24 or 40)
+	local ghost, parts = makeGhost(model, lod and 12 or (reduced and 24 or 40))
 	DeathFX.hide(model)
 
 	local entrySound = cfg.sounds.glitch
@@ -649,12 +670,12 @@ function DeathFX.play(model: Model, kind: string?, deathType: string?, seed: num
 			ghost:Destroy()
 		end
 		if model.Parent then
-			playBurst(model, cfg, reduced, rng)
+			playBurst(model, cfg, reduced, rng, lod)
 		end
 	end
 
 	if ghost and #parts > 0 then
-		runGlitch(ghost, parts, cfg, timeline.glitch, rng, cfg.glitch.highlight and liveCount <= 3, burst)
+		runGlitch(ghost, parts, cfg, timeline.glitch, rng, cfg.glitch.highlight and liveCount <= 3 and not lod, burst)
 	else
 		task.delay(timeline.glitch, burst)
 	end

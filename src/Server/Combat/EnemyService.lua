@@ -39,6 +39,8 @@ local function between(range: any): number
 	return range[1] + math.random() * ((range[2] or range[1]) - range[1])
 end
 
+local revealOnSpawn = false
+
 local function spawnMob(marker: BasePart)
 	local attribute = marker:GetAttribute("EnemyType")
 	local enemyType = type(attribute) == "string" and attribute or DEFAULT_TYPE
@@ -72,6 +74,7 @@ local function spawnMob(marker: BasePart)
 	CollectionService:AddTag(model, "Enemy")
 	root:SetNetworkOwner(nil) -- the server owns the physics, so knockback is the same for everyone
 	EnemyRig.attachWeapon(model, cfg.weapon)
+	local holdUntil = revealOnSpawn and os.clock() + DeathService.revealBody(model, "enemy", entry) or 0 -- held still while it materializes
 
 	local mob = {
 		model = model,
@@ -92,9 +95,10 @@ local function spawnMob(marker: BasePart)
 		baseC0 = {},
 		attacking = false,
 		returning = false,
+		holdUntil = holdUntil,
 	}
 	mob.wake = function()
-		if mobs[model] then
+		if mobs[model] and os.clock() >= mob.holdUntil then
 			EnemyAI.think(mob, os.clock())
 		end
 	end
@@ -132,6 +136,7 @@ function EnemyService.start()
 			spawnMob(marker)
 		end
 	end
+	revealOnSpawn = true -- the first wave appears with the server; every respawn after it materializes
 	markers.ChildAdded:Connect(function(marker)
 		if marker:IsA("BasePart") then
 			spawnMob(marker)
@@ -143,7 +148,7 @@ function EnemyService.start()
 			task.wait(STEP)
 			local now = os.clock()
 			for _, mob in pairs(mobs) do
-				if mob.humanoid.Health > 0 and mob.root.Parent then
+				if mob.humanoid.Health > 0 and mob.root.Parent and now >= mob.holdUntil then
 					EnemyAI.think(mob, now)
 				end
 			end

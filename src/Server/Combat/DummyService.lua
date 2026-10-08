@@ -44,6 +44,8 @@ local function template(): Model?
 	return nil
 end
 
+local revealOnSpawn = false
+
 local function spawnDummy(marker: BasePart)
 	local source = template()
 	if not source then
@@ -72,6 +74,9 @@ local function spawnDummy(marker: BasePart)
 	EnemyTags.stamp(dummy, EnemyConfig.get("dummy"))
 	CollectionService:AddTag(dummy, "Enemy") -- the nameplate controller shows a health bar over every Enemy
 	root:SetNetworkOwner(nil) -- the server owns the physics, so knockback is the same for everyone
+	if revealOnSpawn then
+		DeathService.revealBody(dummy, "dummy", EnemyConfig.get("dummy")) -- materializes like a mob
+	end
 	dummies[dummy] = marker.Position
 
 	humanoid.Died:Once(function()
@@ -103,6 +108,7 @@ function DummyService.start()
 			spawnDummy(marker)
 		end
 	end
+	revealOnSpawn = true -- the first wave appears with the server; respawns materialize
 	markers.ChildAdded:Connect(function(marker)
 		if marker:IsA("BasePart") then
 			spawnDummy(marker)

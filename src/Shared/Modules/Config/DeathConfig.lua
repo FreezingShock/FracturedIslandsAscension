@@ -95,6 +95,8 @@ DeathConfig.library = {
 		maxDistance = 160, -- farther deaths just hide the body
 		reduceAt = 4, -- death effects alive at once: from this many on, a lighter version plays (no echo / outline, fewer triangles)
 		reducedShare = 0.4, -- fraction of the particles in the lighter version
+		lodDistance = 70, -- farther than this (to the camera) a death / reveal draws a thin version: few particles, no glow disc, light or outline
+		lodShare = 0.25, -- fraction of the particles in that thin version
 		hardCap = 14, -- past this many alive at once only the body vanishes
 	},
 
@@ -221,10 +223,15 @@ function DeathConfig.respawnSeconds(kind: string?): number
 	return cfg.timeline.glitch + cfg.timeline.burst
 end
 
---- Seconds the new body is held after it loads: camera travel + converge + solidify + swing + lock-in.
-function DeathConfig.revealSeconds(kind: string?): number
-	local timeline = DeathConfig.resolve(kind or "player", nil).respawn.timeline
-	return timeline.travel + timeline.converge + timeline.solidify + timeline.swing + DeathConfig.resolve(kind or "player", nil).selfRespawn.lockSeconds
+--- Seconds a new body is held while its reveal plays: converge + solidify, and for a player also the camera glide, swing and lock-in.
+function DeathConfig.revealSeconds(kind: string?, enemyEntry: any?): number
+	local cfg = DeathConfig.resolve(kind or "player", enemyEntry)
+	local timeline = cfg.respawn.timeline
+	local seconds = timeline.converge + timeline.solidify
+	if kind == "player" or kind == nil then
+		seconds += timeline.travel + timeline.swing + cfg.selfRespawn.lockSeconds
+	end
+	return seconds
 end
 
 return DeathConfig

@@ -8,7 +8,7 @@
 	  * RemoteEvent EntityDeath { model, kind, deathType, seed } goes to every player within DeathConfig caps.maxDistance
 	    (and to the dead player); clients only draw the glitch and the triangle burst (DeathFX, DeathController).
 	  * players respawn DeathConfig.respawnSeconds() after dying (Players.RespawnTime); the new body is held still for
-	    DeathConfig.revealSeconds() while RemoteEvent EntityRespawn { model, seed } has clients play the reveal (DeathFX.playReverse); mobs and dummies are removed and
+	    DeathConfig.revealSeconds() while RemoteEvent EntityRespawn { model, seed, kind } has clients play the reveal (DeathFX.playReverse); mobs and dummies are removed and
 	    respawned by EnemyService / DummyService, which use DeathService.timeline() so the loot pays out when the burst starts
 	    and the body is removed after the whole sequence.
 	Looks, timings and caps: Modules/Config/DeathConfig.
@@ -160,28 +160,44 @@ end
 -- every player character
 Players.RespawnTime = DeathConfig.respawnSeconds("player")
 
--- The new body of a player who died is held still (and hidden by the clients) while the camera glides to it, then it
--- materializes (DeathFX.playReverse); the hold lasts DeathConfig.revealSeconds, then the body is released.
-local function reveal(player: Player, character: Model)
-	local cfg = DeathConfig.resolve("player", nil)
-	local root = character:WaitForChild("HumanoidRootPart", 5) :: BasePart?
-	local humanoid = character:FindFirstChildOfClass("Humanoid")
-	if not (root and humanoid) then
-		return
-	end
+-- A fresh body is held still (and hidden by the clients) while the reveal plays (DeathFX.playReverse), then released after
+-- DeathConfig.revealSeconds(kind). Players also get the camera glide and head dive (DeathController); the hold covers those.
+local function announce(model: Model, root: BasePart, humanoid: Humanoid, kind: string, entry: any?, owner: Player?)
+	local cfg = DeathConfig.resolve(kind, entry)
 	root.Anchored = true
 	local seed = math.random(1, 1000000)
 	for _, other in ipairs(Players:GetPlayers()) do
 		local theirRoot = other.Character and other.Character:FindFirstChild("HumanoidRootPart") :: BasePart?
-		if other == player or (theirRoot and (theirRoot.Position - root.Position).Magnitude <= cfg.caps.maxDistance) then
-			(respawnRemote :: RemoteEvent):FireClient(other, character, seed)
+		if other == owner or (theirRoot and (theirRoot.Position - root.Position).Magnitude <= cfg.caps.maxDistance) then
+			(respawnRemote :: RemoteEvent):FireClient(other, model, seed, kind)
 		end
 	end
-	task.delay(DeathConfig.revealSeconds("player"), function()
-		if character.Parent and humanoid.Health > 0 and root.Parent then
+	local hold = DeathConfig.revealSeconds(kind, entry)
+	task.delay(hold, function()
+		if model.Parent and humanoid.Health > 0 and root.Parent then
 			root.Anchored = false
 		end
 	end)
+	return hold
+end
+
+local function reveal(player: Player, character: Model)
+	local root = character:WaitForChild("HumanoidRootPart", 5) :: BasePart?
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	if root and humanoid then
+		announce(character, root, humanoid, "player", nil, player)
+	end
+end
+
+--- Holds a freshly spawned mob / dummy still while its reveal plays; returns the seconds it stays held (0 if it cannot be revealed).
+--- Call it after the model is parented and its network owner is set (an anchored part cannot take one).
+function DeathService.revealBody(model: Model, kind: string, enemyEntry: any?): number
+	local root = model:FindFirstChild("HumanoidRootPart") :: BasePart?
+	local humanoid = model:FindFirstChildOfClass("Humanoid")
+	if not (root and humanoid and model.Parent) then
+		return 0
+	end
+	return announce(model, root, humanoid, kind, enemyEntry, nil)
 end
 
 local function watchPlayer(player: Player)
