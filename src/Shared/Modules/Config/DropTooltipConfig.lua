@@ -7,7 +7,7 @@
 	  FOLDED    a small tag: gem + name + count          (stages.folded: show / hide, max count)
 	  UNFOLDED  the full card, ONE at a time, only for the drop you aim at (stages.unfold)
 	Distances are studs from the player's root part. Each stage hides a few studs after it shows (hysteresis), so
-	nothing flickers on the edge. Pickup stays server-side at 5 studs and is not changed here.
+	nothing flickers on the edge. Pickup stays server-side (ItemDrops.PICKUP_RADIUS, 8 studs); unfold.range is kept 40 above it.
 
 	LAYERS, each overriding the one before:
 	  1. defaults                       the same for every drop
@@ -65,7 +65,7 @@ DropTooltipConfig.defaults = {
 			max = 10, -- folded tags at once, nearest first; the overflow stays dots
 		},
 		unfold = {
-			range = 45, -- a tag can only unfold inside this distance
+			range = 48, -- a tag can only unfold inside this distance
 			aimRadius = 0.14, -- fraction of the viewport height
 			hoverFirst = true, -- a drop you point AT (its tag or gem under the aim point) beats a closer drop merely inside aimRadius
 			hoverRadius = 0.04, -- fraction of the viewport height around the anchor that counts as pointing AT it

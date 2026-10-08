@@ -100,7 +100,19 @@ rayParams.FilterType = Enum.RaycastFilterType.Exclude
 rayParams.RespectCanCollide = true
 
 local function blocked(fromPosition: Vector3, targetPosition: Vector3, ignore: { Instance }): boolean
-	rayParams.FilterDescendantsInstances = ignore
+	-- dropped items and other targets (a dying one stays frozen in place for its death animation) never block a hit
+	local filter = table.clone(ignore)
+	local drops = workspace:FindFirstChild("ItemDrops")
+	if drops then
+		table.insert(filter, drops)
+	end
+	for _, other in ipairs(CollectionService:GetTagged(DamageService.TAG)) do
+		table.insert(filter, other)
+	end
+	for _, other in ipairs(CollectionService:GetTagged("Enemy")) do
+		table.insert(filter, other)
+	end
+	rayParams.FilterDescendantsInstances = filter
 	return workspace:Raycast(fromPosition, targetPosition - fromPosition, rayParams) ~= nil
 end
 

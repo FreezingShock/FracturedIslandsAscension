@@ -29,7 +29,7 @@ local ItemDrops = {}
 -- ===================== CONFIG =====================
 local MAX_DROPS = 200 -- oldest drop is removed past this
 local DESPAWN_SECONDS = 300
-local PICKUP_RADIUS = 5 -- studs from the player's root part
+local PICKUP_RADIUS = 8 -- studs from the player's root part
 local PICKUP_DELAY = 0.5 -- everyone, after spawning
 local OWNER_DELAY = 2 -- the player who dropped it
 local FULL_RETRY = 1 -- seconds before retrying a pickup that did not fit
@@ -130,7 +130,8 @@ local function buildModel(toolName: string, position: Vector3)
 	body.Transparency = 1
 	body.CFrame = CFrame.new(position)
 	body.CustomPhysicalProperties = PhysicalProperties.new(0.7, 0.8, 0.15, 1, 1)
-	body.CanCollide = true
+	body.CanCollide = true -- only while it falls to the floor; settle() turns it off
+	body.CanTouch = false
 	body.Parent = model
 	model.PrimaryPart = body
 
