@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>FI:A ideation {{DATE}}</title>
+<style>
+:root{--bg:#0b0b1a;--panel:#14142b;--line:#2a2a4a;--text:#e8e8f0;--gray:#aaa;--gold:#ffaa00;--green:#55ff55;--red:#ff5555;--yellow:#ffff55;--aqua:#55ffff;--purple:#ff55ff}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.55 ui-monospace,Menlo,Consolas,monospace}
+main{max-width:920px;margin:0 auto;padding:20px 16px 60px}
+h1{color:var(--gold);font-size:22px;margin:0 0 4px}h2{color:var(--aqua);font-size:16px;margin:28px 0 10px;text-transform:uppercase;letter-spacing:.08em}
+.sub{color:var(--gray);margin-bottom:16px}
+.strip{display:grid;gap:8px;grid-template-columns:repeat(auto-fit,minmax(200px,1fr))}
+.chip{background:var(--panel);border:1px solid var(--line);border-left:4px solid var(--gold);padding:8px 10px}
+.chip.top{border-left-color:var(--green)}
+.badge{display:inline-block;padding:0 7px;font-weight:700;color:#000;margin-right:6px}
+.S{background:var(--green)}.M{background:var(--yellow)}.L{background:var(--purple)}
+ul.notice{margin:0;padding-left:20px}
+details{background:var(--panel);border:1px solid var(--line);margin:10px 0;padding:10px 14px}
+summary{cursor:pointer;font-weight:700;color:var(--gold)}
+.k{color:var(--aqua)}.risk{color:var(--red)}.why{color:var(--gray)}
+pre{background:#05050f;border:1px solid var(--line);padding:12px;white-space:pre-wrap;word-break:break-word;margin:0}
+button{background:var(--gold);color:#000;border:0;padding:6px 12px;font:inherit;font-weight:700;cursor:pointer;margin-bottom:6px}
+</style></head><body><main>
+<h1>FI:A ideation {{DATE}}</h1>
+<div class="sub">based on {{BASED_ON_SHA}} &middot; {{ASSUMPTIONS}}</div>
+
+<h2>At a glance</h2>
+<div class="strip">
+<!-- one per idea, ranked; add class "top" to the recommended one -->
+<div class="chip top"><span class="badge M">M</span><b>{{NAME}}</b><div class="why">{{ONE_LINE_PITCH}}</div></div>
+</div>
+
+<h2>What I noticed</h2>
+<ul class="notice"><li>{{BULLET}}</li></ul>
+
+<h2>Ideas</h2>
+<!-- repeat per idea, in ranked order -->
+<details open><summary><span class="badge M">M</span>1. {{NAME}}</summary>
+<p>{{PITCH}}</p>
+<p class="why"><span class="k">Why now:</span> {{WHY}}</p>
+<p><span class="k">Goal / files:</span> {{GOAL_FILES}}</p>
+<p><span class="k">Config:</span> <code>{{CONFIG}}</code></p>
+<p><span class="k">Out of scope:</span> {{OOS}}</p>
+<p><span class="k">Verification:</span> {{VERIFY}}</p>
+<p><span class="k">Placeholders / key:</span> {{PLACEHOLDERS}}</p>
+<p class="risk"><b>Risk:</b> {{RISK}}</p>
+</details>
+
+<h2>Recommendation</h2>
+<p>{{RECOMMENDATION_3_SENTENCES}}</p>
+
+<h2>Paste-ready prompt</h2>
+<button onclick="navigator.clipboard.writeText(document.getElementById('p').textContent);this.textContent='Copied'">Copy</button>
+<pre id="p">{{PASTE_READY_PROMPT_ESCAPED}}</pre>
+</main></body></html>
