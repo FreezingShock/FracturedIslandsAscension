@@ -12,7 +12,7 @@ restyling) unless you set `local FORCE = true` at the top.
 |---|---|---|
 | `build_damage_number.luau` | `ReplicatedStorage.GUI.DamageNumber` (BillboardGui, Label, UIStroke, CritBadge) | `DamageNumberController` |
 | `build_ability_menu.luau` | `ReplicatedStorage.GUI.AbilitySlot` template + `StarterGui.AbilityMenu.Slots` | `AbilityController` |
-| `build_enemy_nameplate.luau` | `ReplicatedStorage.GUI.EnemyNameplate` (BillboardGui, NameLabel, Bar, Fill) | `EnemyNameplateController` |
+| `build_enemy_nameplate.luau` | `ReplicatedStorage.GUI.EnemyNameplate` (Title, BarGroup, Tags) + `EnemyNameplate_Tag` + `EnemyNameplate_TagGroup` | `EnemyNameplateController` |
 | `build_attack_bar.luau` | `ReplicatedStorage.GUI.AttackBar` (ScreenGui, Frame, Fill) | `AttackBarController` |
 | `build_drop_label.luau` | `ReplicatedStorage.GUI.DropLabel` (BillboardGui, Label) | `LootService` |
 | `build_drop_tag.luau` | `ReplicatedStorage.GUI.DropTag` (one BillboardGui with the Dot, Folded and Card layers, cut from `TooltipMenu.Template`; `REMOVE_OLD` drops the 3.58.0 DropCard / DropChip) | `DropTooltipController` |

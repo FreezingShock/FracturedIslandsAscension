@@ -49,6 +49,9 @@
       "EnemyService": {
         "$path": "src/Server/Combat/EnemyService.lua"
       },
+      "EnemyTags": {
+        "$path": "src/Server/Combat/EnemyTags.lua"
+      },
       "EquipmentInit": {
         "$path": "src/Server/Inventory/EquipmentInit.server.lua"
       },

@@ -29,6 +29,7 @@ local ServerStorage = game:GetService("ServerStorage")
 local EnemyConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("EnemyConfig")) :: any
 local DamageService = require(ServerScriptService:WaitForChild("DamageService")) :: any
 local LootService = require(ServerScriptService:WaitForChild("LootService")) :: any
+local EnemyTags = require(ServerScriptService:WaitForChild("EnemyTags")) :: any
 
 local STEP = 0.3
 local DEFAULT_TYPE = "placeholder_mob"
@@ -47,6 +48,7 @@ type Mob = {
 	nextWander: number,
 	nextAttack: number,
 	attacking: boolean,
+	damageMult: number,
 }
 local mobs: { [Model]: Mob } = {}
 
@@ -94,15 +96,18 @@ local function spawnMob(marker: BasePart)
 		return
 	end
 	model.Name = entry.name
-	humanoid.MaxHealth = cfg.health
-	humanoid.Health = cfg.health
+	local levelInfo = EnemyConfig.levelInfo(enemyType)
+	humanoid.MaxHealth = cfg.health * levelInfo.hpMult
+	humanoid.Health = humanoid.MaxHealth
 	humanoid.WalkSpeed = cfg.walkSpeed
 	humanoid.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
 	humanoid.HealthDisplayType = Enum.HumanoidHealthDisplayType.AlwaysOff
 
 	model:PivotTo(marker.CFrame * CFrame.new(0, 3.1, 0)) -- an R6 root sits about 3 studs above the ground
 	model:SetAttribute("EnemyType", enemyType)
+	model:SetAttribute("EnemyLevel", levelInfo.level) -- the nameplate shows it; with entry.scales it also scaled health / damage
 	model.Parent = workspace
+	EnemyTags.stamp(model, entry) -- after the parent: tags need a live model for their expiry timers
 	CollectionService:AddTag(model, DamageService.TAG)
 	CollectionService:AddTag(model, "Enemy")
 	root:SetNetworkOwner(nil) -- the server owns the physics, so knockback is the same for everyone
@@ -116,6 +121,7 @@ local function spawnMob(marker: BasePart)
 		cfg = cfg,
 		entry = entry,
 		enemyType = enemyType,
+		damageMult = levelInfo.damageMult,
 		nextWander = 0,
 		nextAttack = os.clock() + (first and between(first.cooldown or { 3, 5 }) or math.huge),
 		attacking = false,
@@ -200,7 +206,7 @@ local function runAttack(mob: Mob, option: any, attack: any, targetPlayer: Playe
 					or look.Magnitude < 1e-3
 					or math.acos(math.clamp(look.Unit:Dot(delta.Unit), -1, 1)) <= math.rad((attack.arc or 360) / 2)
 				if delta.Magnitude <= attack.range + (attack.leeway or 0) and inFront then
-					DamageService.hurtPlayer(targetPlayer, attack.damage, model)
+					DamageService.hurtPlayer(targetPlayer, attack.damage * mob.damageMult, model)
 				end
 			end
 		end

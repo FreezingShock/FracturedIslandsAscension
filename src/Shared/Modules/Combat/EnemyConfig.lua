@@ -43,6 +43,7 @@
 	  EnemyConfig.resolve(enemyType, weaponType, weaponId, preset) -> merged preset table (cached, identical table per combo)
 	  EnemyConfig.sound(enemyType, weaponType, weaponId, slot)     -> sound entry or nil
 	  EnemyConfig.get(enemyType)                                   -> the enemy's entry (falls back to "default")
+	  EnemyConfig.levelInfo(enemyType)                             -> { level, computed, base, hpMult, damageMult, defenseMult }
 	  EnemyConfig.dropsFor(enemyType)                              -> flat list of drop entries / pools
 --]]
 
@@ -198,6 +199,22 @@ EnemyConfig.attacks = {
 	melee_swing = { kind = "melee", range = 5, leeway = 1.5, windup = 0.6, damage = 10, arc = 120, recover = 0.5 },
 }
 
+-- ===================== 1c. LIBRARY: ENEMY LEVELS =====================
+-- Every enemy has a level shown on its nameplate (EnemyConfig.levelInfo). With no `level` on the enemy it is computed:
+--   power = health * weights.hp + bestAttackDps * weights.damage + defense * weights.defense
+--   level = clamp(round(baseLevel + curve * power ^ exponent), baseLevel, maxLevel)
+-- bestAttackDps = the strongest of its attacks: damage / average cooldown. Tune weights / curve here, once, for all enemies.
+-- Level is cosmetic unless the enemy sets scales = true: then each level above its base level (levelScaling.baseLevel, default the
+-- computed level of its written stats) adds scaling.hp / damage / defense (a fraction) to its health, attack damage and defense.
+EnemyConfig.levels = {
+	baseLevel = 1,
+	maxLevel = 100,
+	weights = { hp = 0.02, damage = 8, defense = 1.5 },
+	curve = 1.2,
+	exponent = 0.5,
+	scaling = { hp = 0.06, damage = 0.04, defense = 0.05 },
+}
+
 -- ===================== 1d. LIBRARY: DROP TABLES =====================
 -- Reference one from an enemy with { table = "<name>" }. Stats go straight to the killer's statistics when picked up.
 EnemyConfig.dropTables = {
@@ -278,7 +295,11 @@ EnemyConfig.dropTables = {
 
 -- ===================== 2. ENEMY TYPES =====================
 -- name        shown on the nameplate (a model attribute EnemyName overrides it)
--- nameplate   true = the health bar + name above its head (ReplicatedStorage.GUI.EnemyNameplate)
+-- nameplate   the nameplate over its head (ReplicatedStorage.GUI.EnemyNameplate). On for every enemy; false opts out
+-- level       optional manual level (else computed from its stats, EnemyConfig.levels); defense optional (default 0)
+-- scales      true = the level also scales health / damage / defense (levelScaling = { hp, damage, defense, baseLevel } overrides)
+-- tags        list of NameplateConfig.tags ids shown as permanent chips (an element, "boss", ...); debuffs / effects are added at
+--             runtime with EnemyTags.add (server)
 -- sounds      slot -> key in EnemyConfig.sounds
 -- fx          per-preset tweaks (layer 2); weapons[...] per-weapon tweaks (layer 3)
 -- mob         present only for enemies EnemyService spawns: body / behaviour (see EnemyService)
@@ -286,19 +307,21 @@ EnemyConfig.enemies = {
 	-- anything Damageable with no EnemyType attribute
 	default = {
 		name = "Enemy",
-		nameplate = false,
+		nameplate = true,
 		sounds = { hit = "enemy_hit", crit = "enemy_crit", crash = "enemy_crash", death = "enemy_death" },
 	},
 
 	dummy = {
 		name = "Training Dummy",
 		nameplate = true,
+		level = 1,
 		sounds = { hit = "enemy_hit", crit = "enemy_crit", crash = "enemy_crash", death = "enemy_death" },
 	},
 
 	placeholder_mob = {
 		name = "Placeholder Mob",
 		nameplate = true,
+		tags = { "fire", "enrage" },
 		sounds = { hit = "enemy_hit", crit = "enemy_crit", crash = "enemy_crash", death = "enemy_death" },
 		attacks = { { attack = "melee_swing", weight = 1, cooldown = { 3, 5 } } },
 		xp = { skill = "Combat", amount = 40 },
@@ -322,6 +345,7 @@ EnemyConfig.enemies = {
 	slime_blob = {
 		name = "Slime Blob",
 		nameplate = true,
+		tags = { "earth" },
 		sounds = { hit = "enemy_hit", crit = "enemy_crit", crash = "enemy_crash", death = "enemy_death" },
 		attacks = { { attack = "melee_swing", weight = 1, cooldown = { 3, 5 } } },
 		xp = { skill = "Combat", amount = 25 },
@@ -344,6 +368,7 @@ EnemyConfig.enemies = {
 	skeleton_grunt = {
 		name = "Skeleton Grunt",
 		nameplate = true,
+		tags = { "ice" },
 		sounds = { hit = "enemy_hit", crit = "enemy_crit", crash = "enemy_crash", death = "enemy_death" },
 		attacks = { { attack = "melee_swing", weight = 1, cooldown = { 2.5, 4 } } },
 		xp = { skill = "Combat", amount = 45 },
@@ -366,6 +391,7 @@ EnemyConfig.enemies = {
 	spider_scout = {
 		name = "Spider Scout",
 		nameplate = true,
+		tags = { "storm" },
 		sounds = { hit = "enemy_hit", crit = "enemy_crit", crash = "enemy_crash", death = "enemy_death" },
 		attacks = { { attack = "melee_swing", weight = 1, cooldown = { 2, 3.5 } } },
 		xp = { skill = "Combat", amount = 35 },
@@ -468,6 +494,46 @@ end
 
 function EnemyConfig.get(enemyType: string?): any
 	return EnemyConfig.enemies[enemyType or "default"] or EnemyConfig.enemies.default
+end
+
+local levelCache: { [any]: any } = {}
+
+--- level (shown), computed (from stats), base and hp / damage / defense multipliers for an enemy type (cached).
+--- The multipliers are 1 unless the enemy sets scales = true. Server (EnemyService) and client both read this.
+function EnemyConfig.levelInfo(enemyType: string?): any
+	local key = enemyType or "default"
+	local cached = levelCache[key]
+	if cached then
+		return cached
+	end
+	local entry = EnemyConfig.get(enemyType)
+	local lv = EnemyConfig.levels
+	local health = entry.mob and entry.mob.health or entry.health or 0
+	local bestDps = 0
+	for _, option in ipairs(entry.attacks or {}) do
+		local attack = EnemyConfig.attacks[option.attack]
+		if attack then
+			local cooldown = option.cooldown or { 3, 5 }
+			local average = math.max(((cooldown[1] or 3) + (cooldown[2] or cooldown[1] or 3)) / 2, 0.1)
+			bestDps = math.max(bestDps, (attack.damage or 0) / average)
+		end
+	end
+	local power = health * lv.weights.hp + bestDps * lv.weights.damage + (entry.defense or 0) * lv.weights.defense
+	local computed = math.clamp(math.round(lv.baseLevel + lv.curve * power ^ lv.exponent), lv.baseLevel, lv.maxLevel)
+	local level = math.clamp(math.floor(entry.level or computed), lv.baseLevel, lv.maxLevel)
+	local scaling = entry.levelScaling or {}
+	local base = scaling.baseLevel or computed
+	local steps = entry.scales and math.max(level - base, 0) or 0
+	local info = {
+		level = level,
+		computed = computed,
+		base = base,
+		hpMult = 1 + (scaling.hp or lv.scaling.hp) * steps,
+		damageMult = 1 + (scaling.damage or lv.scaling.damage) * steps,
+		defenseMult = 1 + (scaling.defense or lv.scaling.defense) * steps,
+	}
+	levelCache[key] = info
+	return info
 end
 
 function EnemyConfig.resolve(enemyType: string?, weaponType: string?, weaponId: string?, preset: string): any

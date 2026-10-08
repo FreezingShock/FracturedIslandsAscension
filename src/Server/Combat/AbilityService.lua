@@ -46,6 +46,7 @@ local RateLimiter = require(ServerScriptService:WaitForChild("RateLimiter")) :: 
 local WeaponManager = require(ServerScriptService:WaitForChild("WeaponManager")) :: any
 local DamageService = require(ServerScriptService:WaitForChild("DamageService")) :: any
 local ResourceService = require(ServerScriptService:WaitForChild("ResourceService")) :: any
+local EnemyTags = require(ServerScriptService:WaitForChild("EnemyTags")) :: any
 
 local AbilityService = {}
 
@@ -183,8 +184,10 @@ local function applyEffects(player: Player, ability: any, weaponId: string, stat
 					model:SetAttribute("SlowMult", effect.mult)
 				end
 				model:SetAttribute("SlowUntil", math.max(model:GetAttribute("SlowUntil") or 0, now + effect.duration))
+				EnemyTags.add(model, "slow", { duration = effect.duration })
 			elseif effect.kind == "burn" then
 				local existing = burns[model]
+				EnemyTags.add(model, "burn", { duration = effect.duration })
 				if existing then
 					existing.endsAt = now + effect.duration -- refresh, never stack
 				elseif burnCount < AbilityConfig.maxBurnsGlobal then

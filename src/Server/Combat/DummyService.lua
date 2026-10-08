@@ -17,6 +17,8 @@ local ServerStorage = game:GetService("ServerStorage")
 local CombatConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("CombatConfig")) :: any
 local DamageService = require(ServerScriptService:WaitForChild("DamageService")) :: any
 local LootService = require(ServerScriptService:WaitForChild("LootService")) :: any
+local EnemyConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("EnemyConfig")) :: any
+local EnemyTags = require(ServerScriptService:WaitForChild("EnemyTags")) :: any
 
 local DUMMY = CombatConfig.dummy
 local DummyService = {}
@@ -65,6 +67,8 @@ local function spawnDummy(marker: BasePart)
 	dummy.Parent = workspace
 	CollectionService:AddTag(dummy, DamageService.TAG)
 	dummy:SetAttribute("EnemyType", "dummy") -- EnemyConfig key: its hit effects, sounds and nameplate
+	dummy:SetAttribute("EnemyLevel", EnemyConfig.levelInfo("dummy").level)
+	EnemyTags.stamp(dummy, EnemyConfig.get("dummy"))
 	CollectionService:AddTag(dummy, "Enemy") -- the nameplate controller shows a health bar over every Enemy
 	root:SetNetworkOwner(nil) -- the server owns the physics, so knockback is the same for everyone
 	dummies[dummy] = marker.Position
