@@ -57,7 +57,7 @@ not verified (two-player replication, real mouse drags, long timed runs).
 
 ## 5. Review (large features only)
 Check the diff yourself against the spec and the CLAUDE.md review checklist (server never trusts client values, new
-remotes type-check inputs, async callbacks re-check state, script names unique). Run `/code-review` only if the user asks.
+remotes type-check inputs, async callbacks re-check state, script names unique). For large features run the `fia-reviewer` subagent (read-only, haiku, low effort) on the diff.
 Apply only findings that affect correctness or the stated requirements.
 
 ## 6. Ship automatically, then report

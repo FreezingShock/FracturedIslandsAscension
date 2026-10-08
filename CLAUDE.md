@@ -26,7 +26,7 @@ Naming: `*.client.lua` = LocalScript, `*.server.lua` = Script, plain `.lua` = Mo
 
 ## Workflow automation (committed in `.claude/`, works on any machine after `git clone`)
 - **Skills:** `/fia-ideate <idea>` (idea -> spec) -> `/fia-feature <idea>` (branch, build, verify, review) -> `/fia-verify` (token-lean playtest) -> `/fia-ship` (commit, vault log, push). `/fia-skill <idea or restriction>` creates or changes skills, hooks, subagents, permissions and rules.
-- **Subagent:** `lua-explorer` (read-only code search). Verification runs inline via `/fia-verify`; reviews use `/code-review` for large features.
+- **Subagent:** `lua-explorer` (read-only code search). Verification runs inline via `/fia-verify`; large-feature reviews use the `fia-reviewer` subagent (haiku, low effort).
 - **Review checklist:** async callbacks that mutate reused state check `PlaybackState`/generation (tween `Completed` fires on Cancel); saved-data changes backfill via `Reconcile`; server never trusts client values; new RemoteEvents type-check inputs; GUI is looked up by name, so renames break scripts; script names are unique per realm.
 - **Hooks:** blocks hand edits to generated files; regenerates `default.project.json` when a script is added; Stop is blocked while the project file is stale; a small context pack loads at session start.
 - **How Nate drives it:** `/fia-ideate <topic list>` -> answers 3-4 questions -> pastes the `/fia-feature` prompt -> "connected, verify it" (or tests it himself) -> small follow-ups. Once a change is verified, commit + push to `main` + vault session log happen automatically (his call, 2026-10-04); never ship unverified or failing code. Specs always state config shape (library -> type -> override), out of scope, and verification.
