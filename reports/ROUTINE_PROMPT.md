@@ -1,4 +1,4 @@
-# Routine prompt (v3, commits to main)
+# Routine prompt (v4, commits to main, html via report-style skill)
 The routine's stored prompt is only this stub:
 
 ```
@@ -35,6 +35,7 @@ ideas:
   - {id: <OUT-base>-1, name: ..., size: S|M|L}   (4 entries, ranked best first)
 ---
 # FI:A ideation - <DATE>
+## Summary - 3 short lines, key facts wrapped in {green:..}/{red:..}/{gold:..}/{yellow:..}/{aqua:..} colour tokens (top pick and why, biggest gaps found, anything skipped); then a line `Assumptions: ...`.
 ## What I noticed - 3-5 bullets citing files.
 ## Ideas - each in this exact shape:
 ### <n>. <Name> (S|M|L)
@@ -44,7 +45,7 @@ ideas:
 - **Risk:** the one thing most likely to go wrong.
 ## Recommendation - rank the 4, pick ONE to build first, 3 sentences.
 ## Paste-ready prompt - one fenced code block starting '/fia-feature ' with the recommended idea's full spec (goal, files, config shape, out of scope, verification), paste-ready as-is.
-2) OUT.html - fill reports/ideation/template.html (self-contained, no external requests; HTML-escape the prompt text). Same content as the markdown, ranked order, recommended idea marked "top". Keep it skimmable: the "At a glance" strip must say it all in 30 seconds.
+2) OUT.html - generate it, never hand-write it: run `python3 plugins/fia/skills/report-style/build_html.py reports/ideation/OUT.md` (the report-style skill owns all HTML styling and layout; read plugins/fia/skills/report-style/SKILL.md only if the script errors). Do not edit anything under plugins/.
 3) Append exactly 4 rows (status: proposed) to reports/ideation/INDEX.md. Do not edit existing rows.
 
 STEP 4 - Deliver. git add reports && git commit -m 'reports: ideation <OUT>'. git pull --rebase origin main, then git push origin main; if rejected, pull --rebase and push once more. Commit straight to main, no branch and no PR. Only files under reports/ may be in the commit (git status must show nothing else staged).

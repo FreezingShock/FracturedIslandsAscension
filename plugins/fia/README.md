@@ -24,6 +24,7 @@ Local checkout: `/plugin marketplace add <path to repo>`.
 | `blender-asset` | Blender MCP model/animation to Roblox, generator saved in `tools/blender/` |
 | `figma-to-studio` | Figma frame to Studio GUI template |
 | `reports` | import the cloud routines' daily/weekly/ideation reports from `claude/fia-reports` into the vault |
+| `report-style` | styles and organizes the .html of FIA reports (routines call `build_html.py` on the report .md); edit `report.css` / `keywords.json` to restyle |
 | `content` | add items/abilities/enemies as config data using the layered recipes |
 | `fia-ideate`, `fia-feature`, `fia-verify`, `fia-ship`, `fia-skill` | the feature pipeline (copied from `.claude/skills`) |
 

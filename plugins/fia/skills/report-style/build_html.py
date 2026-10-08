@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Render reports/ideation/<name>.md into a styled <name>.html. Usage: python3 reports/ideation/build_html.py reports/ideation/2026-10-08-3.md
-The font-face (Minecraft, base64) is read from the artifact-styling skill's theme.css when present, else cached in reports/ideation/_font.css."""
-import re, sys, html, glob, os, subprocess, datetime
+"""Render an ideation report .md into a styled .html (skill: report-style).
+Usage: python3 plugins/fia/skills/report-style/build_html.py reports/ideation/<name>.md
+Styling = report.css (tokens at the top), keyword colours = keywords.json, Minecraft font = _font.css (cached from the artifact-styling skill)."""
+import re, sys, html, glob, os, subprocess, datetime, json
 HERE = os.path.dirname(os.path.abspath(__file__))
 src = sys.argv[1]; out = os.path.splitext(src)[0] + ".html"
 md = open(src).read()
@@ -14,9 +15,7 @@ def font_face():
         if m: open(cache, "w").write(m.group(0)); return m.group(0)
     return open(cache).read() if os.path.exists(cache) else ""
 
-KEYWORDS = {"Stamina": "aqua", "Coins": "gold", "AddXP": "green", "XP": "green", "Reconcile": "green", "server-authoritative": "green",
-    "rate limit": "yellow", "i-frame": "lpurple", "i-frames": "lpurple", "rubber-bands": "red", "desync": "red", "leaks": "red", "offline": "yellow",
-    "Winter": "aqua", "Night": "blue", "night": "blue", "Fishing": "aqua", "Farming": "gold", "Combat": "red"}
+KEYWORDS = json.load(open(os.path.join(HERE, "keywords.json")))  # word -> colour name; edit keywords.json, not code
 def inl(t):
     t = e(t)
     t = re.sub(r"\{(\w+):([^{}]+)\}", r'<span class="t-\1">\2</span>', t)       # explicit {color:text}
@@ -39,7 +38,8 @@ def inl(t):
 fm, body = re.match(r"---\n(.*?)\n---\n(.*)", md, re.S).groups()
 date = re.search(r"date: (.+)", fm).group(1); sha = re.search(r"based_on: (.+)", fm).group(1)
 title = re.search(r"^# (.+)", body, re.M).group(1)
-summary = re.findall(r"^(?!#)(.+)", re.search(r"## Summary\n(.*?)\n\n", body, re.S).group(1), re.M)
+sm = re.search(r"## Summary\n(.*?)\n\n", body, re.S)
+summary = re.findall(r"^(?!#)(.+)", sm.group(1), re.M) if sm else []
 assump = (re.search(r"Assumptions: (.+)", body) or [0, ""])[1]
 notes = re.findall(r"^- (.+)", re.search(r"## What I noticed\n(.*?)\n## ", body, re.S).group(1), re.M)
 ideas_md = re.search(r"## Ideas\n(.*?)\n## Recommendation", body, re.S).group(1)

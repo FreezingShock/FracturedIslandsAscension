@@ -1,0 +1,21 @@
+{
+ "Stamina": "aqua",
+ "Coins": "gold",
+ "AddXP": "green",
+ "XP": "green",
+ "Reconcile": "green",
+ "server-authoritative": "green",
+ "rate limit": "yellow",
+ "i-frame": "lpurple",
+ "i-frames": "lpurple",
+ "rubber-bands": "red",
+ "desync": "red",
+ "leaks": "red",
+ "offline": "yellow",
+ "Winter": "aqua",
+ "Night": "blue",
+ "night": "blue",
+ "Fishing": "aqua",
+ "Farming": "gold",
+ "Combat": "red"
+}
