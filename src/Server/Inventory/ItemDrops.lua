@@ -43,6 +43,7 @@ local function dropStackLimit(toolName: string): number
 end
 local LAYER_STEPS = STACK.layers -- count <= step -> that many layers; above the last -> one more
 local MERGE_TAG = "ItemDropMerge" -- an item flying into a stack (client animates it, the server destroys it on arrival)
+local PICKUP_TAG = "ItemDropPickup" -- an item flying into the player who picked it up
 local TICK = 0.2
 local BODY_SIZE = 1.2
 local SETTLE_SPEED = 1.5
@@ -98,31 +99,13 @@ local function updateLabel(rec)
 	updateLayers(rec)
 end
 
---- Visual parts of the item's Tool, re-parented into a Model centred on the Body.
-local function buildModel(toolName: string, position: Vector3)
-	local tool = ItemTools.ensure(toolName)
-	if not tool then
-		return nil
-	end
-	local clone = tool:Clone()
-	local visual = Instance.new("Model")
-	local handle = clone:FindFirstChild("Handle")
-	if not (handle and handle:IsA("BasePart")) then
-		clone:Destroy()
-		return nil
-	end
-	for _, child in ipairs(clone:GetChildren()) do
-		if child:IsA("BasePart") then
-			child.Parent = visual
-		end
-	end
-	clone:Destroy()
-	visual.PrimaryPart = handle
-
+--- Turns a Model of visual parts (PrimaryPart = the Handle) into a drop: an invisible physics Body, every visual part welded to
+--- it, and the unwelded copies + body-relative poses the stack layers are built from.
+local function assemble(visual: Model, name: string, position: Vector3)
 	-- centre the visual's bounding box on the origin of the drop (Body centre)
 	local boxCF, boxSize = visual:GetBoundingBox()
 	local model = Instance.new("Model")
-	model.Name = "Drop_" .. toolName
+	model.Name = name
 
 	local body = Instance.new("Part")
 	body.Name = "Body"
@@ -157,6 +140,37 @@ local function buildModel(toolName: string, position: Vector3)
 	return model, body, boxSize.Y / 2, template
 end
 
+--- Visual parts of the item's Tool, re-parented into a Model centred on the Body.
+local function buildModel(toolName: string, position: Vector3)
+	local tool = ItemTools.ensure(toolName)
+	if not tool then
+		return nil
+	end
+	local clone = tool:Clone()
+	local visual = Instance.new("Model")
+	local handle = clone:FindFirstChild("Handle")
+	if not (handle and handle:IsA("BasePart")) then
+		clone:Destroy()
+		return nil
+	end
+	for _, child in ipairs(clone:GetChildren()) do
+		if child:IsA("BasePart") then
+			child.Parent = visual
+		end
+	end
+	clone:Destroy()
+	visual.PrimaryPart = handle
+	return assemble(visual, "Drop_" .. toolName, position)
+end
+
+--- The drop for an arbitrary sprite Handle (mob loot: stat icons, coins), see ItemDrops.spawnExternal.
+local function buildFromHandle(handle: BasePart, name: string, position: Vector3)
+	local visual = Instance.new("Model")
+	handle.Parent = visual
+	visual.PrimaryPart = handle
+	return assemble(visual, name, position)
+end
+
 --- Minecraft-style stack look: more items on the floor show as more layered, slightly offset copies.
 local function layersFor(count: number): number
 	for i, limit in ipairs(LAYER_STEPS) do
@@ -188,7 +202,7 @@ updateLayers = function(rec)
 			(rng:NextNumber() - 0.5) * STACK.layerSpread[2],
 			(rng:NextNumber() - 0.5) * STACK.layerSpread[1]
 		)
-		local turn = CFrame.Angles(0, (rng:NextNumber() - 0.5) * 0.6, 0)
+		local turn = CFrame.Angles(0, (rng:NextNumber() - 0.5) * STACK.layerTurn, 0)
 		if layer > have and layer <= want then
 			for _, entry in ipairs(rec.template) do
 				local part = entry.part:Clone()
@@ -222,6 +236,28 @@ local function fly(model: Model, keepId: number, color: any)
 	CollectionService:RemoveTag(model, "DropTooltip")
 	CollectionService:AddTag(model, MERGE_TAG)
 	task.delay(STACK.flyTime + 0.2, function()
+		model:Destroy()
+	end)
+end
+
+--- A picked-up item does not vanish: it keeps its model and flies into the player (ItemDropRenderer animates it, the
+--- server destroys it once it has arrived), the way an item flies into a stack. The grant already happened.
+local function flyToPlayer(model: Model, player: Player)
+	model:SetAttribute("PickupBy", player.UserId) -- before the tag changes below: the client reads it when the drop's tag goes
+	for _, part in ipairs(model:GetDescendants()) do
+		if part:IsA("BasePart") then
+			part.Anchored = true
+			part.CanCollide = false
+		end
+	end
+	local label = model:FindFirstChild("CountLabel", true)
+	if label then
+		label:Destroy()
+	end
+	CollectionService:RemoveTag(model, TAG)
+	CollectionService:RemoveTag(model, "DropTooltip")
+	CollectionService:AddTag(model, PICKUP_TAG)
+	task.delay(STACK.pickup.flyTime + 0.2, function()
 		model:Destroy()
 	end)
 end
@@ -387,6 +423,108 @@ function ItemDrops.spawn(opts: any): number?
 	return id
 end
 
+--- A drop somebody else owns (mob loot: LootService): it gets the same sprite, physics, hover, layers and effects, but is never
+--- picked up, merged or expired here. The owner collects it with ItemDrops.take(id, player) or removes it with discard(id).
+---   opts: position, velocity?, count?, name, kind ("item" | "stat" | "coins"), itemId, rarity?, color (Color3), skill?,
+---         apply(label) = sets the sprite's picture (ItemTools.newSpriteHandle), spriteImage = the picture's content id (for
+---         the coloured edge, ItemSpriteData), tint?
+function ItemDrops.spawnExternal(opts: any): (number?, Model?)
+	local position = opts.position
+	if typeof(position) ~= "Vector3" or type(opts.apply) ~= "function" then
+		return nil, nil
+	end
+	local count = opts.count or 1
+	while total >= MAX_DROPS do
+		local oldest = oldestId()
+		if not oldest then
+			break
+		end
+		remove(oldest)
+	end
+	local model, body, halfHeight, template = buildFromHandle(ItemTools.newSpriteHandle(opts.apply), "Drop_" .. tostring(opts.name or "Loot"), position)
+	nextId += 1
+	local id = nextId
+	local now = os.clock()
+	local rec = {
+		id = id,
+		toolName = "",
+		itemId = opts.itemId,
+		count = count,
+		external = true,
+		ownerUntil = 0,
+		pickupAt = math.huge,
+		spawnedAt = now,
+		model = model,
+		body = body,
+		halfHeight = halfHeight,
+		template = template,
+		stillFor = 0,
+		nextTry = 0,
+	}
+	drops[id] = rec
+	falling[id] = rec
+	total += 1
+	body:SetAttribute("DropId", id)
+	model:SetAttribute("DropId", id)
+	model:SetAttribute("ItemId", opts.itemId)
+	model:SetAttribute("DropKind", opts.kind or "item")
+	model:SetAttribute("DropName", opts.name)
+	model:SetAttribute("Rarity", opts.rarity or 0)
+	if typeof(opts.color) == "Color3" then
+		model:SetAttribute("DropColor", opts.color:ToHex())
+	end
+	if opts.skill then
+		model:SetAttribute("DropSkill", opts.skill)
+	end
+	if opts.spriteImage then
+		model:SetAttribute("SpriteImage", opts.spriteImage) -- DropEdges reads this for the edge colours
+	end
+	if typeof(opts.tint) == "Color3" then
+		model:SetAttribute("SpriteTint", opts.tint:ToHex())
+	end
+	model:SetAttribute("Phase", math.random() * math.pi * 2)
+	model:SetAttribute("Settled", false)
+	updateLabel(rec)
+	model.Parent = folder
+	CollectionService:AddTag(model, TAG)
+	CollectionService:AddTag(model, "DropTooltip")
+	body:SetNetworkOwner(nil)
+	if typeof(opts.velocity) == "Vector3" then
+		body.AssemblyLinearVelocity = opts.velocity
+	end
+	return id, model
+end
+
+--- The owner of an external drop collects it: it stops being a drop here and flies into the player.
+function ItemDrops.take(id: number, player: Player): boolean
+	local rec = drops[id]
+	if not (rec and rec.external) then
+		return false
+	end
+	drops[id] = nil
+	falling[id] = nil
+	total -= 1
+	flyToPlayer(rec.model, player)
+	return true
+end
+
+--- The owner of an external drop lets it go (expired).
+function ItemDrops.discard(id: number)
+	local rec = drops[id]
+	if rec and rec.external then
+		remove(id)
+	end
+end
+
+--- Where an external drop is now (its resting centre once settled), or nil when it is gone.
+function ItemDrops.positionOf(id: number): Vector3?
+	local rec = drops[id]
+	if not rec then
+		return nil
+	end
+	return rec.base or rec.body.Position
+end
+
 -- ===================== PICKUP / DESPAWN =====================
 local overlap = OverlapParams.new()
 overlap.FilterType = Enum.RaycastFilterType.Include
@@ -394,7 +532,7 @@ overlap.FilterDescendantsInstances = { folder }
 overlap.MaxParts = 40
 
 local function tryPickup(player: Player, rec, now: number)
-	if not grant or now < rec.pickupAt or now < rec.nextTry then
+	if rec.external or not grant or now < rec.pickupAt or now < rec.nextTry then
 		return
 	end
 	if rec.ownerId == player.UserId and now < rec.ownerUntil then
@@ -408,7 +546,7 @@ local function tryPickup(player: Player, rec, now: number)
 	local ok, result = pcall(grant, player, toolName, count)
 	local added = ok and tonumber(result) or 0
 	if added >= count then
-		rec.model:Destroy()
+		flyToPlayer(rec.model, player)
 		return
 	end
 	-- did not all fit (full inventory, stack cap, error): keep the rest on the floor
@@ -429,7 +567,7 @@ end
 local function mergeSettled()
 	local list = {}
 	for _, rec in pairs(drops) do
-		if rec.base then
+		if rec.base and not rec.external then
 			table.insert(list, rec)
 		end
 	end

@@ -411,6 +411,49 @@ local function acquireRig(e: any)
 	end
 end
 
+-- Picking items up in quick succession climbs in pitch (FXConfig.sounds.pickupStreak), per player.
+local streaks: { [number]: { at: number, n: number } } = {}
+
+local function streakPitch(userId: number): number
+	local cfg = FXConfig.sounds.pickupStreak
+	local now = os.clock()
+	local s = streaks[userId]
+	if s and now - s.at <= cfg.window then
+		s.n += 1
+	else
+		s = { n = 0, at = now }
+		streaks[userId] = s
+	end
+	s.at = now
+	return cfg.pitch[1] + (cfg.pitch[2] - cfg.pitch[1]) * math.clamp(s.n / cfg.steps, 0, 1)
+end
+
+--- A picked-up item has just flown into the player: the pop (rising pitch for a quick run of pickups), a burst in the item's
+--- colour and a small light flash at the player's chest. Every rarity gets the burst (its own preset, else the library one).
+local function arrive(e: any, userId: number)
+	local who = Players:GetPlayerByUserId(userId)
+	local theirRoot = who and who.Character and who.Character:FindFirstChild("HumanoidRootPart") :: BasePart?
+	local at = theirRoot and (theirRoot.Position + Vector3.new(0, STACK.pickup.chest, 0)) or e.rest
+	playPop(at, streakPitch(userId))
+	local mine = player.Character and player.Character:FindFirstChild("HumanoidRootPart") :: BasePart?
+	if not mine or (at - mine.Position).Magnitude > LIMITS.fxRange then
+		return
+	end
+	local spec = e.presets.pickup or FXConfig.library.pickup
+	local rig = table.remove(pool) or buildRig()
+	configure(rig, { presets = {}, color = e.color }) -- nothing persistent: it only carries the burst
+	rig.part.Position = at
+	rig.part.Parent = rigsFolder
+	emitBurst(rig, spec, e.color)
+	rig.light.Color = brightColor(spec, e.color)
+	rig.light.Range = 8
+	rig.light.Brightness = 2
+	rig.light.Enabled = true
+	rig.closing = true
+	rig.closeAt = os.clock() + 1.0
+	table.insert(closing, rig)
+end
+
 local function unregister(inst: Instance)
 	local e = entries[inst]
 	if not e then
@@ -421,6 +464,17 @@ local function unregister(inst: Instance)
 		e.stackConn:Disconnect()
 	end
 	local rig = e.rig
+	local pickedBy = inst:GetAttribute("PickupBy")
+	if pickedBy then
+		-- picked up: it flies to the player first (ItemDropRenderer); the pop and the burst happen where it lands
+		if rig then
+			releaseRig(e)
+		end
+		task.delay(STACK.pickup.flyTime, function()
+			arrive(e, pickedBy)
+		end)
+		return
+	end
 	if rig and inst:GetAttribute("MergeInto") then
 		-- it did not leave, it is flying into a stack: no goodbye burst
 		releaseRig(e)

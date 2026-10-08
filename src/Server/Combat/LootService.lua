@@ -14,8 +14,10 @@
 	ItemId, Count, Rarity, DropColor, DropSkill, DropName) and DropFXController (client) draws its glow and particles from the
 	same attributes; the plain DropLabel stays hidden while they run.
 
-	A drop is an anchored glowing cube at the kill point with a name label (ReplicatedStorage.GUI.DropLabel, hand-restylable:
-	BillboardGui > Label). Only the killer can collect it for `OWNER_SECONDS`, then anyone; it despawns after `LIFETIME`.
+	A drop is a THICK SPRITE (the item / stat / coin icon with a coloured edge) built by ItemDrops.spawnExternal: it is flung a few
+	studs from the kill (Config/LootConfig), lands, hovers, bobs and spins like an item thrown on the floor, and when it is
+	collected it flies into the player (rising-pitch pop, coloured burst). Only the killer can collect it for `OWNER_SECONDS`,
+	then anyone; it despawns after `LIFETIME`.
 	Collecting is a server distance check (PICKUP_RADIUS studs): the client sends nothing. Items and armor go to
 	InventoryDataManager.AddItem (the drop stays when the inventory is full), stats to StatisticsDataManager.GrantStat.
 --]]
@@ -37,18 +39,21 @@ local NotifyService = require(ServerScriptService:WaitForChild("NotifyService"))
 local WalletService = require(ServerScriptService:WaitForChild("WalletService")) :: any
 local GainFeedService = require(ServerScriptService:WaitForChild("GainFeedService")) :: any
 local CoinsConfig = require(Modules:WaitForChild("Config"):WaitForChild("CoinsConfig")) :: any
+local LootConfig = require(Modules:WaitForChild("Config"):WaitForChild("LootConfig")) :: any
+local StatisticsConfig = require(Modules:WaitForChild("StatisticsConfig")) :: any
+local ItemIcons = require(Modules:WaitForChild("ItemIcons")) :: any
+local ItemDrops = require(ServerScriptService:WaitForChild("ItemDrops")) :: any
 
 local OWNER_SECONDS = 15
 local LIFETIME = 90
 local PICKUP_RADIUS = 5
 local SCAN_EVERY = 0.2
-local SPREAD = 3 -- studs a drop lands from the kill point
 local COIN_MERGE_RADIUS = 4 -- coin drops this close (same owner) clump into one
 
 local LootService = {}
 
-type Drop = { part: BasePart, drop: any, ownerId: number?, ownerUntil: number, expiresAt: number, fullNoticeAt: number }
-local drops: { [BasePart]: Drop } = {}
+type Drop = { id: number, drop: any, ownerId: number?, ownerUntil: number, expiresAt: number, fullNoticeAt: number }
+local drops: { [number]: Drop } = {} -- [ItemDrops id] = state
 
 local function randomCount(count: any): number
 	if type(count) == "table" then
@@ -123,63 +128,84 @@ local function roll(enemyType: string?, killer: Player): { any }
 	return out
 end
 
+--- A statistic's entry (icon, colour) from StatisticsConfig, found by skill + key.
+local function statEntry(skill: string, id: string): any?
+	for _, entry in ipairs(StatisticsConfig.STAT_CHAINS[skill] or {}) do
+		if entry.key == id then
+			return entry
+		end
+	end
+	return nil
+end
+
+--- What the sprite shows for a drop: { apply = function(label), image = content id, tint? }.
+local function spriteFor(drop: any): any
+	if drop.kind == "item" then
+		local def = Items.get(drop.id)
+		local spec = ItemIcons.resolve(def or drop.id)
+		return {
+			apply = function(label: ImageLabel)
+				ItemIcons.apply(label, def or drop.id)
+			end,
+			image = spec.image,
+			tint = spec.tint,
+		}
+	end
+	local ref = drop.kind == "coins" and LootConfig.coinsIcon or { skill = drop.skill, id = drop.id }
+	local entry = statEntry(ref.skill, ref.id)
+	local image = entry and entry.icon or ItemIcons.resolve("barrier").image
+	return {
+		apply = function(label: ImageLabel)
+			label.ResampleMode = Enum.ResamplerMode.Pixelated
+			label.Image = image
+		end,
+		image = image,
+	}
+end
+
 function LootService.spawnDrop(position: Vector3, drop: any, ownerId: number?)
-	local offset = Vector3.new((math.random() - 0.5) * 2 * SPREAD, 0, (math.random() - 0.5) * 2 * SPREAD)
+	local look = LootConfig.resolve(drop.kind, drop)
 	if drop.kind == "coins" then
 		-- coins that land close together become one bigger pile (the pop and the tag are the same drop)
-		for part, state in pairs(drops) do
-			if state.drop.kind == "coins" and state.ownerId == ownerId and (part.Position - (position + offset)).Magnitude <= COIN_MERGE_RADIUS then
+		for id, state in pairs(drops) do
+			local at = ItemDrops.positionOf(id)
+			if state.drop.kind == "coins" and state.ownerId == ownerId and at and (at - position).Magnitude <= COIN_MERGE_RADIUS then
 				state.drop.count += drop.count
-				part:SetAttribute("Count", state.drop.count)
+				ItemDrops.setCount(id, state.drop.count)
 				state.expiresAt = os.clock() + LIFETIME
-				local label = part:FindFirstChildWhichIsA("BillboardGui")
-				local text = label and label:FindFirstChild("Label") :: TextLabel?
-				if text then
-					text.Text = ("%dx %s"):format(state.drop.count, drop.name)
-				end
 				return
 			end
 		end
 	end
-	local part = Instance.new("Part")
-	part.Name = "Drop"
-	part.Size = Vector3.new(0.9, 0.9, 0.9)
-	part.Anchored = true
-	part.CanCollide = false
-	part.CanQuery = false
-	part.CanTouch = false
-	part.Material = Enum.Material.Neon
-	part.Color = drop.color
-	part.Position = position + offset
-	part:SetAttribute("DropName", drop.name)
-	-- read-only description for DropTooltipController (client builds the card from these, sends nothing back)
-	part:SetAttribute("DropKind", (drop.kind == "stat" or drop.kind == "coins") and drop.kind or "item")
-	part:SetAttribute("ItemId", drop.id)
-	part:SetAttribute("Count", drop.count)
-	part:SetAttribute("Rarity", drop.rarity or 0)
-	part:SetAttribute("DropColor", drop.color:ToHex())
-	if drop.skill then
-		part:SetAttribute("DropSkill", drop.skill)
-	end
-	CollectionService:AddTag(part, "DropTooltip")
+	-- flung a few studs in a random direction in a short arc: the horizontal speed is chosen so it lands `spread` away
+	local gravity = workspace.Gravity
+	local rise = math.sqrt(2 * gravity * look.arcHeight)
+	local flight = 2 * rise / gravity
+	local angle = math.random() * math.pi * 2
+	local distance = look.spread * (0.5 + 0.5 * math.random())
+	local velocity = Vector3.new(math.cos(angle) * distance / flight, rise, math.sin(angle) * distance / flight)
 
-	local guiFolder = ReplicatedStorage:FindFirstChild("GUI")
-	local template = guiFolder and guiFolder:FindFirstChild("DropLabel")
-	if template then
-		local label = template:Clone()
-		label.Adornee = part
-		local text = label:FindFirstChild("Label") :: TextLabel?
-		if text then
-			text.Text = (drop.count > 1 and ("%dx "):format(drop.count) or "") .. drop.name
-			text.TextColor3 = drop.color
-		end
-		label.Parent = part
+	local sprite = spriteFor(drop)
+	local id = ItemDrops.spawnExternal({
+		position = position,
+		velocity = velocity,
+		count = drop.count,
+		name = drop.name,
+		kind = (drop.kind == "stat" or drop.kind == "coins") and drop.kind or "item",
+		itemId = drop.id,
+		rarity = drop.rarity or 0,
+		color = drop.color,
+		skill = drop.skill,
+		apply = sprite.apply,
+		spriteImage = sprite.image,
+		tint = sprite.tint,
+	})
+	if not id then
+		return
 	end
-
-	part.Parent = workspace
 	local now = os.clock()
-	drops[part] = {
-		part = part,
+	drops[id] = {
+		id = id,
 		drop = drop,
 		ownerId = ownerId,
 		ownerUntil = now + OWNER_SECONDS,
@@ -257,20 +283,23 @@ RunService.Heartbeat:Connect(function(dt)
 	accumulated = 0
 	local now = os.clock()
 	local players = Players:GetPlayers()
-	for part, state in pairs(drops) do
-		if not part.Parent or now >= state.expiresAt then
-			drops[part] = nil
-			part:Destroy()
+	for id, state in pairs(drops) do
+		local at = ItemDrops.positionOf(id)
+		if not at then
+			drops[id] = nil -- ItemDrops removed it (past its drop limit)
+		elseif now >= state.expiresAt then
+			drops[id] = nil
+			ItemDrops.discard(id)
 		else
 			for _, player in ipairs(players) do
 				local character = player.Character
 				local root = character and character:FindFirstChild("HumanoidRootPart") :: BasePart?
 				local humanoid = character and character:FindFirstChildOfClass("Humanoid")
 				local allowed = not state.ownerId or player.UserId == state.ownerId or now >= state.ownerUntil
-				if allowed and root and humanoid and humanoid.Health > 0 and (root.Position - part.Position).Magnitude <= (state.drop.pickupRadius or PICKUP_RADIUS) then
+				if allowed and root and humanoid and humanoid.Health > 0 and (root.Position - at).Magnitude <= (state.drop.pickupRadius or PICKUP_RADIUS) then
 					if collect(player, state) then
-						drops[part] = nil
-						part:Destroy()
+						drops[id] = nil
+						ItemDrops.take(id, player) -- it flies into the player
 						break
 					end
 				end

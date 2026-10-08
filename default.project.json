@@ -234,6 +234,9 @@
         "ItemRegistry": {
           "$path": "src/Shared/Modules/Inventory/ItemRegistry.lua"
         },
+        "ItemSpriteData": {
+          "$path": "src/Shared/Modules/Inventory/ItemSpriteData.lua"
+        },
         "Items": {
           "$path": "src/Shared/Modules/Inventory/Items"
         },
@@ -344,6 +347,9 @@
         },
         "DeathController": {
           "$path": "src/Client/Combat/DeathController.client.lua"
+        },
+        "DropEdges": {
+          "$path": "src/Client/Inventory/DropEdges.lua"
         },
         "DropFXController": {
           "$path": "src/Client/Inventory/DropFXController.client.lua"

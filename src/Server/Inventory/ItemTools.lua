@@ -45,12 +45,18 @@ local function applyGrip(tool: Tool, grip: any)
 	tool.GripRight = grip.right or tool.GripRight
 end
 
---- Flat sprite Handle: SPRITE_PIXELS thin, the item icon on both faces (invisible part, visible SurfaceGuis).
-local function addSpriteHandle(tool: Tool, def: any)
+--- A flat sprite Handle for ANY image: SPRITE_THICKNESS thin, the picture on both faces (an invisible part with a visible
+--- SurfaceGui on its Front and its Back). `apply(label)` sets the ImageLabel's picture; ItemIcons.apply for an item def, or any
+--- Image / ImageRectOffset / ImageColor3 for a stat icon. The Back image is MIRRORED on purpose (a negative ImageRectSize; a
+--- negative Size draws nothing mirrored): a SurfaceGui reads un-mirrored from behind, so without it a spinning sprite would
+--- flip its picture at 180 degrees while its coloured edge (the silhouette of the front) keeps turning, and the two would not
+--- line up. Mirrored, the back is what the other side of a real flat sprite shows. All icon images are ICON_PIXELS square.
+--- Used by item Tools and by mob loot (LootService).
+function ItemTools.newSpriteHandle(apply: (ImageLabel) -> ()): Part
 	local size = ItemModels.SPRITE_SIZE
 	local handle = Instance.new("Part")
 	handle.Name = "Handle"
-	handle.Size = Vector3.new(size, size, size / ItemModels.SPRITE_PIXELS)
+	handle.Size = Vector3.new(size, size, ItemModels.SPRITE_THICKNESS)
 	handle.Transparency = 1
 	handle.CanCollide = false
 	handle.CanQuery = false
@@ -68,15 +74,24 @@ local function addSpriteHandle(tool: Tool, def: any)
 		img.BackgroundTransparency = 1
 		img.Size = UDim2.fromScale(1, 1)
 		img.ScaleType = Enum.ScaleType.Fit
+		apply(img)
 		if face == Enum.NormalId.Back then
-			-- a SurfaceGui reads un-mirrored from behind, so a spinning sprite would "flip" at 180 degrees;
-			-- mirror the back image so it matches what the other side of a flat sprite really looks like
-			img.Size = UDim2.fromScale(-1, 1)
-			img.Position = UDim2.fromScale(1, 0)
+			local rect = img.ImageRectSize
+			if rect.X == 0 or rect.Y == 0 then
+				rect = Vector2.new(ItemModels.ICON_PIXELS, ItemModels.ICON_PIXELS) -- a whole image, not an atlas cell
+			end
+			img.ImageRectOffset = Vector2.new(img.ImageRectOffset.X + rect.X, img.ImageRectOffset.Y)
+			img.ImageRectSize = Vector2.new(-rect.X, rect.Y)
 		end
-		ItemIcons.apply(img, def)
 		img.Parent = gui
 	end
+	return handle
+end
+
+local function addSpriteHandle(tool: Tool, def: any)
+	local handle = ItemTools.newSpriteHandle(function(img)
+		ItemIcons.apply(img, def)
+	end)
 	handle.Parent = tool
 	applyGrip(tool, ItemModels.SPRITE_GRIP)
 end

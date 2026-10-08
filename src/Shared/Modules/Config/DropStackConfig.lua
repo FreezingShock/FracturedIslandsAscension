@@ -15,6 +15,11 @@
 	                  that fades out. Bigger stacks punch harder: scale + perCount * count (max `maxScale`)
 	  layers          { count thresholds }: a stack shows one more offset copy of the item per threshold passed
 	  layerSpread     studs the extra copies are scattered over (horizontal / vertical)
+  layerTurn       radians each extra copy may be turned about the vertical (0 = all copies face the same way, like Minecraft;
+                  thick sprites show every turned edge as a separate outline)
+  pickup          a picked-up item is not deleted: it flies into the player like an item flies into a stack (the same
+                  accelerating arc, spin and shrink), then pops: flyTime seconds, flyArc studs of arc, chest studs above
+                  the player's root it flies to, shrink = fraction of its size it loses on the way
 ]]
 
 local DropStackConfig = {
@@ -26,6 +31,8 @@ local DropStackConfig = {
 	punch = { scale = 1.18, perCount = 0.0015, maxScale = 1.35, time = 0.42, spin = 9 },
 	layers = { 1, 3, 6, 12, 24, 48, 80 },
 	layerSpread = { 0.8, 0.28 },
+	layerTurn = 0,
+	pickup = { flyTime = 0.3, flyArc = 1.0, chest = 0.5, shrink = 0.7 },
 }
 
 return DropStackConfig

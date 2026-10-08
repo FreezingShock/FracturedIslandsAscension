@@ -3,7 +3,8 @@
 
 	Every item gets a Handle. Items listed in MODELS use a real model from
 	ServerStorage.ItemModels (Studio-only, not in Rojo); everything else gets a flat
-	sprite Handle (the ItemIcons image on both faces, SPRITE_PIXELS pixels thick).
+	sprite Handle (the ItemIcons image on both faces, SPRITE_THICKNESS studs thick; a dropped one also gets a coloured edge built
+	on each client from ItemSpriteData, see Client/DropEdges).
 
 	  MODELS[itemId] = {
 	      template = "BasicSword",   -- ServerStorage.ItemModels.<template> (Model with a part named Handle)
@@ -16,7 +17,9 @@
 local ItemModels = {}
 
 ItemModels.SPRITE_SIZE = 2 -- studs (width and height of a sprite item)
-ItemModels.SPRITE_PIXELS = 16 -- sprite thickness = SPRITE_SIZE / SPRITE_PIXELS
+ItemModels.ICON_PIXELS = 160 -- every item / statistic icon image is this many pixels square (needed to mirror the back of a sprite)
+ItemModels.SPRITE_THICKNESS = 0.15 -- studs: how thick a flat sprite is (a dropped one shows it as a coloured edge)
+ItemModels.SPRITE_EDGE_LAYERS = 8 -- a dropped stack shows the coloured edge on this many of its layered copies (the rest stay flat)
 
 -- The pixel swords (Blender, assets/blender/swords): the mesh origin is the grip, which sits 1.17 studs below the
 -- Handle's centre (Roblox centres a mesh on its bounding box), so the grip offset moves the hand to the handle.

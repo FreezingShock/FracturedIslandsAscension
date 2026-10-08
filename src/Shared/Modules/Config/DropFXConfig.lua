@@ -48,7 +48,10 @@ DropFXConfig.limits = {
 DropFXConfig.sounds = {
 	pop = { id = "rbxassetid://77099858882420", volume = 0.7, range = 60 },
 	drop = { pitch = { 0.95, 1.1 } },
-	pickup = { pitch = { 1.15, 1.35 } },
+	pickup = { pitch = { 1.15, 1.35 } }, -- an item expiring
+	-- picking items up in quick succession climbs in pitch: each pickup within `window` seconds of the last one by the same
+	-- player steps the pitch up (after `steps` steps it is at the top), then it falls back to `pitch[1]` when you stop
+	pickupStreak = { window = 1.2, steps = 10, pitch = { 1.0, 2.0 } },
 	stack = { pitch = { 0.85, 1.7 } },
 	learnWindow = 3, -- seconds after joining in which drops that already exist stay silent
 }
