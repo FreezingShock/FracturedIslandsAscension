@@ -77,6 +77,7 @@ local FADE = TweenInfo.new(0.25, Enum.EasingStyle.Quad)
 -- ===================== STATE =====================
 local phase = 1
 player:SetAttribute("CameraMode", PHASES[1].name) -- read by DropTooltipController (idleNearestModes)
+player:SetAttribute("FirstPersonFov", PHASES[1].fov) -- DeathController ends its respawn swing at exactly this view
 local distance = PHASES[1].distance -- smoothed values
 local shoulder = PHASES[1].shoulder
 local fov = PHASES[1].fov
@@ -122,6 +123,11 @@ end
 
 local function onCharacter(char: Model)
 	character = char
+	-- every new body starts in first person, looking where it faces, cursor locked
+	phase = 1
+	player:SetAttribute("CameraMode", PHASES[1].name)
+	distance, shoulder, fov = PHASES[1].distance, PHASES[1].shoulder, PHASES[1].fov
+	cursorFree = false
 	collectBodyParts()
 	char.DescendantAdded:Connect(function(d)
 		if d:IsA("BasePart") and not d:FindFirstAncestorOfClass("Tool") and not isArm(d) then

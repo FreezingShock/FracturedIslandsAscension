@@ -82,7 +82,8 @@ type GhostPart = { part: BasePart, cf: CFrame, size: Vector3, color: Color3, mat
 
 local KEEP = { SpecialMesh = true, Decal = true, Texture = true, BlockMesh = true, CylinderMesh = true }
 
-local function makeGhost(model: Model, maxParts: number): (Model?, { GhostPart })
+-- `originals` (reveal only): the body is already hidden locally, so the real transparencies come from this map { [Instance] = number }
+local function makeGhost(model: Model, maxParts: number, originals: { [Instance]: number }?): (Model?, { GhostPart })
 	local container = Instance.new("Model")
 	container.Name = model.Name .. "_Ghost"
 	local parts: { GhostPart } = {}
@@ -90,12 +91,22 @@ local function makeGhost(model: Model, maxParts: number): (Model?, { GhostPart }
 		if #parts >= maxParts then
 			break
 		end
-		if item:IsA("BasePart") and item.Name ~= "HumanoidRootPart" and item.Transparency < 1 then
+		local realTransparency = originals and originals[item] or (item:IsA("BasePart") and item.Transparency or 1)
+		if item:IsA("BasePart") and item.Name ~= "HumanoidRootPart" and realTransparency < 1 then
+			local sources = item:GetChildren()
 			local ok, copy = pcall(function()
 				return item:Clone()
 			end)
 			if ok and copy then
-				for _, child in ipairs(copy:GetChildren()) do
+				copy.Transparency = realTransparency
+				local copies = copy:GetChildren()
+				for index, child in ipairs(copies) do
+					local source = sources[index]
+					if originals and source and originals[source] and (child:IsA("Decal") or child:IsA("Texture")) then
+						(child :: any).Transparency = originals[source]
+					end
+				end
+				for _, child in ipairs(copies) do
 					if not KEEP[child.ClassName] then
 						child:Destroy()
 					end
@@ -122,7 +133,9 @@ end
 --- Runs the glitch for `seconds` of RENDERED time: each frame advances at most 1/20 s, so a hitch cannot eat the whole glitch.
 --- Phase 1: the body flickers between blue, purple and green, jitters and slices. Phase 2 (overlapping): every body part,
 --- one after another at random moments, starts to glow and swell until it is white-hot; then the burst.
-local function runGlitch(ghost: Model, parts: { GhostPart }, cfg: any, seconds: number, rng: Random, withHighlight: boolean, onDone: () -> ())
+--- `reverse` plays it backwards (the respawn): it starts white-hot and calm-less, cools to the real colours, and the jitter,
+--- slices and flicker die away until the body is exactly the real one; the parts also fade in over the first quarter.
+local function runGlitch(ghost: Model, parts: { GhostPart }, cfg: any, seconds: number, rng: Random, withHighlight: boolean, onDone: () -> (), reverse: boolean?)
 	local glitch = cfg.glitch
 	local palette = glitch.colors
 	local elapsed = 0
@@ -145,8 +158,14 @@ local function runGlitch(ghost: Model, parts: { GhostPart }, cfg: any, seconds: 
 	end
 	local connection: RBXScriptConnection
 	connection = RunService.RenderStepped:Connect(function(dt)
+		if not ghost.Parent then
+			connection:Disconnect() -- the body was removed under us (died again, left): nothing to finish
+			return
+		end
 		elapsed += math.min(dt, 0.05)
-		local t = math.clamp(elapsed / math.max(seconds, 0.05), 0, 1)
+		local raw = math.clamp(elapsed / math.max(seconds, 0.05), 0, 1)
+		local t = reverse and 1 - raw or raw
+		local appear = reverse and math.clamp(raw / 0.25, 0, 1) or 1
 		local intensity = t ^ 1.3
 		local tintAlpha = math.clamp((t - glitch.tintStart) / math.max(glitch.tintRamp, 0.01), 0, 1)
 		local flickerChance = math.clamp((t - glitch.flickerStart) * 1.2, 0, 1) * 0.45
@@ -180,6 +199,9 @@ local function runGlitch(ghost: Model, parts: { GhostPart }, cfg: any, seconds: 
 			else
 				part.Transparency = (flickerHidden and rng:NextNumber() < 0.6) and rng:NextNumber(0.5, 0.9) or ghostPart.transparency
 			end
+			if appear < 1 then
+				part.Transparency = 1 - (1 - part.Transparency) * appear
+			end
 		end
 		if highlight then
 			local meanGlow = glowSum / math.max(count, 1)
@@ -187,7 +209,7 @@ local function runGlitch(ghost: Model, parts: { GhostPart }, cfg: any, seconds: 
 			highlight.FillTransparency = 0.5 - 0.5 * meanGlow + rng:NextNumber(0, 0.25) * (1 - meanGlow)
 			highlight.OutlineTransparency = 0.2 * (1 - meanGlow)
 		end
-		if t >= 1 then
+		if raw >= 1 then
 			connection:Disconnect()
 			onDone()
 		end
@@ -315,6 +337,262 @@ local function playBurst(model: Model, cfg: any, reduced: boolean, rng: Random)
 	Debris:AddItem(anchor, cfg.timeline.burst + burst.lingerSeconds)
 end
 
+-- ===================== REVEAL (the death played backwards, for a respawning player) =====================
+local reveals: { [Model]: () -> () } = {} -- model -> cancel, so a second death mid-reveal can take the body back
+
+local function playSound(parent: Instance, entry: any, rolloff: number)
+	if entry and entry.id ~= "" then
+		local sound = Instance.new("Sound")
+		sound.SoundId = entry.id
+		sound.Volume = entry.volume
+		sound.PlaybackSpeed = between(entry.pitch)
+		sound.RollOffMaxDistance = rolloff
+		sound.Parent = parent
+		sound:Play()
+		Debris:AddItem(sound, 4)
+	end
+end
+
+--- Hides the whole body locally (and anything added to it while hidden). Returns { originals, restore }.
+local function hideRestorable(model: Model): ({ [Instance]: number }, () -> ())
+	local originals: { [Instance]: number } = {}
+	local flags: { [Instance]: boolean } = {}
+	local function take(item: Instance)
+		if item:IsA("BasePart") or item:IsA("Decal") or item:IsA("Texture") then
+			originals[item] = (item :: any).Transparency
+			;(item :: any).Transparency = 1
+		elseif item:IsA("ForceField") then
+			flags[item] = item.Visible
+			item.Visible = false
+		elseif item:IsA("Highlight") then
+			flags[item] = item.Enabled
+			item.Enabled = false
+		end
+	end
+	for _, item in ipairs(model:GetDescendants()) do
+		take(item)
+	end
+	local added = model.DescendantAdded:Connect(take)
+	local function restore()
+		added:Disconnect()
+		for item, value in pairs(originals) do
+			if item.Parent then
+				(item :: any).Transparency = value
+			end
+		end
+		for item, value in pairs(flags) do
+			if item.Parent then
+				if item:IsA("ForceField") then
+					item.Visible = value
+				else
+					(item :: Highlight).Enabled = value
+				end
+			end
+		end
+	end
+	return originals, restore
+end
+
+--- The reverse of the burst: triangles start small on a sphere around the body, fly inward and grow, a glow disc and a light
+--- pulse peak as they merge. Counts, colours, sizes and spin come from cfg.burst; the radius and light from cfg.respawn.
+local function playConverge(model: Model, cfg: any, reduced: boolean, rng: Random)
+	local burst, respawn = cfg.burst, cfg.respawn
+	local converge = respawn.timeline.converge
+	local boxCFrame = model:GetBoundingBox()
+	local anchor = Instance.new("Part")
+	anchor.Name = "RespawnConverge"
+	anchor.Anchored = true
+	anchor.CanCollide = false
+	anchor.CanQuery = false
+	anchor.CanTouch = false
+	anchor.Transparency = 1
+	anchor.Shape = Enum.PartType.Ball
+	anchor.Size = Vector3.one * respawn.radius * 2
+	anchor.CFrame = boxCFrame
+	anchor.Parent = fxFolder()
+
+	local textures = DeathConfig.textures
+	local texture = textures[burst.texture] or textures.triangles
+	local colors = colorSequence(burst.colors)
+	local lastAt = 0
+	for _, wave in ipairs(burst.waves) do
+		lastAt = math.max(lastAt, wave.at)
+	end
+	local flight = math.max(converge - lastAt, 0.2)
+	local lifeMin, lifeMax = flight * 0.82, flight * 0.95
+	local speed = respawn.radius / ((lifeMin + lifeMax) / 2)
+	local avgSize = (burst.size[1] + burst.size[2]) / 2
+	local env = (burst.size[2] - burst.size[1]) / 2
+	local inward = {
+		ShapeInOut = Enum.ParticleEmitterShapeInOut.Inward,
+		ShapeStyle = Enum.ParticleEmitterShapeStyle.Surface,
+		Acceleration = Vector3.zero,
+		Drag = 0,
+	}
+	local function props(extra: { [string]: any }): { [string]: any }
+		local out = {}
+		for key, value in pairs(inward) do
+			out[key] = value
+		end
+		for key, value in pairs(extra) do
+			out[key] = value
+		end
+		return out
+	end
+	local triangles = addEmitter(anchor, cfg, texture, props({
+		Color = colors,
+		Lifetime = NumberRange.new(lifeMin, lifeMax),
+		Speed = NumberRange.new(speed * 0.92, speed * 1.08),
+		Size = NumberSequence.new({
+			NumberSequenceKeypoint.new(0, avgSize * respawn.sizeStart, env * respawn.sizeStart),
+			NumberSequenceKeypoint.new(0.6, avgSize * 0.7, env * 0.7),
+			NumberSequenceKeypoint.new(1, avgSize, env),
+		}),
+		Transparency = NumberSequence.new({
+			NumberSequenceKeypoint.new(0, 1),
+			NumberSequenceKeypoint.new(0.3, 0.1),
+			NumberSequenceKeypoint.new(1, 0),
+		}),
+		Rotation = NumberRange.new(0, 360),
+		RotSpeed = NumberRange.new(-burst.rotSpeed, burst.rotSpeed),
+		FlipbookLayout = Enum.ParticleFlipbookLayout.Grid2x2,
+		FlipbookMode = Enum.ParticleFlipbookMode.Random,
+		FlipbookStartRandom = true,
+	}))
+	local slivers = addEmitter(anchor, cfg, texture, props({
+		Color = colors,
+		Lifetime = NumberRange.new(lifeMin * 0.6, lifeMin),
+		Speed = NumberRange.new(speed * 1.6, speed * 2.2),
+		Size = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0), NumberSequenceKeypoint.new(1, avgSize * 0.8, env * 0.4) }),
+		Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 1), NumberSequenceKeypoint.new(0.3, 0), NumberSequenceKeypoint.new(1, 0.2) }),
+		Orientation = Enum.ParticleOrientation.VelocityParallel,
+		Squash = NumberSequence.new(0.85),
+		FlipbookLayout = Enum.ParticleFlipbookLayout.Grid2x2,
+		FlipbookMode = Enum.ParticleFlipbookMode.Random,
+		FlipbookStartRandom = true,
+	}))
+	local glow = addEmitter(anchor, cfg, textures.glow, {
+		Color = ColorSequence.new(burst.colors[3] or burst.colors[1]),
+		Lifetime = NumberRange.new(burst.glow.life, burst.glow.life),
+		Speed = NumberRange.new(0, 0),
+		Size = NumberSequence.new({ NumberSequenceKeypoint.new(0, burst.glow.size), NumberSequenceKeypoint.new(1, burst.glow.size * 0.5) }),
+		Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 1), NumberSequenceKeypoint.new(1, burst.glow.transparency) }),
+		Acceleration = Vector3.zero,
+		Drag = 0,
+		ShapeInOut = Enum.ParticleEmitterShapeInOut.Outward,
+	})
+
+	-- the waves in reverse order: the trickle leaves first and the dense wave last, so the cloud thickens as it closes in
+	local share = reduced and cfg.caps.reducedShare or 1
+	local total = math.max(8, math.floor(burst.count * share))
+	for _, wave in ipairs(burst.waves) do
+		local amount = math.max(1, math.floor(total * wave.share))
+		local delay = lastAt - wave.at
+		if delay <= 0 then
+			triangles:Emit(amount)
+		else
+			task.delay(delay, function()
+				if triangles.Parent then
+					triangles:Emit(amount)
+				end
+			end)
+		end
+	end
+	slivers:Emit(math.max(2, math.floor(burst.slivers * share)))
+	task.delay(math.max(0, converge - burst.glow.life), function()
+		if glow.Parent then
+			glow:Emit(1)
+		end
+	end)
+
+	local lightSettings = respawn.light
+	local light = Instance.new("PointLight")
+	light.Color = lightSettings.color
+	light.Brightness = 0
+	light.Range = lightSettings.range
+	light.Parent = anchor
+	local rise = TweenService:Create(light, TweenInfo.new(converge, Enum.EasingStyle.Quad, Enum.EasingDirection.In), { Brightness = lightSettings.brightness })
+	rise.Completed:Connect(function()
+		if light.Parent then
+			TweenService:Create(light, TweenInfo.new(lightSettings.time, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Brightness = 0 }):Play()
+		end
+	end)
+	rise:Play()
+
+	playSound(anchor, respawn.sounds.converge, 110)
+	Debris:AddItem(anchor, converge + lightSettings.time + burst.lingerSeconds)
+end
+
+--- The respawn look for `model`: hidden for `delay` seconds (the camera glides to it), triangles converge on it, then it glitches in
+--- (the death glitch backwards) until it is the real body. Everything is a copy; the real body is only un-hidden at the end.
+function DeathFX.playReverse(model: Model, kind: string?, seed: number?, delay: number?)
+	if not (model and model.Parent) or reveals[model] then
+		return
+	end
+	local cfg = DeathConfig.resolve(kind or "player", nil)
+	local caps = cfg.caps
+	if liveCount >= caps.hardCap then
+		return -- too busy: the body just shows up
+	end
+	local reduced = liveCount >= caps.reduceAt
+	liveCount += 1
+	local holdSeconds = delay or 0
+	local timeline = cfg.respawn.timeline
+	task.delay(holdSeconds + timeline.converge + timeline.solidify + cfg.burst.lingerSeconds, function()
+		liveCount = math.max(0, liveCount - 1)
+	end)
+	local rng = Random.new(seed or math.random(1, 1000000))
+
+	local originals, restore = hideRestorable(model)
+	local alive = true
+	local ghost: Model? = nil
+	local function cancel()
+		if not alive then
+			return
+		end
+		alive = false
+		reveals[model] = nil
+		if ghost then
+			ghost:Destroy()
+		end
+		restore()
+	end
+	reveals[model] = cancel
+	model.AncestryChanged:Connect(function()
+		if not model:IsDescendantOf(workspace) then
+			cancel()
+		end
+	end)
+
+	task.spawn(function()
+		task.wait(holdSeconds)
+		if not alive then
+			return
+		end
+		playConverge(model, cfg, reduced, rng)
+		task.wait(timeline.converge)
+		if not alive then
+			return
+		end
+		local owner = Players:GetPlayerFromCharacter(model)
+		local waited = 0
+		while owner and not owner:HasAppearanceLoaded() and waited < 1.5 and alive do -- clothes and accessories load a moment late
+			waited += task.wait()
+		end
+		if not alive then
+			return
+		end
+		local made, parts = makeGhost(model, reduced and 24 or 40, originals)
+		if not made then
+			cancel()
+			return
+		end
+		ghost = made
+		playSound(parts[1].part, cfg.respawn.sounds.glitchIn, 90)
+		runGlitch(made, parts, cfg, timeline.solidify, rng, cfg.glitch.highlight and liveCount <= 3, cancel, true)
+	end)
+end
+
 -- ===================== PLAY =====================
 function DeathFX.live(): number
 	return liveCount
@@ -323,6 +601,10 @@ end
 function DeathFX.play(model: Model, kind: string?, deathType: string?, seed: number?)
 	if not (model and model.Parent) then
 		return
+	end
+	local cancelReveal = reveals[model]
+	if cancelReveal then
+		cancelReveal() -- died again mid-reveal: give the real body back before it is copied for the death glitch
 	end
 	local isPlayer = Players:GetPlayerFromCharacter(model) ~= nil
 	local enemyType = model:GetAttribute("EnemyType")

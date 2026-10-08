@@ -23,6 +23,8 @@
 	  New death type:   add DeathConfig.types.<name> = { ...fields to change... } and reference it with deathType
 	  Another colour:   death = { burst = { colors = { Color3..., ... } }, glitch = { tint = Color3... } }
 	  Sounds:           library.sounds.glitch.id / burst.id = "rbxassetid://..."  (silent until set)
+	  Respawn reveal:   library.respawn (timeline, radius, sounds) + library.selfRespawn (camera / screen); a player's reveal is
+	                    the death played backwards, so burst.* and glitch.* shape it too. Players.RespawnTime = respawnSeconds().
 --]]
 
 local DeathConfig = {}
@@ -102,7 +104,39 @@ DeathConfig.library = {
 	},
 
 	player = {
-		respawnSeconds = 3, -- Players.RespawnTime
+		respawnSeconds = false, -- Players.RespawnTime; false = exactly as long as the death sequence (glitch + burst), or a number
+	},
+
+	-- the reverse of the death, for a player who died: the new body waits hidden while the camera glides to it (travel), the
+	-- triangles converge on it (converge), it glitches in (solidify), then the camera swings into its head (swing). Count / colours / sizes come from `burst`,
+	-- the flicker / glow / jitter from `glitch`: editing the death edits the respawn.
+	respawn = {
+		timeline = { travel = 1.0, converge = 0.9, solidify = 1.1, swing = 0.9 }, -- swing: the camera dives into the head (first person)
+		radius = 9, -- studs: the triangles start on a sphere this big around the body and fly in
+		sizeStart = 0.35, -- fraction of the burst size the triangles have when they start (they grow to full size as they arrive)
+		light = { color = Color3.fromRGB(110, 255, 230), brightness = 5, range = 18, time = 0.7 }, -- pulse as they merge
+		sounds = { -- silent until you set an id; 3D at the body
+			converge = { id = "", volume = 1, pitch = { 0.95, 1.05 } },
+			glitchIn = { id = "", volume = 0.8, pitch = { 0.95, 1.05 } },
+		},
+	},
+
+	-- when the revealed one is YOU: the camera glides from the death view to the new body, the screen starts cool and clears
+	selfRespawn = {
+		tint = Color3.fromRGB(150, 215, 255),
+		saturation = -0.55,
+		contrast = 0.18,
+		flash = 0.35, -- brightness kick as the triangles merge, easing back to 0
+		bloom = 1.0, -- bloom pulse at the merge, fading over solidify
+		distance = 12, -- studs the camera ends up from the new body, on the side it was looking from
+		rise = 2, -- and above it
+		swingArc = 3, -- studs the swing bows out sideways on its way into the head
+		lockSeconds = 0.22, -- the robotic lock-in after the swing: a dip in the field of view, a tiny nod, a flash
+		lockFov = 9, -- degrees the view narrows at the lock
+		lockNod = 3, -- degrees the view nods
+		lockFlash = 0.12,
+		lockSound = { id = "", volume = 1 }, -- silent until set
+		failsafeSeconds = 4, -- if the server never says the reveal started, give the camera back after this long
 	},
 
 	-- when the dead one is YOU: the screen and camera go with the body (DeathController)
@@ -176,6 +210,21 @@ end
 function DeathConfig.total(kind: string?, enemyEntry: any?): number
 	local timeline = DeathConfig.resolve(kind, enemyEntry).timeline
 	return timeline.glitch + timeline.burst
+end
+
+--- Seconds a player takes to respawn (Players.RespawnTime): the player.respawnSeconds override, else the death sequence.
+function DeathConfig.respawnSeconds(kind: string?): number
+	local cfg = DeathConfig.resolve(kind or "player", nil)
+	if type(cfg.player.respawnSeconds) == "number" then
+		return cfg.player.respawnSeconds
+	end
+	return cfg.timeline.glitch + cfg.timeline.burst
+end
+
+--- Seconds the new body is held after it loads: camera travel + converge + solidify + swing + lock-in.
+function DeathConfig.revealSeconds(kind: string?): number
+	local timeline = DeathConfig.resolve(kind or "player", nil).respawn.timeline
+	return timeline.travel + timeline.converge + timeline.solidify + timeline.swing + DeathConfig.resolve(kind or "player", nil).selfRespawn.lockSeconds
 end
 
 return DeathConfig
