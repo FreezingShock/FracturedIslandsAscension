@@ -10,6 +10,9 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local ClockConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Config"):WaitForChild("ClockConfig")) :: any
 
+-- the world's clock starts NOW: startHour (6am) at the moment this server boots, so it never starts in the dark
+workspace:SetAttribute("ClockEpoch", workspace:GetServerTimeNow())
+
 local function tick()
 	local now = ClockConfig.at(workspace:GetServerTimeNow())
 	workspace:SetAttribute("Day", now.day)
