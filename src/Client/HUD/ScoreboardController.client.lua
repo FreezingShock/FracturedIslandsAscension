@@ -41,7 +41,7 @@ local function applyLayout()
 	end
 	local s = math.clamp(camera.ViewportSize.Y / LAYOUT.baseHeight, LAYOUT.minScale, LAYOUT.maxScale)
 	scale.Scale = s
-	panel.AnchorPoint = Vector2.new(1, 0)
+	panel.AnchorPoint = Vector2.new(1, LAYOUT.anchorY)
 	panel.Position = UDim2.new(1, -math.floor(LAYOUT.rightMargin * s), LAYOUT.yScale, 0)
 	panel.Size = UDim2.fromOffset(LAYOUT.width, 0)
 	linesFrame.BackgroundTransparency = LAYOUT.bodyTransparency

@@ -73,9 +73,6 @@
       "EquipmentService": {
         "$path": "src/Server/Inventory/EquipmentService.lua"
       },
-      "GainFeedService": {
-        "$path": "src/Server/Stats/GainFeedService.lua"
-      },
       "InventoryDataManager": {
         "$path": "src/Server/Data/InventoryDataManager.lua"
       },
@@ -365,9 +362,6 @@
         },
         "EnemyTelegraphController": {
           "$path": "src/Client/Combat/EnemyTelegraphController.client.lua"
-        },
-        "GainFeedController": {
-          "$path": "src/Client/HUD/GainFeedController.client.lua"
         },
         "HeldItemNameController": {
           "$path": "src/Client/HUD/HeldItemNameController.client.lua"

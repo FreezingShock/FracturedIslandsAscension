@@ -11,7 +11,7 @@
 	  WalletService.spend(player, amount)            -> true if the player had it and it was taken, false otherwise (never negative)
 
 	The client never sends an amount: it only reads. The balance is mirrored to the player attribute `Coins` (the scoreboard's
-	Purse line reads it) and the RemoteEvent `Wallet` fires (coins, delta) for the purse flash. Gains also go to GainFeedService.
+	Purse line reads it) and the RemoteEvent `Wallet` fires (coins, delta) for the purse flash. Gains also show as a pickup notification (NotifyService).
 --]]
 
 local Players = game:GetService("Players")
@@ -19,7 +19,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerScriptService = game:GetService("ServerScriptService")
 
 local SkillsDataManager = require(ServerScriptService:WaitForChild("SkillsDataManager")) :: any
-local GainFeedService = require(ServerScriptService:WaitForChild("GainFeedService")) :: any
+local NotifyService = require(ServerScriptService:WaitForChild("NotifyService")) :: any
 local CoinsConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Config"):WaitForChild("CoinsConfig")) :: any
 
 local WalletService = {}
@@ -66,7 +66,7 @@ function WalletService.add(player: Player, amount: number, source: string?): num
 	w.coins = math.min(before + amount, MAX_COINS)
 	local added = w.coins - before
 	if added > 0 then
-		GainFeedService.Push(player, "coins", "Coins", added, CoinsConfig.color)
+		NotifyService.pickup(player, "coins", "Coins", added, CoinsConfig.color)
 		publish(player, added)
 	end
 	return added

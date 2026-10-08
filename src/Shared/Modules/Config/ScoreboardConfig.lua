@@ -22,10 +22,9 @@
 
 	RECIPES
 	  New line:                 library.foo = { format = "<font color='#AAAAAA'>Foo:</font> {x}" } and add "foo" to order (or a zone bottom)
-	  New zone:                 zones.mines = { name = "Deep Mines", color = "#55FFFF", bottom = { "hint" } }  (+ the zone in ZoneConfig.ZONES)
+	  New zone:                 zones.mines = { name = "Deep Mines", color = "#55FFFF", }  (+ the zone in ZoneConfig.ZONES)
 	  Zone-only line:           zones.dummy_yard.lines.kills = { format = "..." } and put "kills" in its bottom
 	  Hide the whole board:     enabled = false
-	  Put the [J] hint back:    add "hint" at the end of order (the line still exists in the library)
 	  Move it:                  layout.yScale (fraction of the screen height) and layout.rightMargin (px at 1080p)
 	  Fainter / solid:          layout.bodyTransparency and layout.borderTransparency
 	The panel scales with the viewport (layout.baseHeight is the screen height it was designed for).
@@ -40,7 +39,8 @@ ScoreboardConfig.layout = {
 	textSize = 24, -- every line
 	spacerHeight = 6,
 	rightMargin = 16, -- px at baseHeight
-	yScale = 0.28, -- top edge of the panel as a fraction of the screen height
+	yScale = 0.5, -- where the panel sits on the screen height (0.5 = the middle of the right edge on every device)
+	anchorY = 0.5, -- which point of the panel is placed there (0.5 = its own middle, so it stays centred whatever its height)
 	baseHeight = 1080, -- the screen height the pixel sizes are designed for (UIScale = screen height / baseHeight, clamped)
 	minScale = 0.6,
 	maxScale = 1.4,
@@ -65,7 +65,6 @@ ScoreboardConfig.library = {
 	purse = { format = "<font color='#FFFFFF'>Purse:</font> <font family='{fontValue}' color='#FFAA00'>{coins}</font>", flashOnChange = true },
 	objectiveTitle = { format = "<font color='#FFFFFF'>Objective</font>", when = "objective" },
 	objective = { format = "<font family='{fontValue}' color='#FFFF55'>{objective}</font>", when = "objective" },
-	hint = { format = "<font color='#FFFF55'>[J]</font> <font color='#AAAAAA'>Recent gains</font>" },
 }
 
 -- the lines every zone shows, top to bottom; "-" is a blank spacer; "@bottom" is replaced by the zone's own lines (then a spacer)

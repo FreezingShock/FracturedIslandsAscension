@@ -12,7 +12,7 @@
 	  NotifyService.collection(player, skill, name, from, to, rewardList)  COLLECTION TIER UP card
 	  NotifyService.describeRewards(entries)                                [{ reward, ctx }] -> [{ text, color }] through CollectionRewards.describe
 
-	Called from: GainFeedService.Push (every item / stat / Coins gain), LootService (inventory full), SkillRewardService and
+	Called from: InventoryDataManager.AddItem, WalletService.add and LootService (item / stat / Coins gains), LootService (inventory full), SkillRewardService and
 	CollectionService (level / tier ups).
 --]]
 

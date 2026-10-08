@@ -37,7 +37,6 @@ local InventoryDataManager = require(ServerScriptService:WaitForChild("Inventory
 local StatisticsDataManager = require(ServerScriptService:WaitForChild("StatisticsDataManager")) :: any
 local NotifyService = require(ServerScriptService:WaitForChild("NotifyService")) :: any
 local WalletService = require(ServerScriptService:WaitForChild("WalletService")) :: any
-local GainFeedService = require(ServerScriptService:WaitForChild("GainFeedService")) :: any
 local CoinsConfig = require(Modules:WaitForChild("Config"):WaitForChild("CoinsConfig")) :: any
 local LootConfig = require(Modules:WaitForChild("Config"):WaitForChild("LootConfig")) :: any
 local StatisticsConfig = require(Modules:WaitForChild("StatisticsConfig")) :: any
@@ -256,7 +255,7 @@ local function collect(player: Player, state: Drop): boolean
 		if not StatisticsDataManager.GrantStat(player, drop.skill, drop.id, drop.count) then
 			return false
 		end
-		GainFeedService.Push(player, "stat:" .. tostring(drop.id), drop.name, drop.count, "#" .. drop.color:ToHex())
+		NotifyService.pickup(player, "stat:" .. tostring(drop.id), drop.name, drop.count, "#" .. drop.color:ToHex())
 	elseif drop.kind == "coins" then
 		if WalletService.add(player, drop.count, "Kill") <= 0 then
 			return false
