@@ -61,11 +61,22 @@ local function freeze(model: Model)
 			child:Destroy() -- the spawn bubble must not stay around a body that is about to burst
 		end
 	end
-	for _, part in ipairs(model:GetDescendants()) do
+	-- a dying body is a ghost: nothing walks into or stands on it, until the model is removed at respawn. The Humanoid
+	-- switches collision back on for its own parts, so every part is held at false (change signal) for the model's life.
+	local function ghost(part: Instance)
 		if part:IsA("BasePart") then
-			part.CanCollide = false -- a dying body is a ghost: nothing walks into or stands on it
+			part.CanCollide = false
+			part:GetPropertyChangedSignal("CanCollide"):Connect(function()
+				if part.CanCollide then
+					part.CanCollide = false
+				end
+			end)
 		end
 	end
+	for _, part in ipairs(model:GetDescendants()) do
+		ghost(part)
+	end
+	model.DescendantAdded:Connect(ghost)
 	local root = model:FindFirstChild("HumanoidRootPart") :: BasePart?
 	if root then
 		root.AssemblyLinearVelocity = Vector3.zero
