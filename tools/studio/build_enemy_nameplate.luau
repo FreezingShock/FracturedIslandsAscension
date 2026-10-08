@@ -236,12 +236,18 @@ local tags = new("CanvasGroup", {
 	AutomaticSize = Enum.AutomaticSize.Y,
 	BackgroundTransparency = 1,
 }, stack)
-new("UIPadding", { PaddingTop = UDim.new(0, 2) }, tags)
+-- room above (further from the bar) and below / at the sides so the pills' outer stroke is never clipped by the CanvasGroup
+new("UIPadding", {
+	PaddingTop = UDim.new(0, 8),
+	PaddingBottom = UDim.new(0, 4),
+	PaddingLeft = UDim.new(0, 6),
+	PaddingRight = UDim.new(0, 6),
+}, tags)
 new("UIListLayout", {
 	FillDirection = Enum.FillDirection.Horizontal,
 	HorizontalAlignment = Enum.HorizontalAlignment.Center,
 	VerticalAlignment = Enum.VerticalAlignment.Top,
-	Padding = UDim.new(0, 4),
+	Padding = UDim.new(0, 8), -- space between the pills
 	SortOrder = Enum.SortOrder.LayoutOrder,
 }, tags)
 b.Parent = gui

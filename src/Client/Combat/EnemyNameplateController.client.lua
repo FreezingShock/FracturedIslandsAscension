@@ -49,6 +49,8 @@ type Plate = {
 	ghost: Frame,
 	hpLabel: TextLabel?,
 	tagsGroup: CanvasGroup?,
+	tagsPad: UIPadding?,
+	tagsBase: number,
 	tweens: { [string]: Tween },
 	nameShown: boolean,
 	barShown: boolean,
@@ -146,12 +148,44 @@ local function setBar(plate: Plate, on: boolean, seconds: number?)
 	end
 end
 
+-- the tag row animates in as you get close: it rises and fades in while its chips pop in one by one; past the range it goes back
 local function setTags(plate: Plate, on: boolean, seconds: number?)
 	if plate.tagsShown == on or not plate.tagsGroup then
 		return
 	end
 	plate.tagsShown = on
-	play(plate, "tagsFade", plate.tagsGroup, on and CFG.intro.tagSeconds or (seconds or CFG.intro.hideSeconds), { GroupTransparency = on and 0 or 1 })
+	local intro = CFG.intro
+	local chips = {}
+	for _, entry in pairs(plate.chips) do
+		table.insert(chips, entry.chip)
+	end
+	table.sort(chips, function(a, b)
+		return a.LayoutOrder < b.LayoutOrder
+	end)
+	if on then
+		play(plate, "tagsFade", plate.tagsGroup, intro.tagSeconds, { GroupTransparency = 0 })
+		play(plate, "tagsRise", plate.tagsPad, intro.tagSeconds + 0.1, { PaddingTop = UDim.new(0, plate.tagsBase) }, Enum.EasingStyle.Back)
+		for index, chip in ipairs(chips) do
+			local scale = chip:FindFirstChildOfClass("UIScale")
+			if scale then
+				task.delay((index - 1) * intro.tagStagger, function()
+					if plate.tagsShown and scale.Parent then
+						TweenService:Create(scale, TweenInfo.new(intro.tagSeconds, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1 }):Play()
+					end
+				end)
+			end
+		end
+	else
+		local time = seconds or intro.tagHideSeconds
+		play(plate, "tagsFade", plate.tagsGroup, time, { GroupTransparency = 1 })
+		play(plate, "tagsRise", plate.tagsPad, time, { PaddingTop = UDim.new(0, plate.tagsBase + intro.tagRise) })
+		for _, chip in ipairs(chips) do
+			local scale = chip:FindFirstChildOfClass("UIScale")
+			if scale then
+				TweenService:Create(scale, TweenInfo.new(time, Enum.EasingStyle.Quad, Enum.EasingDirection.In), { Scale = intro.tagStartScale }):Play()
+			end
+		end
+	end
 end
 
 -- ===================== LEVEL =====================
@@ -283,7 +317,7 @@ local function createChip(plate: Plate, id: string, def: any, stacks: number, ex
 		scale.Scale = CFG.intro.tagStartScale
 	end
 	chip.Parent = group
-	if scale then
+	if scale and plate.tagsShown then
 		TweenService:Create(scale, TweenInfo.new(CFG.intro.tagSeconds, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1 }):Play()
 	end
 	plate.chips[id] = { chip = chip, expiry = expiry, stacks = stacks, token = 0 }
@@ -502,6 +536,8 @@ local function attach(model: Instance)
 		ghost = ghost,
 		hpLabel = find(gui, "HpLabel") :: TextLabel?,
 		tagsGroup = find(gui, "Tags") :: CanvasGroup?,
+		tagsPad = (find(gui, "Tags") and find(gui, "Tags"):FindFirstChildOfClass("UIPadding")) :: UIPadding?,
+		tagsBase = 0,
 		tweens = {},
 		nameShown = false,
 		barShown = false,
@@ -530,6 +566,10 @@ local function attach(model: Instance)
 	end
 	if plate.tagsGroup then
 		plate.tagsGroup.GroupTransparency = 1
+	end
+	if plate.tagsPad then
+		plate.tagsBase = plate.tagsPad.PaddingTop.Offset
+		plate.tagsPad.PaddingTop = UDim.new(0, plate.tagsBase + CFG.intro.tagRise)
 	end
 
 	if plate.nameLabel then

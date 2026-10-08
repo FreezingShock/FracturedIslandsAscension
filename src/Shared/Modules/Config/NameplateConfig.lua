@@ -26,7 +26,7 @@ local NameplateConfig = {}
 NameplateConfig.show = {
 	nameDistance = 40, -- studs: name + level fade in inside this
 	barDistance = 40, -- studs: the bar shows inside this, only while the enemy is below max health
-	tagDistance = 25, -- studs: the tag row fades in inside this
+	tagDistance = 18, -- studs: the tag row animates in inside this (chips pop in one by one) and out again past it
 	fullHideDelay = 1.5, -- seconds the bar stays after the enemy is back at full health, then it closes again
 	fadeSeconds = 0.25,
 	checkInterval = 0.1, -- seconds between distance checks (one shared loop for every plate)
@@ -43,6 +43,9 @@ NameplateConfig.intro = {
 	barStartScale = 0.6,
 	tagSeconds = 0.25,
 	tagStartScale = 0.4,
+	tagRise = 8, -- pixels the row slides up while it appears
+	tagStagger = 0.05, -- seconds between each chip popping in
+	tagHideSeconds = 0.15,
 	hideSeconds = 0.2,
 }
 
@@ -95,9 +98,9 @@ NameplateConfig.tagsCfg = {
 
 -- outline of each kind's pill (top -> bottom gradient: lighter on top)
 NameplateConfig.tagKinds = {
-	element = { top = "#9BFF9B", bottom = "#2BA82B" },
-	effect = { top = "#9A9AFF", bottom = "#2B2BB0" },
-	debuff = { top = "#FF9A9A", bottom = "#B02B2B" },
+	element = { top = "#9BFF9B", bottom = "#38C238" },
+	effect = { top = "#9A9AFF", bottom = "#4646E0" },
+	debuff = { top = "#FF9A9A", bottom = "#D03C3C" },
 }
 
 -- kind = element | effect | debuff. color = tile colour shown only while icon is "" (glyph = its placeholder letter).
