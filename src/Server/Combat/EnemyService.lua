@@ -65,7 +65,8 @@ local function spawnMob(marker: BasePart)
 	humanoid.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
 	humanoid.HealthDisplayType = Enum.HumanoidHealthDisplayType.AlwaysOff
 
-	model:PivotTo(marker.CFrame * CFrame.new(0, 3.1, 0)) -- an R6 root sits about 3 studs above the ground
+	model:PivotTo(marker.CFrame * CFrame.new(0, 3.1, 0)) -- roughly right; placeOnGround sets the exact height from the real floor
+	EnemyRig.placeOnGround(model, marker)
 	model:SetAttribute("EnemyType", enemyType)
 	model:SetAttribute("EnemyLevel", levelInfo.level) -- the nameplate shows it; with entry.scales it also scaled health / damage
 	model.Parent = workspace

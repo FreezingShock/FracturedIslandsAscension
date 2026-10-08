@@ -19,6 +19,7 @@ local DamageService = require(ServerScriptService:WaitForChild("DamageService"))
 local LootService = require(ServerScriptService:WaitForChild("LootService")) :: any
 local EnemyConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("EnemyConfig")) :: any
 local EnemyTags = require(ServerScriptService:WaitForChild("EnemyTags")) :: any
+local EnemyRig = require(ServerScriptService:WaitForChild("EnemyRig")) :: any
 local DeathService = require(ServerScriptService:WaitForChild("DeathService")) :: any
 
 local DUMMY = CombatConfig.dummy
@@ -66,7 +67,8 @@ local function spawnDummy(marker: BasePart)
 	humanoid.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
 	humanoid.HealthDisplayType = Enum.HumanoidHealthDisplayType.AlwaysOff
 
-	dummy:PivotTo(marker.CFrame * CFrame.new(0, 3.1, 0)) -- an R6 root sits about 3 studs above the ground
+	dummy:PivotTo(marker.CFrame * CFrame.new(0, 3.1, 0)) -- roughly right; placeOnGround sets the exact height from the real floor
+	EnemyRig.placeOnGround(dummy, marker)
 	dummy.Parent = workspace
 	CollectionService:AddTag(dummy, DamageService.TAG)
 	dummy:SetAttribute("EnemyType", "dummy") -- EnemyConfig key: its hit effects, sounds and nameplate

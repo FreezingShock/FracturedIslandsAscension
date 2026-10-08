@@ -11,8 +11,10 @@
 
 	  EnemyRig.build(cfg) -> Model?
 	  EnemyRig.attachWeapon(model, weapon)
+	  EnemyRig.placeOnGround(model, marker)   stand the model's feet exactly on the floor under a spawn marker (no pop on release)
 --]]
 
+local CollectionService = game:GetService("CollectionService")
 local Players = game:GetService("Players")
 local ServerStorage = game:GetService("ServerStorage")
 
@@ -39,6 +41,33 @@ function EnemyRig.build(cfg: any): Model?
 		end
 	end
 	return rig
+end
+
+--- Puts `model` (already near the marker) at the marker's X/Z with the lowest point of its body on the floor found by a raycast
+--- down from the marker. Call it BEFORE the weapon is attached (a sword hangs below the feet). A rig dropped by height guesses
+--- starts inside the floor or in the air, and the Humanoid snaps it to its real standing height the moment it is released.
+function EnemyRig.placeOnGround(model: Model, marker: BasePart)
+	local ignore: { Instance } = { model }
+	if marker.Parent then
+		table.insert(ignore, marker.Parent) -- the spawn markers
+	end
+	for _, tagged in ipairs(CollectionService:GetTagged("Enemy")) do
+		table.insert(ignore, tagged)
+	end
+	for _, player in ipairs(Players:GetPlayers()) do
+		if player.Character then
+			table.insert(ignore, player.Character)
+		end
+	end
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.FilterDescendantsInstances = ignore
+	params.RespectCanCollide = true
+	local hit = workspace:Raycast(marker.Position + Vector3.new(0, 4, 0), Vector3.new(0, -80, 0), params)
+	local floorY = hit and hit.Position.Y or (marker.Position.Y + marker.Size.Y / 2)
+	local boxCFrame, boxSize = model:GetBoundingBox()
+	local bottom = boxCFrame.Position.Y - boxSize.Y / 2
+	model:PivotTo(model:GetPivot() + Vector3.new(0, floorY - bottom, 0))
 end
 
 local function part(name: string, size: Vector3, color: Color3, material: Enum.Material): Part

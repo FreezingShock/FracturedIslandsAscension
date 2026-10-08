@@ -78,7 +78,7 @@ end
 -- ===================== GHOST (the glitching copy) =====================
 -- A LIGHT copy: only the visible parts, each stripped of everything but its mesh / decals. Cloning a whole avatar (layered
 -- clothing, cages, accessories, scripts) twice froze the game for seconds, so this never clones the Model.
-type GhostPart = { part: BasePart, cf: CFrame, size: Vector3, color: Color3, material: Enum.Material, transparency: number, glowAt: number }
+type GhostPart = { part: BasePart, source: BasePart?, cf: CFrame, size: Vector3, color: Color3, material: Enum.Material, transparency: number, glowAt: number }
 
 local KEEP = { SpecialMesh = true, Decal = true, Texture = true, BlockMesh = true, CylinderMesh = true }
 
@@ -118,7 +118,7 @@ local function makeGhost(model: Model, maxParts: number, originals: { [Instance]
 				copy.Massless = true
 				copy.CFrame = item.CFrame
 				copy.Parent = container
-				table.insert(parts, { part = copy, cf = item.CFrame, size = copy.Size, color = copy.Color, material = copy.Material, transparency = copy.Transparency, glowAt = 0 })
+				table.insert(parts, { part = copy, source = item, cf = item.CFrame, size = copy.Size, color = copy.Color, material = copy.Material, transparency = copy.Transparency, glowAt = 0 })
 			end
 		end
 	end
@@ -189,7 +189,9 @@ local function runGlitch(ghost: Model, parts: { GhostPart }, cfg: any, seconds: 
 			local calm = 1 - glow -- a glowing part stops glitching and just burns brighter
 			local jitter = Vector3.new(rng:NextNumber(-1, 1), rng:NextNumber(-0.5, 0.5), rng:NextNumber(-1, 1)) * glitch.jitterStuds * intensity * calm
 			local slice = sliced[index] and Vector3.new(sliced[index], 0, 0) * calm or Vector3.zero
-			part.CFrame = ghostPart.cf + jitter + slice
+			-- the reveal follows the real part, so an idle animation cannot make the last frame differ from the body that replaces it
+			local liveSource = reverse and ghostPart.source
+			part.CFrame = ((liveSource and liveSource.Parent) and liveSource.CFrame or ghostPart.cf) + jitter + slice
 			part.Size = ghostPart.size * (1 + glitch.glowSwell * glow)
 			local base = ghostPart.color:Lerp(picked[index], tintAlpha)
 			part.Color = base:Lerp(glitch.glowColor, glow)
