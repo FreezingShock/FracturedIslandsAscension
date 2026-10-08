@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>FI:A ideation 2026-10-08</title>
+<style>
+:root{--bg:#0b0b1a;--panel:#14142b;--line:#2a2a4a;--text:#e8e8f0;--gray:#aaa;--gold:#ffaa00;--green:#55ff55;--red:#ff5555;--yellow:#ffff55;--aqua:#55ffff;--purple:#ff55ff}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.55 ui-monospace,Menlo,Consolas,monospace}
+main{max-width:920px;margin:0 auto;padding:20px 16px 60px}
+h1{color:var(--gold);font-size:22px;margin:0 0 4px}h2{color:var(--aqua);font-size:16px;margin:28px 0 10px;text-transform:uppercase;letter-spacing:.08em}
+.sub{color:var(--gray);margin-bottom:16px}
+.strip{display:grid;gap:8px;grid-template-columns:repeat(auto-fit,minmax(200px,1fr))}
+.chip{background:var(--panel);border:1px solid var(--line);border-left:4px solid var(--gold);padding:8px 10px}
+.chip.top{border-left-color:var(--green)}
+.badge{display:inline-block;padding:0 7px;font-weight:700;color:#000;margin-right:6px}
+.S{background:var(--green)}.M{background:var(--yellow)}.L{background:var(--purple)}
+ul.notice{margin:0;padding-left:20px}
+details{background:var(--panel);border:1px solid var(--line);margin:10px 0;padding:10px 14px}
+summary{cursor:pointer;font-weight:700;color:var(--gold)}
+.k{color:var(--aqua)}.risk{color:var(--red)}.why{color:var(--gray)}
+pre{background:#05050f;border:1px solid var(--line);padding:12px;white-space:pre-wrap;word-break:break-word;margin:0}
+button{background:var(--gold);color:#000;border:0;padding:6px 12px;font:inherit;font-weight:700;cursor:pointer;margin-bottom:6px}
+</style></head><body><main>
+<h1>FI:A ideation 2026-10-08</h1>
+<div class="sub">based on 6c23584 &middot; Reports 2026-10-08 and 2026-10-08-2 already exist, so this is -3 and none of their 8 ideas is repeated. Vault unavailable. Keys grepped: Q/R/T/E/G/C bound, abilities use RMB/Z/X/C/V, sprint is Shift, F is unused in src.</div>
+
+<h2>At a glance</h2>
+<div class="strip">
+<div class="chip top"><span class="badge S">S</span><b>Dodge Roll</b> (top)<div class="why">Tap F to roll a short distance, spending Stamina, and enemy attacks that land during the roll miss. Timing a roll through a telegraphed slam finally feels like SkyBlock-meets-Souls combat.</div></div>
+<div class="chip"><span class="badge M">M</span><b>Fishing Holes</b><div class="why">Walk up to glowing fishing holes, cast with a click, wait for the bobber to dip and hit the prompt in time to reel in a catch. Better rods and Fishing levels pull rarer fish, kelp and treasure.</div></div>
+<div class="chip"><span class="badge M">M</span><b>Night Hunt</b><div class="why">When night falls on the island, monsters in the wild glow with a purple aura, hit harder and drop much more; the scoreboard and action bar warn you at dusk. Brave players farm at night, careful ones wait for dawn.</div></div>
+<div class="chip"><span class="badge L">L</span><b>Seasonal Farm Plots</b><div class="why">Claim a farm plot, plant seeds and watch crops grow over in-game days; each season favours different crops and winter kills the field unless you chose hardy plants. Harvest for Farming XP, crops for Coins and rare mutations.</div></div>
+</div>
+
+<h2>What I noticed</h2>
+<ul class="notice"><li><b>Day/night and seasons are cosmetic.</b> <code>ClockConfig.at()</code> returns <code>isNight</code> and <code>season</code>, but only <code>ClockService</code> and <code>ScoreboardController</code> read them; no mob, drop or skill reacts to time.</li><li><b>Fishing and Farming have XP tables, zones and collections but no action.</b> <code>ZoneConfig.SKILLS</code> and <code>StatisticsConfig</code> list them (e.g. Fishing Kelp), but nothing calls <code>AddXP</code> for them; only <code>LootService.reward</code> feeds XP (<code>entry.xp</code>).</li><li><b>Enemies now fight back, players cannot avoid.</b> <code>EnemyAI</code>/<code>EnemyAttacks</code>/<code>EnemyTelegraphController</code> (3.74.1: combo/lunge/slam, telegraphs) exist, yet the only defence is Defense stat; grep finds no dodge/i-frame code.</li><li><b>Stamina has one consumer.</b> <code>ResourceConfig</code> Stamina is spent only by sprint (<code>MovementConfig.sprint.resource</code>).</li><li><b>Saved-data pattern is ready for new fields:</b> <code>PROFILE_TEMPLATE</code> in <code>SkillsDataManager</code> (e.g. <code>_Rewards</code>) with <code>Reconcile</code> backfill.</li></ul>
+
+<h2>Ideas</h2>
+<details open><summary><span class="badge S">S</span>1. Dodge Roll (top)</summary>
+<p>Tap F to roll a short distance, spending Stamina, and enemy attacks that land during the roll miss. Timing a roll through a telegraphed slam finally feels like SkyBlock-meets-Souls combat.</p>
+<p class="why"><span class="k">Why now:</span> 3.74.1 added telegraphed enemy attacks (<code>EnemyAttacks</code>, <code>EnemyTelegraphController</code>), but the player has no active defence; Stamina is only used by sprint.</p>
+<p><span class="k">Goal / files:</span> Client sends intent on F; server validates Stamina, cooldown and state, dashes the character and grants a short i-frame window that <code>EnemyAttacks</code> honours. <code>Shared/Modules/Stats/MovementConfig.lua</code> (add <code>dodge</code>), <code>Server/Stats/MovementService.lua</code> (validate, spend, set attribute <code>Invulnerable</code> expiry), <code>Client/World/SprintController.client.lua</code> (send intent, local dash feel). If the hit check needs a one-line read of the attribute, it is in <code>Server/Combat/EnemyAttacks.lua</code> (4th file only if unavoidable).</p>
+<p><span class="k">Config:</span> <code>MovementConfig.dodge = { key = "F", staminaCost = 25, distance = 14, duration = 0.28, iframes = 0.22, cooldown = 0.9, sound = "" }</code>; library -&gt; type -&gt; override: <code>dodge.types = { light = {...}, heavy = {...} }</code> picked by equipped armor weight later, per-player override via stat <code>DodgeDistance</code>.</p>
+<p><span class="k">Out of scope:</span> Directional dodge animations, armor-weight types, perfect-dodge rewards, mobile button.</p>
+<p><span class="k">Verification:</span> Fire the dodge remote: Stamina drops by <code>staminaCost</code>; character moves about <code>distance</code> studs; attribute <code>DodgeUntil</code> is set then expires after <code>iframes</code>; a second fire inside <code>cooldown</code> or with Stamina below cost is rejected; an enemy attack resolved during <code>DodgeUntil</code> deals 0 damage and one after it deals damage.</p>
+<p><span class="k">Placeholders / key:</span> Roll animation id and whoosh sound as empty slots. Key F.</p>
+<p class="risk"><b>Risk:</b> Server-driven movement on a client-owned character rubber-bands; let the client move locally and have the server only validate and own the i-frame window.</p>
+</details>
+<details><summary><span class="badge M">M</span>2. Fishing Holes</summary>
+<p>Walk up to glowing fishing holes, cast with a click, wait for the bobber to dip and hit the prompt in time to reel in a catch. Better rods and Fishing levels pull rarer fish, kelp and treasure.</p>
+<p class="why"><span class="k">Why now:</span> Fishing is one of the six skills with zone art, a statistics chain and level rewards, and it is the only one with literally no source of XP (<code>ZoneConfig.SKILLS.Fishing</code>, <code>StatisticsConfig</code>).</p>
+<p><span class="k">Goal / files:</span> First non-combat loop: server owns the cast, bite timer and catch roll; client only shows the bobber and sends cast/reel intent. <code>Shared/Modules/Stats/FishingConfig.lua</code> (new), <code>Server/Stats/FishingService.lua</code> + <code>FishingInit.server.lua</code> (new, RemoteEvent with type-checked inputs and <code>RateLimiter</code>), <code>Client/World/FishingController.client.lua</code> (new), reuse <code>LootService.spawnDrop</code>, <code>SkillsDataManager.AddXP</code>, <code>StatisticsDataManager</code>.</p>
+<p><span class="k">Config:</span> <code>FishingConfig.holes[&lt;tag&gt;]</code> (CollectionService tag on a Part) -&gt; <code>type</code> (<code>pond</code>/<code>sea</code>/<code>lava</code>) -&gt; per-hole override: <code>{ biteSeconds = {3,8}, reelWindow = 0.8, pools = { common = {weight, entries}, treasure = {...} }, xp = { skill = "Fishing", amount = 12 } }</code>; <code>fishingSpeed</code> and a rod item field <code>power</code> scale <code>biteSeconds</code>.</p>
+<p><span class="k">Out of scope:</span> Fishing rod crafting, sea creatures as enemies, a bait system, minigame art beyond one exclamation billboard.</p>
+<p><span class="k">Verification:</span> Server-side call for a cast near a tagged hole opens a cast with a bite time inside <code>biteSeconds</code>; reel inside <code>reelWindow</code> after bite returns a catch entry from the pool and calls AddXP once; reel before bite or after the window gives nothing; casting 10x in 1s hits the rate limit; a cast from beyond <code>maxRange</code> is rejected.</p>
+<p><span class="k">Placeholders / key:</span> Splash/bite sounds, bobber model and rod cast animation as silent slots (a Part sphere stands in). No key (mouse click).</p>
+<p class="risk"><b>Risk:</b> Lots of new surface (cast state per player); an abandoned cast on death or leave must be cleaned up or it leaks a task.</p>
+</details>
+<details><summary><span class="badge M">M</span>3. Night Hunt</summary>
+<p>When night falls on the island, monsters in the wild glow with a purple aura, hit harder and drop much more; the scoreboard and action bar warn you at dusk. Brave players farm at night, careful ones wait for dawn.</p>
+<p class="why"><span class="k">Why now:</span> The clock (3.73.4) now produces <code>isNight</code>, seasons and <code>Lighting.ClockTime</code>, yet nothing reacts to it. Enemy levels/tags (<code>EnemyTags</code>) already give a way to mark a boosted mob.</p>
+<p><span class="k">Goal / files:</span> Time-of-day modifiers declared in data: a <code>Night</code> tag and stat multipliers on spawn, higher drop chance/XP on kill, and the nameplate tag shows while it applies. <code>Shared/Modules/Config/ClockConfig.lua</code> (add <code>modifiers</code>), <code>Server/Combat/EnemyService.lua</code> (apply at spawn and on phase flip via <code>ClockService</code> attribute), <code>Server/Combat/LootService.lua</code> (read multiplier in <code>roll</code>/<code>reward</code>), <code>Shared/Modules/Combat/EnemyConfig.lua</code> (per-enemy <code>timeModifiers</code> override), tag icon via <code>EnemyTags</code> + <code>tools/gen_tag_icons.py</code>.</p>
+<p><span class="k">Config:</span> <code>ClockConfig.modifiers.night = { hp = 1.25, damage = 1.3, dropChance = 1.5, xp = 1.4, tag = "Moonlit" }</code> (library) -&gt; <code>ClockConfig.modifiers.seasons.Winter = {...}</code> (type) -&gt; <code>EnemyConfig.types.&lt;id&gt;.timeModifiers = { night = false }</code> (override to opt out).</p>
+<p><span class="k">Out of scope:</span> Special night-only mobs, weather, blood moon events, per-zone overrides.</p>
+<p><span class="k">Verification:</span> Set <code>workspace</code> ClockEpoch so isNight is true; a freshly spawned eligible mob has attribute <code>Tag_Moonlit</code> and Humanoid.MaxHealth = base*hp; killing it calls AddXP with amount*xp; a mob whose config sets <code>night = false</code> gets no tag; flipping to day removes the tag and restores MaxHealth ratio.</p>
+<p><span class="k">Placeholders / key:</span> Aura colour only; tag icon from gen_tag_icons; no sound.</p>
+<p class="risk"><b>Risk:</b> Changing MaxHealth on live mobs mid-fight can desync the nameplate bar and leash heal; apply at spawn and only re-scale outside combat.</p>
+</details>
+<details><summary><span class="badge L">L</span>4. Seasonal Farm Plots</summary>
+<p>Claim a farm plot, plant seeds and watch crops grow over in-game days; each season favours different crops and winter kills the field unless you chose hardy plants. Harvest for Farming XP, crops for Coins and rare mutations.</p>
+<p class="why"><span class="k">Why now:</span> Farming is a core skill with zones and collections but no loop, and the 3.73.4 calendar (8-day months, four seasons) was built for exactly this and is unused by gameplay.</p>
+<p><span class="k">Goal / files:</span> Persistent plots: plant, grow by in-game days from <code>ClockConfig</code>, harvest. Growth is computed from saved plant day numbers (no timers), so it progresses offline. <code>Shared/Modules/Stats/CropsConfig.lua</code> (new), <code>Server/Stats/FarmService.lua</code> + <code>FarmInit.server.lua</code> (new), <code>Server/Data/SkillsDataManager.lua</code> (<code>PROFILE_TEMPLATE._Farm = { plots = {} }</code>, Reconcile backfills), <code>Client/World/FarmController.client.lua</code> (new, prompts + stage visuals), <code>ClockConfig</code> read-only.</p>
+<p><span class="k">Config:</span> <code>CropsConfig.crops.&lt;id&gt; = { growDays = 4, stages = 4, seasons = { Spring = 1.0, Summer = 1.2, Autumn = 0.8, Winter = 0 }, yield = {...}, xp = {skill="Farming", amount=8}, seed = "item id" }</code> (library) -&gt; <code>types</code> (<code>grain</code>/<code>root</code>/<code>flower</code>) -&gt; per-crop override; <code>mutations = { { chance = 0.02, id = ..., yieldMult = 3 } }</code>; plots tagged <code>FarmPlot</code> in Studio with attribute <code>size</code>.</p>
+<p><span class="k">Out of scope:</span> Sprinklers, minions, fertilizer items, selling UI (Island Merchant is separate), mobile controls.</p>
+<p><span class="k">Verification:</span> Plant on an owned plot: profile <code>_Farm.plots[id]</code> stores crop and the clock day index; advance ClockConfig time by <code>growDays</code> and the stage reads <code>stages</code>; harvest before ripe returns nothing and keeps the crop; harvest when ripe adds yield items and calls AddXP once; in Winter growth rate is 0 and an unprotected crop is removed; reconnecting preserves state; a missing <code>_Farm</code> field is backfilled by Reconcile.</p>
+<p><span class="k">Placeholders / key:</span> Plot/crop models, plant and harvest sounds as placeholder Parts and silent slots; no key (ProximityPrompt).</p>
+<p class="risk"><b>Risk:</b> Saved plot data plus a world calendar that resets per server (<code>ClockEpoch</code>): growth must be tied to a persisted real-time or server-independent day count, not server boot time, or crops regrow wrongly on a new server.</p>
+</details>
+
+<h2>Recommendation</h2>
+<p>Build Dodge Roll first: it is the cheapest idea, makes the brand-new enemy attacks fun immediately, and needs no saved data. Second is Night Hunt (uses the unused clock cheaply), third Fishing Holes, and Seasonal Farm Plots last because the ClockEpoch persistence problem should be decided before it is built.</p>
+
+<h2>Paste-ready prompt</h2>
+<button onclick="navigator.clipboard.writeText(document.getElementById('p').textContent);this.textContent='Copied'">Copy</button>
+<pre id="p">/fia-feature Dodge Roll (S)
+Goal: pressing F makes the player roll a short distance, spend Stamina and become immune to enemy hits for a short window. Server-authoritative: the client sends only intent (a RemoteEvent with no trusted values), the server checks Stamina, cooldown, character state and rate limit, spends the cost and writes the i-frame expiry.
+Files: src/Shared/Modules/Stats/MovementConfig.lua (add dodge block), src/Server/Stats/MovementService.lua (validate, spend Stamina through the existing resource path, set attribute DodgeUntil = server time + iframes), src/Client/World/SprintController.client.lua (listen for dodge.key, send intent, apply the local dash with a short BodyVelocity/LinearVelocity). If needed, one read of DodgeUntil inside src/Server/Combat/EnemyAttacks.lua where hits are resolved. Grep first that F is unbound.
+Config shape (library -&gt; type -&gt; override): MovementConfig.dodge = { key = &quot;F&quot;, staminaCost = 25, distance = 14, duration = 0.28, iframes = 0.22, cooldown = 0.9, sound = &quot;&quot;, animation = &quot;&quot; }; dodge.types = { light = {...}, heavy = {...} } for later armor weights; per-player override via a DodgeDistance stat. No numbers or ids hardcoded in behaviour code.
+Out of scope: directional roll animations, armor-weight types, perfect-dodge rewards, mobile button, saved data.
+Verification (text assertions): firing the dodge remote lowers Stamina by staminaCost; the character moves about distance studs; attribute DodgeUntil is set and passes after iframes; a second fire inside cooldown or with Stamina below cost is rejected; an enemy attack resolved during DodgeUntil deals 0 damage and one after it deals normal damage; spamming the remote hits the rate limit.
+Placeholders: roll animation id and whoosh sound as empty slots.</pre>
+</main></body></html>

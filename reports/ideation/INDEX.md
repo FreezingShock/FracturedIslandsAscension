@@ -11,3 +11,7 @@ One line per idea ever proposed. Status: proposed | built | rejected | parked. E
 | 2026-10-08b-2 | Bestiary | M | 2026-10-08 | proposed |
 | 2026-10-08b-3 | Potions & Food | M | 2026-10-08 | proposed |
 | 2026-10-08b-4 | Boss: The Rustblade Warden | L | 2026-10-08 | proposed |
+| 2026-10-08-3-1 | Dodge Roll | S | 2026-10-08 | proposed |
+| 2026-10-08-3-2 | Fishing Holes | M | 2026-10-08 | proposed |
+| 2026-10-08-3-3 | Night Hunt | M | 2026-10-08 | proposed |
+| 2026-10-08-3-4 | Seasonal Farm Plots | L | 2026-10-08 | proposed |
