@@ -61,6 +61,11 @@ local function freeze(model: Model)
 			child:Destroy() -- the spawn bubble must not stay around a body that is about to burst
 		end
 	end
+	for _, part in ipairs(model:GetDescendants()) do
+		if part:IsA("BasePart") then
+			part.CanCollide = false -- a dying body is a ghost: nothing walks into or stands on it
+		end
+	end
 	local root = model:FindFirstChild("HumanoidRootPart") :: BasePart?
 	if root then
 		root.AssemblyLinearVelocity = Vector3.zero
