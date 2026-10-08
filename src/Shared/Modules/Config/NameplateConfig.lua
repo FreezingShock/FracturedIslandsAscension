@@ -25,8 +25,9 @@ local NameplateConfig = {}
 -- ===================== VISIBILITY =====================
 NameplateConfig.show = {
 	nameDistance = 40, -- studs: name + level fade in inside this
-	barDistance = 25, -- studs: the bar is shown inside this, or inside nameDistance once the enemy is damaged
-	tagDistance = 25, -- studs: the tag row follows the bar
+	barDistance = 40, -- studs: the bar shows inside this, only while the enemy is below max health
+	tagDistance = 25, -- studs: the tag row fades in inside this
+	fullHideDelay = 1.5, -- seconds the bar stays after the enemy is back at full health, then it closes again
 	fadeSeconds = 0.25,
 	checkInterval = 0.1, -- seconds between distance checks (one shared loop for every plate)
 	hysteresis = 2, -- studs of slack before a shown part hides again (no flicker at the edge)
@@ -37,8 +38,9 @@ NameplateConfig.show = {
 NameplateConfig.intro = {
 	nameRise = 8, -- pixels the name + badge slide up while fading in
 	nameSeconds = 0.35,
-	barSeconds = 0.4, -- the bar scales from barStartScale to 1
-	barStartScale = 0.55,
+	barSeconds = 0.45, -- the bar opens between the name and the tags (its slot grows from 0) and scales from barStartScale to 1
+	barCloseSeconds = 0.3,
+	barStartScale = 0.6,
 	tagSeconds = 0.25,
 	tagStartScale = 0.4,
 	hideSeconds = 0.2,
@@ -53,7 +55,21 @@ NameplateConfig.hp = {
 	deathFadeSeconds = 0.3,
 	-- HP number: 1,234 -> "1234", 36,500 -> "36.5K", 1,250,000 -> "1.2M"
 	units = { { 1e9, "B" }, { 1e6, "M" }, { 1e3, "K" } },
-	showMax = false, -- true = "15.3K/36.5K"
+	showMax = true, -- "15.3K/36.5K" (false = only the current value)
+}
+
+-- ===================== DEATH =====================
+-- name + level: a white punch, then they drop, tilt and shrink away; the bar closes and the tags pop out one by one
+NameplateConfig.death = {
+	punchScale = 1.28,
+	punchSeconds = 0.09,
+	flashColor = "#FFFFFF",
+	dropPixels = 24, -- how far the name falls
+	tiltDegrees = 9, -- random left / right
+	endScale = 0.55,
+	fallSeconds = 0.5,
+	barCloseSeconds = 0.25,
+	tagStagger = 0.05, -- seconds between each tag popping out
 }
 
 -- ===================== LEVEL BADGE =====================
@@ -77,7 +93,14 @@ NameplateConfig.tagsCfg = {
 	timerStep = 0.25, -- seconds between timer text refreshes
 }
 
--- kind = element | effect | debuff. color = chip border / placeholder tile. glyph = placeholder letter (until icon is set)
+-- outline of each kind's pill (top -> bottom gradient: lighter on top)
+NameplateConfig.tagKinds = {
+	element = { top = "#9BFF9B", bottom = "#2BA82B" },
+	effect = { top = "#9A9AFF", bottom = "#2B2BB0" },
+	debuff = { top = "#FF9A9A", bottom = "#B02B2B" },
+}
+
+-- kind = element | effect | debuff. color = placeholder tile. glyph = placeholder letter (until icon is set)
 NameplateConfig.tags = {
 	-- elements (permanent, from EnemyConfig.enemies.<key>.tags)
 	fire = { kind = "element", name = "Fire", color = "#FF8A2A", glyph = "F", icon = "" },

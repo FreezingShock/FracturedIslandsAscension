@@ -35,7 +35,10 @@ type Plate = {
 	humanoid: Humanoid,
 	head: BasePart,
 	title: CanvasGroup,
-	titleBase: UDim2,
+	titlePad: UIPadding?,
+	titleScale: UIScale?,
+	barHeight: number,
+	fullAt: number?,
 	nameLabel: TextLabel?,
 	levelLabel: TextLabel?,
 	badgeStroke: UIStroke?,
@@ -115,15 +118,14 @@ local function setName(plate: Plate, on: boolean, seconds: number?)
 	end
 	plate.nameShown = on
 	local intro = CFG.intro
-	local rise = UDim2.fromOffset(0, intro.nameRise)
-	local base = plate.titleBase
+	local rise = UDim.new(0, intro.nameRise)
 	if on then
 		play(plate, "titleFade", plate.title, intro.nameSeconds, { GroupTransparency = 0 })
-		play(plate, "titlePos", plate.title, intro.nameSeconds, { Position = base }, Enum.EasingStyle.Back)
+		play(plate, "titlePos", plate.titlePad, intro.nameSeconds, { PaddingTop = UDim.new(0, 0) }, Enum.EasingStyle.Back)
 	else
 		local time = seconds or intro.hideSeconds
 		play(plate, "titleFade", plate.title, time, { GroupTransparency = 1 })
-		play(plate, "titlePos", plate.title, time, { Position = base + rise })
+		play(plate, "titlePos", plate.titlePad, time, { PaddingTop = rise })
 	end
 end
 
@@ -133,12 +135,13 @@ local function setBar(plate: Plate, on: boolean, seconds: number?)
 	end
 	plate.barShown = on
 	local intro = CFG.intro
+	-- the slot between the name and the tags is 0 high while hidden: opening it pushes the two apart
 	if on then
-		play(plate, "barFade", plate.barGroup, intro.barSeconds, { GroupTransparency = 0 })
+		play(plate, "barSlot", plate.barGroup, intro.barSeconds, { Size = UDim2.new(1, 0, 0, plate.barHeight), GroupTransparency = 0 })
 		play(plate, "barScale", plate.barScale, intro.barSeconds, { Scale = 1 }, Enum.EasingStyle.Back)
 	else
-		local time = seconds or intro.hideSeconds
-		play(plate, "barFade", plate.barGroup, time, { GroupTransparency = 1 })
+		local time = seconds or intro.barCloseSeconds
+		play(plate, "barSlot", plate.barGroup, time, { Size = UDim2.new(1, 0, 0, 0), GroupTransparency = 1 }, Enum.EasingStyle.Quint, Enum.EasingDirection.InOut)
 		play(plate, "barScale", plate.barScale, time, { Scale = intro.barStartScale })
 	end
 end
@@ -196,6 +199,11 @@ local function groupFor(plate: Plate, kind: string): Frame?
 	end
 	local group = groupTemplate:Clone()
 	group.Name = "Group_" .. kind
+	local kindColors = CFG.tagKinds[kind]
+	local strokeGradient = group:FindFirstChild("StrokeGradient", true) :: UIGradient?
+	if kindColors and strokeGradient then
+		strokeGradient.Color = ColorSequence.new(Color3.fromHex(kindColors.top), Color3.fromHex(kindColors.bottom))
+	end
 	group.LayoutOrder = CFG.tagsCfg.kindOrder[kind] or 9
 	group.Parent = row
 	plate.groups[kind] = group
@@ -351,15 +359,59 @@ local function setFraction(plate: Plate)
 	return math.clamp(plate.humanoid.Health / math.max(plate.humanoid.MaxHealth, 1), 0, 1)
 end
 
+local function playDeath(plate: Plate)
+	if plate.dead then
+		return
+	end
+	plate.dead = true
+	counting[plate] = nil
+	local d = CFG.death
+	-- bar closes, tags pop out one by one
+	setBar(plate, false, d.barCloseSeconds)
+	if plate.tagsGroup then
+		local delay = 0
+		for _, entry in pairs(plate.chips) do
+			local scale = entry.chip:FindFirstChildOfClass("UIScale")
+			if scale then
+				task.delay(delay, function()
+					if scale.Parent then
+						TweenService:Create(scale, TweenInfo.new(0.2, Enum.EasingStyle.Back, Enum.EasingDirection.In), { Scale = 0 }):Play()
+					end
+				end)
+				delay += d.tagStagger
+			end
+		end
+		play(plate, "tagsFade", plate.tagsGroup, 0.25 + delay, { GroupTransparency = 1 })
+	end
+	-- name + level: a white punch, then fall, tilt and shrink away
+	plate.nameShown = false
+	local title, scale, pad = plate.title, plate.titleScale, plate.titlePad
+	local label = plate.nameLabel
+	local originalColor = label and label.TextColor3
+	if label then
+		label.TextColor3 = Color3.fromHex(d.flashColor)
+	end
+	title.GroupTransparency = 0
+	play(plate, "deathPunch", scale, d.punchSeconds, { Scale = d.punchScale }, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+	task.delay(d.punchSeconds, function()
+		if not title.Parent then
+			return
+		end
+		if label and originalColor then
+			TweenService:Create(label, TweenInfo.new(d.fallSeconds * 0.6, Enum.EasingStyle.Quad), { TextColor3 = originalColor }):Play()
+		end
+		local tilt = (math.random() < 0.5 and -1 or 1) * d.tiltDegrees
+		play(plate, "deathPunch", scale, d.fallSeconds, { Scale = d.endScale }, Enum.EasingStyle.Quint, Enum.EasingDirection.In)
+		play(plate, "titleFade", title, d.fallSeconds, { GroupTransparency = 1 }, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+		play(plate, "titlePos", pad, d.fallSeconds, { PaddingTop = UDim.new(0, d.dropPixels) }, Enum.EasingStyle.Quint, Enum.EasingDirection.In)
+		play(plate, "titleTilt", title, d.fallSeconds, { Rotation = tilt }, Enum.EasingStyle.Quint, Enum.EasingDirection.In)
+	end)
+end
+
 local function onHealth(plate: Plate)
 	local humanoid = plate.humanoid
 	if humanoid.Health <= 0 then
-		plate.dead = true
-		counting[plate] = nil
-		local seconds = CFG.hp.deathFadeSeconds
-		setName(plate, false, seconds)
-		setBar(plate, false, seconds)
-		setTags(plate, false, seconds)
+		playDeath(plate)
 		return
 	end
 	local fraction = setFraction(plate)
@@ -437,13 +489,15 @@ local function attach(model: Instance)
 		humanoid = humanoid,
 		head = head,
 		title = title,
-		titleBase = title.Position,
+		titlePad = title:FindFirstChildOfClass("UIPadding"),
+		titleScale = title:FindFirstChildOfClass("UIScale"),
+		barHeight = barGroup.Size.Y.Offset,
 		nameLabel = find(gui, "NameLabel") :: TextLabel?,
 		levelLabel = find(gui, "LevelLabel") :: TextLabel?,
 		badgeStroke = find(gui, "BadgeStroke") :: UIStroke?,
 		badgeGradient = find(gui, "BadgeGradient") :: UIGradient?,
 		barGroup = barGroup,
-		barScale = barGroup:FindFirstChildOfClass("UIScale"),
+		barScale = (find(gui, "BarRoot") and find(gui, "BarRoot"):FindFirstChildOfClass("UIScale")) :: UIScale?,
 		fill = fill,
 		ghost = ghost,
 		hpLabel = find(gui, "HpLabel") :: TextLabel?,
@@ -466,8 +520,11 @@ local function attach(model: Instance)
 
 	-- start hidden: the loop fades the parts in when the player gets close
 	title.GroupTransparency = 1
-	title.Position = plate.titleBase + UDim2.fromOffset(0, CFG.intro.nameRise)
+	if plate.titlePad then
+		plate.titlePad.PaddingTop = UDim.new(0, CFG.intro.nameRise)
+	end
 	barGroup.GroupTransparency = 1
+	barGroup.Size = UDim2.new(1, 0, 0, 0)
 	if plate.barScale then
 		plate.barScale.Scale = CFG.intro.barStartScale
 	end
@@ -553,7 +610,14 @@ RunService.Heartbeat:Connect(function(dt)
 			local tagRange = show.tagDistance + (plate.tagsShown and hysteresis or 0)
 			local damaged = plate.humanoid.Health < plate.humanoid.MaxHealth - 0.5
 			setName(plate, distance <= nameRange)
-			setBar(plate, distance <= barRange or (damaged and distance <= nameRange))
+			if damaged then
+				plate.fullAt = nil
+			elseif not plate.fullAt then
+				plate.fullAt = os.clock()
+			end
+			-- the bar only exists while the enemy is hurt (and a moment after it is whole again)
+			local keep = damaged or (plate.barShown and plate.fullAt ~= nil and os.clock() - plate.fullAt < show.fullHideDelay)
+			setBar(plate, keep and distance <= barRange)
 			setTags(plate, plate.chipCount > 0 and distance <= tagRange)
 			if doTimers and plate.chipCount > 0 then
 				updateTimers(plate, serverNow)
