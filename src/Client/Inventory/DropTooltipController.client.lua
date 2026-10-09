@@ -112,6 +112,7 @@ local LINE_HEIGHT = measureLineHeight()
 local function describe(e: any)
 	local inst = e.inst
 	local colorHex = inst:GetAttribute("DropColor")
+	local tintHex = inst:GetAttribute("SpriteTint")
 	e.info = TooltipItems.fromDrop({
 		kind = inst:GetAttribute("DropKind") or "item",
 		itemId = inst:GetAttribute("ItemId"),
@@ -120,6 +121,8 @@ local function describe(e: any)
 		rarity = inst:GetAttribute("Rarity") or 0,
 		color = colorHex and ("#" .. colorHex) or nil,
 		skill = inst:GetAttribute("DropSkill"),
+		image = inst:GetAttribute("SpriteImage"), -- the sprite's own picture (stat / coin drops have no ItemIcons entry)
+		imageColor = tintHex and Color3.fromHex(tintHex) or nil,
 	})
 	e.cfg = Config.resolve(inst:GetAttribute("Rarity") or 0, inst:GetAttribute("ItemId"))
 end

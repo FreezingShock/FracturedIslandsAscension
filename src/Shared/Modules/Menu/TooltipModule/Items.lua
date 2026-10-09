@@ -8,7 +8,9 @@
 	  Items.fromTool(toolInfo)  -> config for TooltipModule.show()
 	  Items.fromDrop(info)      -> the SUMMARY of a dropped item for DropTooltipController (title, titleColor, stack, icon,
 	                               tags incl. a rarity tag even for Common, description); same mapping as fromTool, trimmed.
-	                               info = { kind = "item" | "stat", itemId, name, count, rarity, color (hex), skill }
+	                               info = { kind = "item" | "stat" | "coins", itemId, name, count, rarity, color (hex), skill,
+                                        image (the drop's sprite picture: stat / coin icons), imageColor }
+                               Every drop gets an icon: the item's ItemIcons picture, or the sprite's image.
 
 	toolInfo is the table the server sends per inventory slot:
 	  { name, displayName, count, rarity, description }
@@ -158,6 +160,17 @@ function Items.fromTool(toolInfo: any)
 end
 
 --- Summary of a dropped item (see header). Reuses fromTool so a new item field shows up on drops with no extra code.
+--- The icon of a drop. Every drop shows the picture its sprite shows: a stat / coin drop uses `info.image` (the sprite's
+--- flat picture, DropTooltipController reads it from the drop), an item uses its ItemIcons spec (the same one the sprite uses).
+local function dropIcon(info: any, color: string, def: any?)
+	local icon = def and tooltipIcon(def, color) or nil
+	if not (icon and icon.image) and type(info.image) == "string" and info.image ~= "" then
+		icon = { image = info.image, imageColor = info.imageColor or Color3.new(1, 1, 1), color = color }
+	end
+	return icon or { color = color }
+end
+
+--- Summary of a dropped item (see header). Reuses fromTool so a new item field shows up on drops with no extra code.
 function Items.fromDrop(info: any)
 	local count = tonumber(info.count) or 1
 	if info.kind == "stat" then
@@ -166,7 +179,7 @@ function Items.fromDrop(info: any)
 		if info.skill then
 			table.insert(tags, { text = info.skill, color = Style.SKILL_COLORS[info.skill] or "#FFFFFF" })
 		end
-		return { title = info.name, titleColor = color, stack = count > 1 and count or nil, icon = { color = color }, tags = tags }
+		return { title = info.name, titleColor = color, stack = count > 1 and count or nil, icon = dropIcon(info, color), tags = tags }
 	end
 
 	if info.kind == "coins" then
@@ -175,7 +188,7 @@ function Items.fromDrop(info: any)
 			title = info.name,
 			titleColor = color,
 			stack = count > 1 and count or nil,
-			icon = { color = color },
+			icon = dropIcon(info, color),
 			tags = { { text = "CURRENCY", color = "#FFFFFF" }, { text = "PURSE", color = color } },
 		}
 	end
@@ -200,7 +213,7 @@ function Items.fromDrop(info: any)
 		title = full.title,
 		titleColor = full.titleColor,
 		stack = full.stack,
-		icon = full.icon,
+		icon = dropIcon(info, mainColor, def),
 		tags = tags,
 		description = full.description,
 		rarity = rarity,
