@@ -108,8 +108,10 @@ DeathConfig.library = {
 		-- reveal starts (Roblox cannot play a sound backwards: upload the audio reversed, e.g. Audacity > Effect > Reverse, and put its id in
 		-- reverseId; until then the reveal is silent). fit = change the playback speed (between minSpeed and maxSpeed) so the sound lasts
 		-- exactly as long as the animation; if it is still longer, it fades out over `fade` seconds when the animation ends.
+		-- reverseLead = seconds the reversed sound starts BEFORE the triangles converge (it still ends with the glitch-in, so it is stretched);
+		-- it can only start as early as the reveal's hold (a player's camera glide; mobs start at once, so they get no lead).
 		-- To silence it for one kind: kinds.enemy = { sounds = { sao = { id = "", reverseId = "" } } }.
-		sao = { id = "rbxassetid://128025726296262", reverseId = "rbxassetid://134268534307752", volume = 1, rolloff = 110, fit = true, minSpeed = 0.75, maxSpeed = 1.5, fade = 0.4 },
+		sao = { id = "rbxassetid://128025726296262", reverseId = "rbxassetid://134268534307752", reverseLead = 0.5, volume = 1, rolloff = 110, fit = true, minSpeed = 0.75, maxSpeed = 1.5, fade = 0.4 },
 	},
 
 	player = {

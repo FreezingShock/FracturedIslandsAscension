@@ -645,15 +645,23 @@ function DeathFX.playReverse(model: Model, kind: string?, seed: number?, delay: 
 		end
 	end)
 
+	-- the reversed death sound starts a little BEFORE the triangles converge (sao.reverseLead, within the hold) and still ends with the glitch-in
+	local sao = cfg.sounds.sao
+	if not lod and type(sao) == "table" then
+		local lead = math.clamp(sao.reverseLead or 0, 0, holdSeconds)
+		task.delay(holdSeconds - lead, function()
+			if alive then
+				playTimed(sao, model:GetPivot().Position, lead + timeline.converge + timeline.solidify, true)
+			end
+		end)
+	end
+
 	task.spawn(function()
 		task.wait(holdSeconds)
 		if not alive then
 			return
 		end
 		playConverge(model, cfg, reduced, rng, lod)
-		if not lod then
-			playTimed(cfg.sounds.sao, model:GetPivot().Position, timeline.converge + timeline.solidify, true) -- the reversed death sound, fitted to the reveal
-		end
 		task.wait(timeline.converge)
 		if not alive then
 			return
