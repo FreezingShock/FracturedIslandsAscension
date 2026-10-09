@@ -48,7 +48,8 @@
       "mcp__plugin_obsidian-second-brain_vault__obsidian_vault_health",
       "mcp__plugin_obsidian-second-brain_vault__obsidian_list_skills",
       "mcp__plugin_obsidian-second-brain_vault__obsidian_get_skill",
-      "Bash(git checkout main)"
+      "Bash(git checkout main)",
+      "mcp__fia-vault"
     ],
     "deny": [
       "Bash(git push --force*)",

@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "fia-vault": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@bitbonsai/mcpvault@0.16.0",
+        "${FIA_VAULT_PATH:-/home/user/fracturedislandsvault}"
+      ]
+    }
+  }
+}

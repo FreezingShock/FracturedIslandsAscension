@@ -57,8 +57,16 @@ Naming: `*.client.lua` = LocalScript, `*.server.lua` = Script, plain `.lua` = Mo
 - `ChangeSkill` RemoteEvent admin check is a hardcoded `ADMIN_IDS` list in `SkillsDataManager`.
 - `SkillsPageModule` yields on `workspace:WaitForChild("UISounds")` at require time.
 
-## Vault memory workflow (Obsidian second brain)
-The `obsidian-second-brain` MCP (`mcp__plugin_obsidian-second-brain_vault__*`) is this project's long-term memory and log. Vault paths are relative to `FracturedVault`; use the real `✦`/`✷` characters, never copy-pasted ones.
+## Game memory vault (FracturedIslandsVault)
+Game memory is the separate repo `FreezingShock/FracturedIslandsVault`, read through the `fia-vault` MCP (`mcpvault`, pinned in `.mcp.json`). It holds system cards, gotchas, decisions and the session log. It never holds personal notes.
+- **Setup:** the server reads `$FIA_VAULT_PATH`, defaulting to `/home/user/fracturedislandsvault` (the cloud clone). On a Mac, clone the repo and set `FIA_VAULT_PATH` to that folder. The server doesn't start if the folder is missing.
+- **Start of work:** read `Index.md` and `North Star.md` in the vault. Open only the cards the task needs (`read_note`, `search_notes`), not the code.
+- **Cards describe code.** Each card lists `code_paths` and `verified_commit`. If you change a listed file, update its card in the same change. If the card and the code disagree, trust the code and fix the card.
+- **End of work:** append a dated entry to `sessions/YYYY-MM.md` (oldest first, newest at the bottom), and add a gotcha or decision note when there is a durable lesson.
+- The vault repo is separate from this one. Commit vault changes in the vault repo, not here.
+
+## Vault memory workflow (Obsidian second brain, superseded)
+Kept until `FracturedIslandsVault` is verified in a cloud session and on desktop; then delete this section. The `obsidian-second-brain` MCP (`mcp__plugin_obsidian-second-brain_vault__*`) is this project's long-term memory and log. Vault paths are relative to `FracturedVault`; use the real `✦`/`✷` characters, never copy-pasted ones.
 - **Session start:** the SessionStart pack already shows the newest session entry; read `8 - Claude/agents/game-dev.md` (current focus) only if needed and the **Codebase & Systems Registry** section of `8 - Claude/projects/fractured-islands.md`. Design intent lives in `8 - Claude/projects/fractured-islands-master-hub.md`.
 - **During work:** if the vault and the code disagree, trust the code for what exists and add the disagreement to the Registry's "Open conflicts" list. Do not rewrite design text or anything in `2 - Creations/` without Nate's explicit go-ahead.
 - **Session end:** update only the Registry rows that changed (`obsidian_replace_text`), append a dated entry to the current month's log `8 - Claude/agents/game-dev-log-YYYY-MM.md` (`obsidian_update_note` with `append`, no heading, never read the note first; oldest first, newest at the bottom; a new month = a new note with the same header), and put durable lessons/blockers in `8 - Claude/memory/projects/fractured-islands.md`. Extend existing notes; do not create new vault documentation files.
