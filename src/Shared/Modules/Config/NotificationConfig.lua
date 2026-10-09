@@ -43,7 +43,9 @@ local NotificationConfig = {}
 NotificationConfig.fonts = {
 	value = "rbxassetid://12187371840", -- Silkscreen (values, stats, items, attributes, titles, counts)
 	numeralFace = "Merriweather", -- roman numerals (Enum.Font name for rich text <font face>)
-	valueScale = 0.8, -- Silkscreen is wide: values inside a line are drawn at this fraction of the label's text size
+	nameFace = "Merriweather", -- item / label names on pickup cards ("+1" stays Silkscreen); drawn bold
+	nameBold = true,
+	valueScale = 1.0, -- Silkscreen is wide: values inside a line are drawn at this fraction of the label's text size
 }
 
 NotificationConfig.library = {
@@ -62,8 +64,8 @@ NotificationConfig.library = {
 		slideOut = { time = 0.3, style = "Quint", direction = "In" },
 		restack = { time = 0.25, style = "Quint", direction = "Out" }, -- the gap closing when a card leaves
 		pop = { scale = 1.06, time = 0.2 }, -- the card pops when a pickup merges into it
-		bodyTransparency = 0.45, -- the black body
-		borderTransparency = 0.35, -- the 4px outer border
+		bodyTransparency = 0.3, -- the black body (more solid than before so the text reads on any background)
+		borderTransparency = 0.2, -- the 4px outer border
 		timerBar = true,
 		-- THEME: every card is coloured from the thing it shows (its `color`): the 4px border is a dark shade of it, the body a very dark
 		-- tint, the 2px stroke a light shade, the text gets a soft top-to-bottom gradient and the timer bar a shine. *Mix = how far toward
@@ -120,7 +122,7 @@ NotificationConfig.kinds = {
 			show = { id = "rbxassetid://82373959251026", volume = 0.6, pitch = 1.15 },
 		},
 	},
-	-- PICKUP: "+3 Rotten Flesh  x8"; amount and label are Silkscreen values
+	-- PICKUP: "+3 Rotten Flesh  x8"; the amount ("+3") is a Silkscreen value, the name is Merriweather Bold (fonts.nameFace)
 	pickup = {
 		template = "CardPickup",
 		priority = 1,
@@ -137,6 +139,8 @@ NotificationConfig.kinds = {
 		priority = 2,
 		color = "#FFFF55",
 		subColor = "#AAAAAA",
+		countColor = "#FFAA00",
+		countFormat = "x{count}", -- the same notice repeated (payload.key, e.g. "inventory_full") stacks into ONE card: "Your inventory is full!  x4"
 	},
 }
 

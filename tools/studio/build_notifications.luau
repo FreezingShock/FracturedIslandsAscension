@@ -10,6 +10,7 @@
 --       CardPickup      > Body > Row (Icon (Gem, Image), Label, Count), Timer (Fill)
 --       CardSystem      > Body > Row (Icon (Gem, Image), Text (Title... Text, Sub)), Timer (Fill)
 --       RewardLine      (TextLabel, RichText)   cloned into CardLevelUp / CardCollection Lines
+-- (3.82.0 look: bigger cards / icons / text; the live template was resized in place, this builder holds the same numbers)
 -- Colours, texts and sizes of the live cards come from Modules/Config/NotificationConfig; this only holds the look and the layout.
 -- Run on the Edit datamodel with the Studio MCP (stop Play first). Skips when FIANotifications exists unless FORCE = true.
 local FORCE = false
@@ -170,20 +171,20 @@ label(templates, "RewardLine", "", "#FFFFFF", 20, {})
 
 -- ===================== PICKUP =====================
 do
-	local outer, body = card(templates, "CardPickup", 340, 12, 8)
+	local outer, body = card(templates, "CardPickup", 380, 12, 8)
 	local r = row(body, "Row", 10, 1)
-	icon(r, 36).LayoutOrder = 1
-	label(r, "Label", "", "#FFFFFF", 22, { Size = UDim2.new(0, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.XY, TextWrapped = false, TextYAlignment = Enum.TextYAlignment.Center, LayoutOrder = 2 })
-	label(r, "Count", "", "#FFAA00", 18, { FontFace = FONT, Size = UDim2.new(0, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.XY, TextWrapped = false, TextYAlignment = Enum.TextYAlignment.Center, Visible = false, LayoutOrder = 3 })
+	icon(r, 44).LayoutOrder = 1
+	label(r, "Label", "", "#FFFFFF", 26, { Size = UDim2.new(0, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.XY, TextWrapped = false, TextYAlignment = Enum.TextYAlignment.Center, LayoutOrder = 2 })
+	label(r, "Count", "", "#FFAA00", 20, { FontFace = FONT, Size = UDim2.new(0, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.XY, TextWrapped = false, TextYAlignment = Enum.TextYAlignment.Center, Visible = false, LayoutOrder = 3 })
 	timer(body, 3).LayoutOrder = 2
 end
 
 -- ===================== SYSTEM =====================
 do
-	local outer, body = card(templates, "CardSystem", 400, 12, 9)
+	local outer, body = card(templates, "CardSystem", 440, 12, 9)
 	local r = row(body, "Row", 10, 1)
-	icon(r, 34).LayoutOrder = 1
-	local col = new("Frame", { Name = "Text", BackgroundTransparency = 1, Size = UDim2.new(1, -44, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, LayoutOrder = 2 }, r)
+	icon(r, 44).LayoutOrder = 1
+	local col = new("Frame", { Name = "Text", BackgroundTransparency = 1, Size = UDim2.new(1, -54, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, LayoutOrder = 2 }, r)
 	list(col, Enum.FillDirection.Vertical, 1)
 	label(col, "Main", "", "#FFFF55", 22, { LayoutOrder = 1 })
 	label(col, "Sub", "", "#AAAAAA", 16, { LayoutOrder = 2 })

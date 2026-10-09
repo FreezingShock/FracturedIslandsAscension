@@ -263,9 +263,9 @@ local function collect(player: Player, state: Drop): boolean
 	else
 		local added = InventoryDataManager.AddItem(player, drop.toolName, drop.count)
 		if added <= 0 then
-			if os.clock() - state.fullNoticeAt > 3 then
+			if os.clock() - state.fullNoticeAt > 1 then
 				state.fullNoticeAt = os.clock()
-				NotifyService.system(player, "Your inventory is full!", "#FF5555", "Drop or stash items to pick up more.")
+				NotifyService.system(player, "Your inventory is full!", "#FF5555", "Drop or stash items to pick up more.", "inventory_full") -- repeats stack into one card
 			end
 			return false
 		end

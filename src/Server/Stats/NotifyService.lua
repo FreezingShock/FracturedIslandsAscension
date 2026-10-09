@@ -7,7 +7,7 @@
 	(server -> client) carries a list of payloads; sends are batched per frame-ish (FLUSH seconds) so a burst is one message.
 
 	  NotifyService.pickup(player, key, label, amount, colorHex?, icon?)   "+3 Rotten Flesh"; same key while showing merges (x2, x3 ...)
-	  NotifyService.system(player, text, colorHex?, sub?)                  "Your inventory is full!"
+	  NotifyService.system(player, text, colorHex?, sub?, key?)             "Your inventory is full!"; the same key while showing stacks (x2, x3 ...)
 	  NotifyService.levelUp(player, skill, from, to, rewardList)           SKILL LEVEL UP card
 	  NotifyService.collection(player, skill, name, from, to, rewardList)  COLLECTION TIER UP card
 	  NotifyService.describeRewards(entries)                                [{ reward, ctx }] -> [{ text, color }] through CollectionRewards.describe
@@ -61,11 +61,11 @@ function NotifyService.pickup(player: Player, key: string, label: string, amount
 	queue(player, { kind = "pickup", key = key, label = label, amount = amount, color = isHex(color) and color or nil, icon = icon })
 end
 
-function NotifyService.system(player: Player, text: string, color: string?, sub: string?)
+function NotifyService.system(player: Player, text: string, color: string?, sub: string?, key: string?)
 	if type(text) ~= "string" then
 		return
 	end
-	queue(player, { kind = "system", text = text, color = isHex(color) and color or nil, sub = type(sub) == "string" and sub or nil })
+	queue(player, { kind = "system", text = text, color = isHex(color) and color or nil, sub = type(sub) == "string" and sub or nil, key = type(key) == "string" and key or nil })
 end
 
 --- [{ reward, ctx }] -> [{ text, color }]: one plain line per reward, from the same describe() the reward pages use.

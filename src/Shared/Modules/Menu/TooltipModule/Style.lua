@@ -25,6 +25,8 @@ Style.DYNAMIC_TEXT_SIZE = 20
 -- rerun the builder with FORCE). Titles, stats, bars, level bar, pills and the footer are Silkscreen; the description body is Noto Sans (bold).
 Style.SIZE = { title = 24, tag = 16, description = 22, stat = 20, progress = 20, level = 20, dynamic = 20, footer = 18, click = 18, details = 16 }
 Style.FONT_BODY_WEIGHT = Enum.FontWeight.Bold
+Style.FONT_TITLE = "rbxasset://fonts/families/Merriweather.json" -- tooltip titles (Merriweather, bold)
+Style.FONT_TITLE_WEIGHT = Enum.FontWeight.Bold
 
 -- Minecraft color codes (&a, &7 ... also accepted as §a) -> hex.
 Style.MC_CODES = {

@@ -2,6 +2,7 @@
 -- Restyles the shared tooltip design StarterGui.TooltipMenu.Template (TooltipModule clones it at runtime, so EVERY tooltip in the game
 -- follows): Silkscreen for titles, tags, stats, bars, the level bar, click pills and the footer; the description body stays Noto Sans but
 -- bold and bigger; wider layout. Sizes = ReplicatedStorage.Modules.TooltipModule.Style.SIZE (change there AND rerun with FORCE = true).
+-- The TITLE is Merriweather Bold (Style.FONT_TITLE); everything else is as described above.
 -- Run through the Studio MCP (execute_luau, Edit datamodel, Play stopped). Keeps every instance name. Idempotent: skips when the Template
 -- already carries the attribute FontsApplied == VERSION unless FORCE = true.
 local FORCE = false
@@ -30,7 +31,7 @@ local function label(inst, font, size)
 end
 
 -- title area
-label(template.TitleFrame.TitleLabel, PIXEL, SIZE.title)
+label(template.TitleFrame.TitleLabel, Font.new(Style.FONT_TITLE, Style.FONT_TITLE_WEIGHT, Enum.FontStyle.Normal), SIZE.title)
 label(template.TitleFrame:FindFirstChild("StackLabel"), PIXEL, 20)
 for _, tag in ipairs(template.TitleFrame.ItemTags:GetChildren()) do
 	label(tag:FindFirstChild("TagLabel"), PIXEL, SIZE.tag)

@@ -89,6 +89,15 @@ local function value(text: string, color: string, base: number): string
 	)
 end
 
+--- An item / label name in Merriweather (bold), at the label's own size.
+local function nameText(text: string, color: string): string
+	local body = escape(text)
+	if Config.fonts.nameBold then
+		body = "<b>" .. body .. "</b>"
+	end
+	return string.format("<font face=\"%s\" color=\"%s\">%s</font>", Config.fonts.nameFace, color, body)
+end
+
 --- Roman numeral in Merriweather.
 local function numeral(n: number, color: string): string
 	return string.format("<font face=\"%s\" color=\"%s\">%s</font>", Config.fonts.numeralFace, color, SkillsConfig.roman(n))
@@ -399,7 +408,7 @@ local function fillPickup(entry: Entry)
 			return value(cfg.amountPrefix .. number(entry.amount), color, label.TextSize)
 		end)
 		:gsub("{label}", function()
-			return value(payload.label, cfg.theme.labelTint and color or cfg.labelColor, label.TextSize)
+			return nameText(payload.label, cfg.theme.labelTint and color or cfg.labelColor)
 		end)
 	label.Text = text
 	if entry.count > 1 then
@@ -418,7 +427,11 @@ local function fillSystem(entry: Entry)
 	local color = payload.color or cfg.color
 	local main = body.Row.Text.Main :: TextLabel
 	local sub = body.Row.Text.Sub :: TextLabel
-	main.Text = escape(payload.text)
+	local text = escape(payload.text)
+	if entry.count > 1 then -- the same notice again: one card with a counter
+		text ..= string.format("  <font color=\"%s\">%s</font>", cfg.countColor, (cfg.countFormat:gsub("{count}", tostring(entry.count))))
+	end
+	main.Text = text
 	main.TextColor3 = hex(color)
 	if payload.sub and payload.sub ~= "" then
 		sub.Text = escape(payload.sub)
@@ -620,10 +633,14 @@ end
 
 local function merge(payload: any): boolean
 	for _, entry in ipairs(active) do
-		if entry.kind == "pickup" and entry.key == payload.key and not entry.leaving and not entry.dead then
+		if (entry.kind == payload.kind) and entry.key == payload.key and not entry.leaving and not entry.dead then
 			entry.count += 1
-			entry.amount += payload.amount
-			fillPickup(entry)
+			if entry.kind == "pickup" then
+				entry.amount += payload.amount
+				fillPickup(entry)
+			else
+				fillSystem(entry)
+			end
 			applyTheme(entry.card, entry.color, entry.cfg.theme)
 			startTimer(entry)
 			local popScale = entry.card:FindFirstChild("Pop") :: UIScale?
@@ -636,9 +653,9 @@ local function merge(payload: any): boolean
 		end
 	end
 	for _, queued in ipairs(waiting) do
-		if queued.kind == "pickup" and queued.key == payload.key then
+		if queued.kind == payload.kind and queued.key == payload.key then
 			queued.count = (queued.count or 1) + 1
-			queued.amount += payload.amount
+			queued.amount = (queued.amount or 0) + (payload.amount or 0)
 			return true
 		end
 	end
@@ -656,6 +673,8 @@ local function onPayload(payload: any)
 		if merge(payload) then
 			return
 		end
+	elseif payload.kind == "system" and type(payload.key) == "string" and merge(payload) then
+		return -- a repeated notice stacks into the card that is already showing / waiting
 	end
 	insertWaiting(payload)
 	pump()
