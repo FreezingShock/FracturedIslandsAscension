@@ -100,6 +100,16 @@ CombatConfig.damage = {
 CombatConfig.crash = {
 	step = "last",
 	animation = "sword_crash",
+	sounds = { "sword_crash", "sword_crash2", "sword_crash3", "sword_crash4" }, -- CombatConfig.sounds keys; one picked at random (equal chance) per crash hit
+	-- the landing look (CombatFX.crashImpact), at the ground under the hit: two shockwave rings, a dust cloud and a spark spray
+	fx = {
+		rings = {
+			{ color = Color3.fromRGB(255, 244, 215), from = 2, to = 15, time = 0.42, thickness = 0.25 },
+			{ color = Color3.fromRGB(255, 185, 90), from = 4, to = 24, time = 0.6, thickness = 0.12 },
+		},
+		dust = { texture = "rbxasset://textures/particles/smoke_main.dds", color = Color3.fromRGB(225, 210, 185), count = 22, life = { 0.6, 1.1 }, speed = { 6, 16 }, spread = 85, size = { 2.4, 5.5 }, transparency = 0.4, accel = Vector3.new(0, -8, 0), drag = 3 },
+		sparks = { texture = "rbxasset://textures/particles/sparkles_main.dds", color = Color3.fromRGB(255, 232, 160), count = 30, life = { 0.25, 0.6 }, speed = { 28, 62 }, spread = 70, size = { 0.9, 0 }, accel = Vector3.new(0, -70, 0), light = 1 },
+	},
 	queueSeconds = 1.5,
 	damageMult = 1.25,
 	aoeRadius = 8,
@@ -187,6 +197,12 @@ CombatConfig.sounds = {
 	sword_crit2 = { id = "rbxassetid://82383170249566", volume = 0.9, pitch = { 0.97, 1.03 }, minDistance = 14, maxDistance = 100 },
 	sword_crit3 = { id = "rbxassetid://127769468592171", volume = 0.9, pitch = { 0.97, 1.03 }, minDistance = 14, maxDistance = 100 },
 	sword_crit4 = { id = "rbxassetid://90751268932745", volume = 1.0, pitch = { 0.97, 1.03 }, minDistance = 16, maxDistance = 110 },
+	-- the Crash hit (a click in the air that lands): replaces the step's sound, crit or not. One is picked at random per hit
+	-- from CombatConfig.crash.sounds
+	sword_crash = { id = "rbxassetid://119510799018421", volume = 1.0, pitch = { 0.95, 1.05 }, minDistance = 16, maxDistance = 110 },
+	sword_crash2 = { id = "rbxassetid://133601296259995", volume = 1.0, pitch = { 0.95, 1.05 }, minDistance = 16, maxDistance = 110 },
+	sword_crash3 = { id = "rbxassetid://81940494770825", volume = 1.0, pitch = { 0.95, 1.05 }, minDistance = 16, maxDistance = 110 },
+	sword_crash4 = { id = "rbxassetid://134113758425541", volume = 1.0, pitch = { 0.95, 1.05 }, minDistance = 16, maxDistance = 110 },
 	sword_equip = { id = "rbxasset://sounds/unsheath.wav", volume = 0.45, pitch = { 0.95, 1.05 } },
 	sword_impact = { id = "", volume = 0.7, pitch = { 0.9, 1.1 } }, -- reserved for the damage system
 }
@@ -328,10 +344,13 @@ local function soundEntry(key: string?): any?
 	return nil
 end
 
-function CombatConfig.stepSound(weaponType: string?, stepIndex: number, weaponId: string?, crit: boolean?): any?
+function CombatConfig.stepSound(weaponType: string?, stepIndex: number, weaponId: string?, crit: boolean?, crash: boolean?): any?
 	local override = weaponId and CombatConfig.overrides[weaponId]
 	local key
-	if crit then
+	if crash then
+		local pool = CombatConfig.crash.sounds
+		key = pool[math.random(#pool)]
+	elseif crit then
 		key = override and override.stepCritSounds and override.stepCritSounds[stepIndex]
 		if not key then
 			local cfg = CombatConfig.get(weaponType)

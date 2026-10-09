@@ -20,6 +20,7 @@
 
 local ContentProvider = game:GetService("ContentProvider")
 local Debris = game:GetService("Debris")
+local TweenService = game:GetService("TweenService")
 
 local CombatConfig = require(script.Parent:WaitForChild("CombatConfig")) :: any
 
@@ -178,10 +179,10 @@ function CombatFX.swing(character: Model, weaponType: string, stepIndex: number,
 	end
 end
 
---- The swing's attack sound (steps[i].sound, or critSound on a crit), 3D at the point the blow landed. Played only for
---- a swing that hit something, from the WeaponHit broadcast, never on a miss.
-function CombatFX.hitSound(position: Vector3, weaponType: string, stepIndex: number, weaponId: string?, isCrit: boolean)
-	CombatFX.playAt(position, (CombatConfig.stepSound(weaponType, stepIndex, weaponId, isCrit)))
+--- The swing's attack sound (steps[i].sound, or critSound on a crit, or the crash sound on a Crash), 3D at the point the
+--- blow landed. Played only for a swing that hit something, from the WeaponHit broadcast, never on a miss.
+function CombatFX.hitSound(position: Vector3, weaponType: string, stepIndex: number, weaponId: string?, isCrit: boolean, isCrash: boolean?)
+	CombatFX.playAt(position, (CombatConfig.stepSound(weaponType, stepIndex, weaponId, isCrit, isCrash)))
 end
 
 function CombatFX.equip(character: Model, weaponType: string, weaponId: string?)
@@ -207,6 +208,65 @@ end
 
 function CombatFX.impact(position: Vector3, weaponType: string, weaponId: string?)
 	CombatFX.playAt(position, CombatConfig.slotSound(weaponType, "impact", weaponId))
+end
+
+--- One flat ring on the ground that grows and fades out (a shockwave).
+local function shockwave(position: Vector3, spec: any)
+	local ring = Instance.new("Part")
+	ring.Shape = Enum.PartType.Cylinder
+	ring.Anchored, ring.CanCollide, ring.CanQuery, ring.CanTouch, ring.CastShadow = true, false, false, false, false
+	ring.Material = Enum.Material.Neon
+	ring.Color = spec.color
+	ring.Size = Vector3.new(spec.thickness, spec.from, spec.from) -- the cylinder's axis is its X: lay it flat
+	ring.CFrame = CFrame.new(position + Vector3.new(0, 0.15, 0)) * CFrame.Angles(0, 0, math.pi / 2)
+	ring.Parent = workspace
+	TweenService:Create(ring, TweenInfo.new(spec.time, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {
+		Size = Vector3.new(spec.thickness * 0.2, spec.to, spec.to),
+		Transparency = 1,
+	}):Play()
+	Debris:AddItem(ring, spec.time + 0.1)
+end
+
+--- A one-shot particle burst from an attachment (count particles at once, then nothing).
+local function burst(parent: Instance, spec: any)
+	local emitter = Instance.new("ParticleEmitter")
+	emitter.Texture = spec.texture
+	emitter.Color = ColorSequence.new(spec.color)
+	emitter.Lifetime = NumberRange.new(spec.life[1], spec.life[2])
+	emitter.Speed = NumberRange.new(spec.speed[1], spec.speed[2])
+	emitter.SpreadAngle = Vector2.new(spec.spread, spec.spread)
+	emitter.Acceleration = spec.accel
+	emitter.Drag = spec.drag or 0
+	emitter.Size = NumberSequence.new(spec.size[1], spec.size[2])
+	emitter.Transparency = NumberSequence.new(spec.transparency or 0, 1)
+	emitter.LightEmission = spec.light or 0
+	emitter.Rate = 0
+	emitter.Parent = parent
+	emitter:Emit(spec.count)
+end
+
+--- The Crash landing: a shockwave on the ground under the hit, a dust cloud and a spark spray. `point` is where the blow
+--- landed; the ground is found below it, ignoring the struck target and the local character.
+function CombatFX.crashImpact(point: Vector3, exclude: { Instance })
+	local cfg = CombatConfig.crash.fx
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.FilterDescendantsInstances = exclude
+	local hit = workspace:Raycast(point + Vector3.new(0, 4, 0), Vector3.new(0, -40, 0), params)
+	local ground = hit and hit.Position or point
+
+	for _, ringSpec in ipairs(cfg.rings) do
+		shockwave(ground, ringSpec)
+	end
+	local holder = Instance.new("Part")
+	holder.Anchored, holder.CanCollide, holder.CanQuery, holder.CanTouch, holder.Transparency, holder.Size = true, false, false, false, 1, Vector3.one
+	holder.Position = ground + Vector3.new(0, 0.3, 0)
+	holder.Parent = workspace
+	local attachment = Instance.new("Attachment")
+	attachment.Parent = holder
+	burst(attachment, cfg.dust)
+	burst(attachment, cfg.sparks)
+	Debris:AddItem(holder, 2)
 end
 
 function CombatFX.stop(character: Model)

@@ -175,7 +175,19 @@ WeaponHit.OnClientEvent:Connect(function(data)
 	CombatFX.impact(data.position, data.weaponType, data.weaponId)
 	-- the swing's attack sound: only when it hit, once per swing (the nearest target), crit variant on a crit
 	if type(data.step) == "number" and data.first == true and type(data.weaponType) == "string" then
-		CombatFX.hitSound(typeof(data.point) == "Vector3" and data.point or data.position, data.weaponType, data.step, data.weaponId, data.isCrit == true)
+		local point = typeof(data.point) == "Vector3" and data.point or data.position
+		CombatFX.hitSound(point, data.weaponType, data.step, data.weaponId, data.isCrit == true, data.crash == true)
+		if data.crash == true and typeof(point) == "Vector3" then
+			local exclude = {}
+			if typeof(data.target) == "Instance" then
+				table.insert(exclude, data.target)
+			end
+			local character = game:GetService("Players").LocalPlayer.Character
+			if character then
+				table.insert(exclude, character)
+			end
+			CombatFX.crashImpact(point, exclude)
+		end
 	end
 	EnemyFX.hit(data)
 end)
