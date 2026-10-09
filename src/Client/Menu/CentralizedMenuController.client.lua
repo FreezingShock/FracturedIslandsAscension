@@ -973,9 +973,9 @@ local NEXUS_BLANK_GROUPS = {
 	{ layoutOrder = 1, count = 4 },
 	{ layoutOrder = 3, count = 5 },
 	{ layoutOrder = 11, count = 4 },
-	{ layoutOrder = 15, count = 12 }, -- (the retired hotbar-toggle button has no cell any more) the blanks up to the bottom row
-	{ layoutOrder = 17, count = 2 }, -- bottom row: 2 blanks, then WarpMap, Close, Settings, BoosterOil
-	{ layoutOrder = 22, count = 3 },
+	{ layoutOrder = 15, count = 11 }, -- (the retired hotbar-toggle button has no cell any more) the blanks up to the bottom row
+	{ layoutOrder = 17, count = 3 }, -- bottom row: 3 blanks, then WarpMap, Close, Settings, BoosterOil
+	{ layoutOrder = 22, count = 2 }, -- ...then 2 blanks
 }
 
 local NEXUS_ITEM_ORDERS = {
