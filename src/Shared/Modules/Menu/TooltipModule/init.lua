@@ -480,7 +480,23 @@ local function renderTitle(cfg)
 		titleLabel.Visible = hasTitle
 		if hasTitle then
 			titleLabel.Text = tostring(cfg.title)
-			titleLabel.TextColor3 = Style.color3(cfg.titleColor or Style.DEFAULT_TITLE_COLOR)
+			local titleSpec = cfg.titleColor or Style.DEFAULT_TITLE_COLOR
+			titleLabel.TextColor3 = Style.color3(titleSpec)
+			-- the title's text stroke: a darker shade of the same colour (the rarity colour on drops)
+			local titleStroke = titleLabel:FindFirstChildOfClass("UIStroke")
+			if titleStroke then
+				-- palette colours use their Minecraft dark pair; greys / whites (Nexus tiers 1-10) get the same grey at 20%
+				-- brightness, because Style.dark turns #AAAAAA into a lighter stroke
+				-- the colour the title text actually shows: the first colour tag in a rich title (main menu buttons), else titleColor
+				local shown = type(cfg.title) == "string" and cfg.title:match("color=[\"']?(#%x%x%x%x%x%x)") or titleSpec
+				local titleRgb = Style.color3(shown)
+				local _, sat = titleRgb:ToHSV()
+				if sat < 0.12 then
+					titleStroke.Color = Color3.new(titleRgb.R * 0.2, titleRgb.G * 0.2, titleRgb.B * 0.2)
+				else
+					titleStroke.Color = Style.color3(Style.dark(shown))
+				end
+			end
 		end
 	end
 
