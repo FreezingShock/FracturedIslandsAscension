@@ -17,6 +17,7 @@ if template:GetAttribute("FontsApplied") == VERSION and not FORCE then
 end
 
 local PIXEL = Font.new(Style.FONT_PIXEL, Enum.FontWeight.Regular, Enum.FontStyle.Normal)
+local PIXEL_BOLD = Font.new(Style.FONT_PIXEL, Enum.FontWeight.Bold, Enum.FontStyle.Normal)
 local BODY = Font.new(Style.FONT_BODY, Style.FONT_BODY_WEIGHT, Enum.FontStyle.Normal)
 local changed = 0
 
@@ -42,16 +43,12 @@ label(template.DescriptionLabel, BODY, SIZE.description)
 label(template.LevelBar:FindFirstChild("LevelLabel", true), PIXEL, SIZE.level)
 label(template.ProgressBar:FindFirstChild("ProgressLabel", true), PIXEL, SIZE.progress)
 
--- stats rows (the prototype the module clones): taller row, bigger icon
+-- stats rows (the prototype the module clones): ONLY the font weight changes (Silkscreen Bold, size = SIZE.stat = the original 20);
+-- the row height, icon size and spacing stay exactly as designed in the Template (the dotted separator lives there)
 for _, row in ipairs(template.Stats:GetChildren()) do
 	if row:IsA("Frame") then
-		row.Size = UDim2.new(1, 0, 0, SIZE.stat + 6)
-		label(row:FindFirstChild("NameLabel", true), PIXEL, SIZE.stat)
-		label(row:FindFirstChild("ValueLabel", true), PIXEL, SIZE.stat)
-		local icon = row:FindFirstChild("IconLabel", true)
-		if icon then
-			icon.Size = UDim2.fromOffset(SIZE.stat, SIZE.stat)
-		end
+		label(row:FindFirstChild("NameLabel", true), PIXEL_BOLD, SIZE.stat)
+		label(row:FindFirstChild("ValueLabel", true), PIXEL_BOLD, SIZE.stat)
 	end
 end
 
