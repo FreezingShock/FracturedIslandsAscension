@@ -53,7 +53,21 @@ MovementConfig.dodge = {
 	cooldown = 0.9,
 	requireGround = false, -- true = no rolling in the air (false: the air clips play)
 	statDistance = "DodgeDistance",
-	sound = "", -- whoosh: silent until you set an id
+	sound = "rbxassetid://138067295629083", -- riptide (Minecraft enchantment sound), heard by everyone 3D at the roller
+	-- roll FX, seen by everyone: `ground` while standing, `air` while not (the air look is bigger and brighter)
+	fx = {
+		ground = {
+			ring = { color = Color3.fromRGB(85, 255, 255), from = 2, to = 12, time = 0.5, thickness = 0.15, drop = 2.9, vertical = false },
+			trail = { color = Color3.fromRGB(70, 220, 255), coreColor = Color3.fromRGB(235, 255, 255), fadeColor = Color3.fromRGB(40, 120, 255), lifetime = 0.3, width = 2.6 },
+			motes = { color = Color3.fromRGB(200, 240, 255), rate = 60, burst = 12, speed = 4, accel = Vector3.new(0, 4, 0) },
+		},
+		air = {
+			ring = { color = Color3.fromRGB(255, 220, 120), from = 3, to = 10, time = 0.4, thickness = 0.1, drop = 0, vertical = true },
+			trail = { color = Color3.fromRGB(255, 200, 90), coreColor = Color3.fromRGB(255, 252, 235), fadeColor = Color3.fromRGB(255, 120, 40), lifetime = 0.5, width = 3.6 },
+			motes = { color = Color3.fromRGB(255, 240, 200), rate = 90, burst = 20, speed = 8, accel = Vector3.new(0, -2, 0) },
+		},
+		moteTexture = "rbxasset://textures/particles/sparkles_main.dds",
+	},
 	-- the 8 roll clips, picked by the angle between the roll direction and where the character faces (f = forward, fr, r, br, b, bl, l, fl);
 	-- `air` plays when the roller is not standing on anything. A type may override any of it (dodge.types.heavy.animations = {...}).
 	animations = {

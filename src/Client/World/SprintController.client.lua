@@ -13,6 +13,8 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+local Debris = game:GetService("Debris")
 
 local MovementConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("MovementConfig")) :: any
 local SetSprint = ReplicatedStorage:WaitForChild("SetSprint")
@@ -145,6 +147,100 @@ local function playSound(root: BasePart, id: string)
 	game:GetService("Debris"):AddItem(sound, 3)
 end
 
+--- A flat ring (ground) or a ring standing across the roll (air) that grows and fades out.
+local function spawnRing(cfg, position: Vector3, direction: Vector3)
+	local ring = Instance.new("Part")
+	ring.Shape = Enum.PartType.Cylinder
+	ring.Anchored = true
+	ring.CanCollide = false
+	ring.CanQuery = false
+	ring.CanTouch = false
+	ring.CastShadow = false
+	ring.Material = Enum.Material.Neon
+	ring.Color = cfg.color
+	ring.Size = Vector3.new(cfg.thickness, cfg.from, cfg.from) -- the cylinder's axis is its X
+	if cfg.vertical then
+		ring.CFrame = CFrame.lookAt(position, position + direction) * CFrame.Angles(0, math.pi / 2, 0)
+	else
+		ring.CFrame = CFrame.new(position) * CFrame.Angles(0, 0, math.pi / 2)
+	end
+	ring.Parent = workspace
+	TweenService:Create(ring, TweenInfo.new(cfg.time, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {
+		Size = Vector3.new(cfg.thickness * 0.2, cfg.to, cfg.to),
+		Transparency = 1,
+	}):Play()
+	Debris:AddItem(ring, cfg.time + 0.1)
+end
+
+--- A beam-like ribbon sweeping behind the roll: a wide coloured outer layer that fades out to `fadeColor`, and a thin
+--- bright white core inside it. Both taper to a point at the tail. Lives for the roll plus its fade.
+local TAPER = NumberSequence.new({
+	NumberSequenceKeypoint.new(0, 1),
+	NumberSequenceKeypoint.new(0.55, 0.6),
+	NumberSequenceKeypoint.new(1, 0),
+})
+
+local function ribbon(root: BasePart, width: number, color: Color3, fadeColor: Color3?, transparency: number, lifetime: number, life: number)
+	local a0 = Instance.new("Attachment")
+	a0.Position = Vector3.new(-width / 2, -0.2, 0)
+	a0.Parent = root
+	local a1 = Instance.new("Attachment")
+	a1.Position = Vector3.new(width / 2, -0.2, 0)
+	a1.Parent = root
+	local trail = Instance.new("Trail")
+	trail.Attachment0 = a0
+	trail.Attachment1 = a1
+	trail.Color = fadeColor and ColorSequence.new(color, fadeColor) or ColorSequence.new(color)
+	trail.Lifetime = lifetime
+	trail.Transparency = NumberSequence.new(transparency, 1)
+	trail.WidthScale = TAPER
+	trail.LightEmission = 1
+	trail.LightInfluence = 0
+	trail.FaceCamera = true
+	trail.MinLength = 0.05
+	trail.Parent = root
+	Debris:AddItem(a0, life)
+	Debris:AddItem(a1, life)
+	Debris:AddItem(trail, life)
+end
+
+local function spawnTrail(root: BasePart, cfg, life: number)
+	ribbon(root, cfg.width, cfg.color, cfg.fadeColor, 0.25, cfg.lifetime, life)
+	ribbon(root, cfg.width * 0.3, cfg.coreColor, nil, 0, cfg.lifetime * 0.7, life)
+end
+
+--- Motes: a burst on the first frame, then a steady stream until the roll ends.
+local function spawnMotes(root: BasePart, cfg, texture: string, duration: number)
+	local attachment = Instance.new("Attachment")
+	attachment.Parent = root
+	local emitter = Instance.new("ParticleEmitter")
+	emitter.Texture = texture
+	emitter.Color = ColorSequence.new(cfg.color)
+	emitter.Lifetime = NumberRange.new(0.4, 0.9)
+	emitter.Speed = NumberRange.new(cfg.speed * 0.5, cfg.speed)
+	emitter.SpreadAngle = Vector2.new(180, 180)
+	emitter.Acceleration = cfg.accel
+	emitter.Size = NumberSequence.new(0.35, 0)
+	emitter.Transparency = NumberSequence.new(0, 1)
+	emitter.LightEmission = 1
+	emitter.Rate = 0
+	emitter.Parent = attachment
+	emitter:Emit(cfg.burst)
+	emitter.Rate = cfg.rate
+	task.delay(duration, function()
+		emitter.Rate = 0
+	end)
+	Debris:AddItem(attachment, duration + 1)
+end
+
+--- The roll FX for everyone who can see the roller; ground or air look chosen by the roller's FloorMaterial.
+local function playRollFx(root: BasePart, humanoid: Humanoid, duration: number)
+	local fx = DODGE.fx[humanoid.FloorMaterial == Enum.Material.Air and "air" or "ground"]
+	spawnRing(fx.ring, root.Position - Vector3.new(0, fx.ring.drop, 0), rollDirection(root, humanoid))
+	spawnTrail(root, fx.trail, duration + fx.trail.lifetime)
+	spawnMotes(root, fx.motes, DODGE.fx.moteTexture, duration)
+end
+
 DodgeEvent.OnClientEvent:Connect(function(roller, distance, duration, soundId, animations)
 	if typeof(roller) ~= "Instance" or not roller:IsA("Player") or type(distance) ~= "number" or type(duration) ~= "number" then
 		return
@@ -158,6 +254,7 @@ DodgeEvent.OnClientEvent:Connect(function(roller, distance, duration, soundId, a
 	if type(soundId) == "string" and soundId ~= "" then
 		playSound(root, soundId) -- everybody hears it, 3D at the roller
 	end
+	playRollFx(root, humanoid, duration) -- everybody sees it
 	if roller ~= player then
 		return
 	end
