@@ -95,6 +95,13 @@ Sources.register("skill", {
 	description = "A permanent reward for reaching a skill level.",
 })
 
+Sources.register("nexus", {
+	rank = 22,
+	label = "Nexus Level",
+	color = "#FF55FF",
+	description = "A permanent reward for reaching an Aetheric Nexus Level.",
+})
+
 Sources.register("admin", {
 	rank = 90,
 	label = "Admin",

@@ -3,7 +3,7 @@
 	Place inside: ServerScriptService
 
 	The Aetheric Nexus Level (see NexusConfig). The saved data is `_Nexus` in the skills profile:
-	  { xp = total XP, sources = { skills = n, collections = n, misc = n }, awarded = { [key] = true } }
+	  { xp = total XP, sources = { skills = n, collections = n, misc = n }, awarded = { [key] = true }, claimedLevel = n }
 	`awarded` holds one key per paid task ("s.Farming.7", "c.Farming.wheat.3"), so a task can never pay twice (a level that is lowered
 	and gained again, a replayed reward, a rejoin). The level is derived from `xp`, nothing else is stored.
 
@@ -25,6 +25,7 @@ local Modules = ReplicatedStorage:WaitForChild("Modules")
 local NexusConfig = require(Modules:WaitForChild("Config"):WaitForChild("NexusConfig")) :: any
 local SkillsConfig = require(Modules:WaitForChild("SkillsConfig")) :: any
 local SkillsDataManager = require(ServerScriptService:WaitForChild("SkillsDataManager")) :: any
+local AttributeStatManager = require(ServerScriptService:WaitForChild("AttributeStatManager")) :: any
 
 local ATTR = NexusConfig.attributes
 
@@ -32,6 +33,9 @@ local NexusService = {}
 
 local backfilledSkills: { [Player]: boolean } = {}
 local backfilledCollections: { [Player]: boolean } = {}
+local derivedFor: { [Player]: boolean } = {} -- the level rewards were built at least once this session
+local pendingRewards: { [Player]: any } = {} -- reward entries waiting for the attribute profile
+local ATTRIBUTE_WAIT = 60 -- seconds to wait for the attribute profile before giving up
 
 --- The saved table, repaired if it is missing a field (an old profile, a hand-edited one).
 local function nexusOf(data)
@@ -43,6 +47,7 @@ local function nexusOf(data)
 	nexus.xp = type(nexus.xp) == "number" and nexus.xp or 0
 	nexus.sources = type(nexus.sources) == "table" and nexus.sources or {}
 	nexus.awarded = type(nexus.awarded) == "table" and nexus.awarded or {}
+	nexus.claimedLevel = type(nexus.claimedLevel) == "number" and nexus.claimedLevel or 0
 	return nexus
 end
 
@@ -59,6 +64,70 @@ local function publish(player: Player)
 	for id in pairs(NexusConfig.categories) do
 		player:SetAttribute(ATTR.categoryPrefix .. id, nexus.sources[id] or 0)
 	end
+end
+
+
+-- ===================== LEVEL REWARDS =====================
+-- A permanent stat bonus per level (NexusConfig.rewardsFor). `claimedLevel` is a high-water mark: a level is marked paid FIRST, and the
+-- boosts are rebuilt from the WHOLE claimed range every time (AttributeStatManager.ApplySource replaces everything with the "nexus:" prefix),
+-- so a rejoin, a restore or a lowered total can never double a reward or take one back.
+local function applyAttributes(player: Player, entries)
+	pendingRewards[player] = entries
+	local function apply()
+		pendingRewards[player] = nil
+		AttributeStatManager.ApplySource(player, "nexus:", entries, "nexus")
+		SkillsDataManager.MarkDirty(player) -- the stats shown on the pages may have changed
+	end
+	if AttributeStatManager.IsLoaded(player) then
+		apply()
+		return
+	end
+	task.spawn(function()
+		local waited = 0
+		while player.Parent and waited < ATTRIBUTE_WAIT and pendingRewards[player] == entries do
+			if AttributeStatManager.IsLoaded(player) then
+				apply()
+				return
+			end
+			waited += task.wait(0.5)
+		end
+	end)
+end
+
+local function syncRewards(player: Player)
+	local data = SkillsDataManager.GetData(player)
+	if not data then
+		return
+	end
+	local nexus = nexusOf(data)
+	local level = NexusConfig.levelFromXp(nexus.xp)
+	local grew = level > nexus.claimedLevel
+	if grew then
+		nexus.claimedLevel = level -- high-water mark first: a level is never paid twice
+	end
+	if not (grew or not derivedFor[player]) then
+		return
+	end
+	derivedFor[player] = true
+	local entries = {}
+	for l = 1, nexus.claimedLevel do
+		for index, reward in ipairs(NexusConfig.rewardsFor(l)) do
+			local stat = NexusConfig.rewards.stats[reward.stat]
+			table.insert(entries, {
+				id = string.format("%d.%d", l, index),
+				label = string.format("Nexus Level %d", l),
+				color = stat and stat.color or "#FF55FF",
+				attr = reward.stat,
+				flat = reward.amount,
+			})
+		end
+	end
+	applyAttributes(player, entries)
+end
+
+function NexusService.claimedLevel(player: Player): number
+	local data = SkillsDataManager.GetData(player)
+	return data and nexusOf(data).claimedLevel or 0
 end
 
 --- Pay `amount` XP of `category` once per `key`. Returns the XP actually added (0 when already paid, capped, or invalid).
@@ -91,6 +160,7 @@ function NexusService.award(player: Player, category: string, key: string?, amou
 	nexus.xp += gain
 	nexus.sources[category] = (nexus.sources[category] or 0) + gain
 	publish(player)
+	syncRewards(player)
 	return gain
 end
 
@@ -164,6 +234,7 @@ function NexusService.adminSetTotal(player: Player, total: number): number?
 	nexus.sources.misc = misc
 	nexus.xp = others + misc
 	publish(player)
+	syncRewards(player)
 	return nexus.xp
 end
 
@@ -171,12 +242,15 @@ SkillsDataManager.OnChanged(function(player)
 	if player.Parent then
 		backfillSkills(player)
 		publish(player)
+		syncRewards(player)
 	end
 end)
 
 Players.PlayerRemoving:Connect(function(player)
 	backfilledSkills[player] = nil
 	backfilledCollections[player] = nil
+	derivedFor[player] = nil
+	pendingRewards[player] = nil
 end)
 
 return NexusService

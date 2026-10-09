@@ -23,7 +23,7 @@ restyling) unless you set `local FORCE = true` at the top.
 | `build_view_rows.luau` | `ReplicatedStorage.GUI.ViewRow` (a copy of the `View.Cursor` label) + `ViewMenu.View.Scale` (UIScale) | `ViewMenuController` |
 | `build_collection_rewards.luau` | `GridTemplates.CollectionsMenu4` + `TemporaryMenus.TierTitle`, `RewardSlot`, `CollectionStatSlot` (reward page templates) | `CollectionsPageModule` |
 | `build_nexus_badge.luau` | SURGICAL: `FIAHUD.Root.Badge` layers (Outline, Stroke, Trough, `XpClip` > `XpHex`, shaded Face; the Level label stays); numbers = `HudTheme.badge.xp`; Figma `Level Badge` | `ResourceBarsController` + `NexusBadgeView` |
-| `build_nexus_page.luau` | `GridTemplates.NexusLevelMenu` + `TemporaryMenus.NexusSpacer`, `NexusBadgeSlot` (clone of the HUD badge, 2x), `NexusInfoPanel`; run AFTER `build_nexus_badge` | `NexusLevelPageModule` |
+| `build_nexus_page.luau` | `GridTemplates.NexusLevelMenu` + `TemporaryMenus.NexusSlot` (StatSlot + LevelLabel; the SkyBlock-style page is only slots; removes the old NexusBadgeSlot / NexusInfoPanel / NexusSpacer) | `NexusLevelPageModule` |
 | `build_skills_menu.luau` | `SkillDescFrame`: slots `Level1..Level25`, `XpBar`, `WisdomLabel`, `NextReward`; hub button `CarpentrySkills` | `SkillsPageModule` |
 | `build_scoreboard.luau` | `StarterGui.FIAScoreboard` (Panel: Board > Lines, Template; tooltip look) | `ScoreboardController` |
 | `build_actionbar.luau` | `FIAHUD.Root.ActionBar` (CanvasGroup > Label (+ Pop UIScale, Stroke), Sub (+ Stroke)); sizes from `HudTheme.actionBar` | `ActionBarClient` |

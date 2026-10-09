@@ -337,6 +337,31 @@ end
 local closeNexusPanel
 
 -- ===================== BUTTON CONFIGS =====================
+-- ===================== NEXUS LEVEL PAGE =====================
+local function openNexusLevel()
+	if GridMenuModule.hasGrid("NexusLevelMenu") then
+		GridMenuModule.navigateToGrid("NexusLevelMenu") -- onPopulate fills it (and refills on Back)
+	end
+end
+
+-- The Nexus buttons' tooltip (home middle slot + Profile): one table that TooltipModule reads when it shows, kept current from the Player attributes.
+local NEXUS_TOOLTIP = {
+	title = '<font color="#FF55FF"><b>Aetheric Nexus Level</b></font>',
+	desc = '<font color="#AAAAAA">Your account level, earned from skill level-ups and collections.</font>',
+	click = '<font color="#FFFF55">Click to view!</font>',
+}
+if NexusLevelPageModule then
+	local NexusConfig = require(Modules:WaitForChild("Config"):WaitForChild("NexusConfig")) :: any
+	local function refreshNexusTooltip()
+		local text = NexusLevelPageModule.tooltipText()
+		NEXUS_TOOLTIP.title, NEXUS_TOOLTIP.desc, NEXUS_TOOLTIP.click = text.title, text.desc, text.click
+	end
+	refreshNexusTooltip()
+	for _, attribute in ipairs({ NexusConfig.attributes.level, NexusConfig.attributes.progress, NexusConfig.attributes.total }) do
+		player:GetAttributeChangedSignal(attribute):Connect(refreshNexusTooltip)
+	end
+end
+
 local NEXUS_BUTTONS = {
 	Skills = {
 		tooltipData = {
@@ -364,13 +389,13 @@ local NEXUS_BUTTONS = {
 		menuTitle = "Settings",
 		menuChild = "SettingsMenu",
 	},
+	-- The middle slot: the Aetheric Nexus Level page (same grid as the Profile menu's AethericNexus button)
 	AethericNexus = {
-		tooltipData = {
-			title = '<font color="#FF55FF"><b>Aetheric Nexus</b></font>',
-			desc = '<font color="#AAAAAA">Access your aetheric core and view your stats, playtime, and more.</font>',
-			click = '<font color="#FFFF55">Click to view!</font>',
-		},
-		action = nil,
+		tooltipData = NEXUS_TOOLTIP,
+		action = "callback",
+		callback = function()
+			openNexusLevel()
+		end,
 	},
 	Bank = {
 		tooltipData = {
@@ -778,25 +803,6 @@ local function openProfileMenu3(skillName, attrConfig)
 	GridMenuModule.navigateToGrid("ProfileMenu3")
 end
 
--- ===================== NEXUS LEVEL PAGE =====================
--- The Profile button's tooltip: one table that TooltipModule reads when it shows, kept current from the Player attributes.
-local NEXUS_TOOLTIP = {
-	title = '<font color="#FF55FF"><b>Aetheric Nexus Level</b></font>',
-	desc = '<font color="#AAAAAA">Your account level, earned from skill level-ups and collections.</font>',
-	click = '<font color="#FFFF55">Click to view!</font>',
-}
-if NexusLevelPageModule then
-	local NexusConfig = require(Modules:WaitForChild("Config"):WaitForChild("NexusConfig")) :: any
-	local function refreshNexusTooltip()
-		local text = NexusLevelPageModule.tooltipText()
-		NEXUS_TOOLTIP.title, NEXUS_TOOLTIP.desc, NEXUS_TOOLTIP.click = text.title, text.desc, text.click
-	end
-	refreshNexusTooltip()
-	for _, attribute in ipairs({ NexusConfig.attributes.level, NexusConfig.attributes.progress, NexusConfig.attributes.total }) do
-		player:GetAttributeChangedSignal(attribute):Connect(refreshNexusTooltip)
-	end
-end
-
 local NEXUS_LEVEL_BUTTONS = {
 	BackButton = {
 		tooltipData = {
@@ -826,9 +832,7 @@ local PROFILE_BUTTONS = {
 		tooltipData = NEXUS_TOOLTIP,
 		action = "callback",
 		callback = function()
-			if GridMenuModule.hasGrid("NexusLevelMenu") then
-				GridMenuModule.navigateToGrid("NexusLevelMenu") -- onPopulate fills it (and refills on Back)
-			end
+			openNexusLevel()
 		end,
 	},
 	FarmingAttributes = {

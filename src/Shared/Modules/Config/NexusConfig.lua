@@ -69,10 +69,97 @@ NexusConfig.tiers = {
 	{ from = 100, color = "#AA0000" },
 }
 
--- The Nexus Level page (NexusLevelPageModule): which cells of its 9 x 6 grid the big badge and the info panel span (row / column, 0-based)
+-- ===================== LEVEL REWARDS =====================
+-- What reaching a level gives, GRANTED by NexusService (a permanent stat bonus per level, rebuilt from the saved claimedLevel) and
+-- SHOWN by the page tooltips: one pure helper, NexusConfig.rewardsFor(level), feeds both.
+--   library.level        every level;  library.milestone  every `milestoneEvery`-th level on top of it
+--   overrides[<level>]   REPLACES the list of that one level (e.g. overrides[50] = { { stat = "Health", amount = 50 } })
+--   stats[<attribute>]   how a reward line is shown: name + colour (the attribute keys of Attributes)
+NexusConfig.rewards = {
+	milestoneEvery = 10,
+	library = {
+		level = { { stat = "Health", amount = 5 } },
+		milestone = { { stat = "Defense", amount = 2 }, { stat = "Intelligence", amount = 3 } },
+	},
+	overrides = {},
+	stats = {
+		Health = { name = "Health", color = "#FF5555" },
+		Defense = { name = "Defense", color = "#55FF55" },
+		Intelligence = { name = "Intelligence", color = "#55FFFF" },
+	},
+}
+
+-- ===================== THE NEXUS LEVEL PAGE (NexusLevelPageModule): a copy of SkyBlock's Levels menu =====================
+-- A 9 x 6 grid of slots (row / col, 0-based). `icon` = a key of ItemIconData (assets/icons, tools/fetch_icons.py); `tooltip` = an id of
+-- NexusConfig.tooltips. Moving a slot or adding one is data: add an entry (kind picks what it shows) and a tooltip.
 NexusConfig.page = {
-	badgeCells = { rows = { 0, 4 }, cols = { 0, 3 } },
-	infoCells = { rows = { 0, 4 }, cols = { 4, 8 } },
+	preview = { row = 2, cols = { 2, 3, 4, 5, 6 } }, -- two levels back, one back, the CURRENT level (the middle one), then two ahead
+	panes = {
+		done = { icon = "green_stained_glass_pane", color = "#55FF55" }, -- finished level
+		current = { icon = "yellow_stained_glass_pane", color = "#FFFF55" }, -- the level being progressed
+		todo = { icon = "red_stained_glass_pane", color = "#FF5555" }, -- not finished
+	},
+	slots = {
+		ranking = { row = 0, col = 4, icon = "item_frame", tooltip = "ranking" },
+		comingSoon = { row = 1, col = 7, icon = "redstone_torch", tooltip = "comingSoon" },
+		milestone = { row = 3, col = 4, icon = "nether_star", tooltip = "milestone" }, -- directly below the middle preview slot
+		rewards = { row = 2, col = 7, icon = "filled_map", tooltip = "rewards" },
+		sources = { row = 3, col = 7, icon = "chest", tooltip = "sources" },
+		emblems = { row = 4, col = 7, icon = "name_tag", tooltip = "emblems" },
+	},
+}
+
+-- Tooltip text (Minecraft colour codes). title / lines are rich text; tokens in braces are filled by the page:
+-- {level} {xp} {total} {pct} {max} {bar} {done} {milestones} {milestone} {reward}. The page adds the dynamic blocks (reward lines, sources) itself.
+NexusConfig.tooltips = {
+	ranking = {
+		title = '<font color="#55FF55">Your Nexus Level Ranking</font>',
+		lines = {
+			'<font color="#555555">Classic Mode</font>',
+			"",
+			'<font color="#FFFFFF">Your level: </font><font color="#FFFF55">{level}</font>',
+			'<font color="#FFFFFF">You have: </font><font color="#55FFFF">{total} XP</font>',
+			"",
+			'<font color="#AAAAAA">You have completed </font><font color="#55FFFF">{pct}%</font><font color="#AAAAAA"> of the total Nexus XP Tasks.</font>',
+			"",
+			'<font color="#AAAAAA">Ranking information requires Nexus Level 10 or higher.</font>',
+			'<font color="#555555">Level rankings may take time to refresh.</font>',
+		},
+	},
+	comingSoon = { title = '<font color="#FF5555">Coming Soon</font>', lines = {} },
+	rewards = {
+		title = '<font color="#55FF55">Leveling Rewards</font>',
+		lines = {
+			'<font color="#AAAAAA">View all the rewards you can unlock by leveling up your Nexus Level.</font>',
+			"",
+			'<font color="#AAAAAA">Progress to Max: </font><font color="#55FFFF">{pct}%</font>',
+			"{bar}",
+			"",
+			'<font color="#FFFF55">Click to view rewards!</font>',
+		},
+	},
+	sources = {
+		title = '<font color="#FFAA00">XP Sources</font>',
+		lines = { '<font color="#AAAAAA">Where your Nexus XP came from.</font>', "", "{sources}", "", '<font color="#FFFFFF">Total: </font><font color="#FFFF55">{total} XP</font>' },
+	},
+	emblems = {
+		title = '<font color="#55FF55">Prefix Emblems</font>',
+		lines = {
+			'<font color="#AAAAAA">Add some spice by having an emblem next to your name in chat and in tab!</font>',
+			"",
+			'<font color="#AAAAAA">Emblems are unlocked through various activities such as leveling up or completing achievements!</font>',
+			"",
+			'<font color="#FF5555">Coming Soon</font>',
+		},
+	},
+	milestone = {
+		title = '<font color="#FFAA00">Next Milestone: Level {milestone}</font>',
+		lines = { '<font color="#AAAAAA">Reward:</font>', "{reward}", "", '<font color="#FFFF55">Click to preview!</font>' },
+	},
+	pane = {
+		title = '<font color="#55FF55">Level {level}</font>',
+		lines = { '<font color="#AAAAAA">Reward:</font>', "{reward}", "", "{xp}", '<font color="#FFFF55">Click to view rewards!</font>' },
+	},
 }
 
 -- ===================== HELPERS (pure, shared by the server and the client) =====================
@@ -152,6 +239,43 @@ end
 function NexusConfig.categoryOf(source: string): string
 	local def = NexusConfig.library[source]
 	return def and def.category or "misc"
+end
+
+--- The rewards of one level: a list of { stat, amount } (the library level reward, plus the milestone one on every milestoneEvery-th level).
+function NexusConfig.rewardsFor(level: number): { { stat: string, amount: number } }
+	local out = {}
+	level = math.floor(tonumber(level) or 0)
+	if level < 1 or level > NexusConfig.curve.maxLevel then
+		return out
+	end
+	local config = NexusConfig.rewards
+	local override = config.overrides[level]
+	local source = override
+	if not source then
+		source = table.clone(config.library.level)
+		if level % config.milestoneEvery == 0 then
+			for _, reward in ipairs(config.library.milestone) do
+				table.insert(source, reward)
+			end
+		end
+	end
+	for _, reward in ipairs(source) do
+		table.insert(out, { stat = reward.stat, amount = reward.amount })
+	end
+	return out
+end
+
+--- The next milestone level above `level` (nil at the cap).
+function NexusConfig.nextMilestone(level: number): number?
+	local every = NexusConfig.rewards.milestoneEvery
+	local nextLevel = (math.floor(level / every) + 1) * every
+	return nextLevel <= NexusConfig.curve.maxLevel and nextLevel or nil
+end
+
+--- Milestones reached / in total (for the "Progress to Max" bar of the rewards slot).
+function NexusConfig.milestoneCount(level: number): (number, number)
+	local every = NexusConfig.rewards.milestoneEvery
+	return math.floor(level / every), math.floor(NexusConfig.curve.maxLevel / every)
 end
 
 return NexusConfig

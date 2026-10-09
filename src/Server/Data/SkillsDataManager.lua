@@ -59,7 +59,7 @@ PROFILE_TEMPLATE._Rewards = { claimed = {}, recipes = {}, unlocks = {} }
 PROFILE_TEMPLATE._Wallet = { coins = 0 }
 
 -- The Aetheric Nexus Level (NexusService owns it): total XP, XP per category, and the keys of the tasks already paid. Reconcile backfills it.
-PROFILE_TEMPLATE._Nexus = { xp = 0, sources = { skills = 0, collections = 0, misc = 0 }, awarded = {} }
+PROFILE_TEMPLATE._Nexus = { xp = 0, sources = { skills = 0, collections = 0, misc = 0 }, awarded = {}, claimedLevel = 0 }
 
 -- ── Inventory data (structurally isolated under one key) ──
 -- items         : array of { itemId = string, count = number }

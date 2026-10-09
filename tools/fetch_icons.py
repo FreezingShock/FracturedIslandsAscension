@@ -69,6 +69,15 @@ ICONS = {
     "rabbit_foot": "Rabbit's_Foot",
     "phantom_membrane": "Phantom_Membrane",
     "nautilus_shell": "Nautilus_Shell",
+    "item_frame": "Item_Frame",  # Nexus Level page: Level Ranking
+    "filled_map": "Map",  # Nexus Level page: Leveling Rewards
+    "chest": "FILE:Chest_(inventory)_JE5.png",  # Nexus Level page: XP Sources
+    "redstone_torch": "Redstone_Torch",  # Nexus Level page: Coming Soon slot
+    "name_tag": "Name_Tag",  # Nexus Level page: Prefix Emblems
+    "arrow": "Arrow",
+    "green_stained_glass_pane": "FILE:Green_Stained_Glass_(texture)_JE3_BE2.png",  # Nexus Level preview: finished level
+    "yellow_stained_glass_pane": "FILE:Yellow_Stained_Glass_(texture)_JE3_BE2.png",  # in progress
+    "red_stained_glass_pane": "FILE:Red_Stained_Glass_(texture)_JE3_BE2.png",  # not finished
 }
 
 
@@ -80,6 +89,11 @@ def api(**params):
 
 
 def find_file(base):
+    """`FILE:<exact wiki file name>` pins one file (blocks and other art the item search cannot find)."""
+    if base.startswith("FILE:"):
+        pages = api(action="query", titles="File:" + base[5:], prop="imageinfo", iiprop="url|size")["query"]["pages"]
+        info = next(iter(pages.values())).get("imageinfo")
+        return {"name": base[5:], "url": info[0]["url"], "width": info[0]["width"], "height": info[0]["height"]} if info else None
     """Newest `<base>[_(item)]_JE#[_BE#].png` that is a square raster."""
     pat = re.compile(r"^" + re.escape(base) + r"(?:_\(item\))?_JE(\d+)(?:_BE(\d+))?\.png$")
     images = []
