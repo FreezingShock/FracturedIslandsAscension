@@ -6,7 +6,7 @@
 	The client sends nothing and decides nothing: the payload says what to show.
 	  telegraph  a flat marker on the ground (circle / line / cone-as-box) that fills up over the windup, so the player sees WHERE and
 	             WHEN the hit lands (the body flash is EnemyTelegraphController)
-	  swing      the sword's trail (the Blade's TrailA / TrailB attachments, built by EnemyRig) for the swing's duration
+	  swing      the sword's trail (the held Tool's Handle TrailA / TrailB attachments, built by EnemyRig) for the swing's duration
 	  impact     an expanding ring on the ground (the slam)
 	  parry      a blue guard outline on the enemy while it blocks
 	Colours come from the move's telegraph.color (EnemyConfig.attacks); nothing here is per enemy.
@@ -115,8 +115,8 @@ local function telegraph(payload: any)
 end
 
 local function swing(model: Model, duration: number)
-	local sword = model:FindFirstChild("Sword")
-	local blade = sword and sword:FindFirstChild("Blade") :: BasePart?
+	local tool = model:FindFirstChildOfClass("Tool")
+	local blade = tool and tool:FindFirstChild("Handle") :: BasePart?
 	local a = blade and blade:FindFirstChild("TrailA") :: Attachment?
 	local b = blade and blade:FindFirstChild("TrailB") :: Attachment?
 	if not (blade and a and b) then

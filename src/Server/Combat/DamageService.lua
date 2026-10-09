@@ -211,6 +211,10 @@ local function applyHits(player: Player, hits: { any }, hitInfo: any, facing: Ve
 		if type(taken) == "number" then
 			amount *= taken
 		end
+		local defense = hit.model:GetAttribute("Defense") -- an enemy's gear Defense (EnemyService): the same rule as a player's
+		if type(defense) == "number" and defense > 0 then
+			amount = math.max(1, math.floor(amount * 100 / (100 + defense) + 0.5))
+		end
 		hit.humanoid:TakeDamage(amount)
 		DamageTracker.record(player, amount)
 		hit.model:SetAttribute("LastHit", os.clock())

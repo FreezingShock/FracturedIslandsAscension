@@ -3,11 +3,12 @@
 	Place inside: ServerScriptService   (required by EnemyService)
 
 	Builds the body of a mob: the ServerStorage[mob.template] model when it exists (drop your own R6 rig there; custom modelling
-	later), else a plain tinted R6 rig, then welds the mob.weapon (EnemyConfig) to the right hand.
+	later), else a plain tinted R6 rig. Then it equips the mob's weapon: mob.weapon = { item = "<Items id>" }. That is the REAL item:
+	a clone of the item's Tool (ItemTools), so the sword model, grip and sword animations are the ones a player's copy of the item
+	gets, and the item's abilities (AbilityConfig, listed on the item) are what the mob's "ability" attacks cast.
 
-	A sword is a Model "Sword" of Grip / Guard / Blade parts welded to the Right Arm, hanging along the arm like the player's Tool
-	grip (so the player's R6 sword animations carry it correctly). The Blade carries the attachments TrailA / TrailB that the client
-	(EnemyAttackFXController) turns into a swing trail. A rig that already has a "Sword" model keeps it.
+	The Tool's Handle carries the attachments TrailA / TrailB that the client (EnemyAttackFXController) turns into a swing trail.
+	A rig that already holds a Tool keeps it.
 
 	  EnemyRig.build(cfg) -> Model?
 	  EnemyRig.attachWeapon(model, weapon)
@@ -16,7 +17,13 @@
 
 local CollectionService = game:GetService("CollectionService")
 local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local ServerScriptService = game:GetService("ServerScriptService")
 local ServerStorage = game:GetService("ServerStorage")
+
+local Modules = ReplicatedStorage:WaitForChild("Modules")
+local Items = require(Modules:WaitForChild("Items")) :: any
+local ItemTools = require(ServerScriptService:WaitForChild("ItemTools")) :: any
 
 local EnemyRig = {}
 
@@ -70,60 +77,37 @@ function EnemyRig.placeOnGround(model: Model, marker: BasePart)
 	model:PivotTo(model:GetPivot() + Vector3.new(0, floorY - bottom, 0))
 end
 
-local function part(name: string, size: Vector3, color: Color3, material: Enum.Material): Part
-	local p = Instance.new("Part")
-	p.Name = name
-	p.Size = size
-	p.Color = color
-	p.Material = material
-	p.CanCollide = false
-	p.CanQuery = false
-	p.CanTouch = false
-	p.Massless = true
-	p.TopSurface = Enum.SurfaceType.Smooth
-	p.BottomSurface = Enum.SurfaceType.Smooth
-	return p
-end
-
+--- Equips the item's own Tool in the mob's hand. The engine welds the Handle to the Right Arm with the item's grip, exactly as for
+--- a player. Warns (and leaves the mob unarmed) when the item has no Tool.
 function EnemyRig.attachWeapon(model: Model, weapon: any?)
-	if not weapon or model:FindFirstChild("Sword") then
+	if not weapon or model:FindFirstChildOfClass("Tool") then
 		return
 	end
-	local arm = model:FindFirstChild("Right Arm") :: BasePart?
-	if not (arm and weapon.kind == "sword") then
+	local humanoid = model:FindFirstChildOfClass("Humanoid")
+	local def = weapon.item and Items.get(weapon.item)
+	local template = def and def.toolName and ItemTools.ensure(def.toolName)
+	if not (humanoid and template) then
+		warn(("[EnemyRig] %s: weapon item '%s' has no Tool (needs a toolName)"):format(model.Name, tostring(weapon.item)))
 		return
 	end
-	local length = weapon.bladeLength or 4
-	local sword = Instance.new("Model")
-	sword.Name = "Sword"
+	local tool = template:Clone()
+	tool.CanBeDropped = false
+	tool.Parent = model
+	humanoid:EquipTool(tool)
 
-	-- the hand is the bottom of the arm; the blade runs on along the arm's -Y
-	local hand = arm.CFrame * CFrame.new(0, -1, 0)
-	local grip = part("Grip", Vector3.new(0.28, 0.9, 0.28), weapon.gripColor or Color3.fromRGB(50, 35, 30), Enum.Material.Wood)
-	grip.CFrame = hand * CFrame.new(0, -0.05, 0)
-	local guard = part("Guard", Vector3.new(1.5, 0.22, 0.45), weapon.guardColor or Color3.fromRGB(70, 60, 55), Enum.Material.Metal)
-	guard.CFrame = hand * CFrame.new(0, -0.55, 0)
-	local blade = part("Blade", Vector3.new(0.12, length, 0.5), weapon.bladeColor or Color3.fromRGB(150, 150, 150), Enum.Material.Metal)
-	blade.CFrame = hand * CFrame.new(0, -0.66 - length / 2, 0)
-
-	local trailA = Instance.new("Attachment")
-	trailA.Name = "TrailA"
-	trailA.Position = Vector3.new(0, -length / 2 + 0.3, 0)
-	trailA.Parent = blade
-	local trailB = Instance.new("Attachment")
-	trailB.Name = "TrailB"
-	trailB.Position = Vector3.new(0, length / 2, 0)
-	trailB.Parent = blade
-
-	for _, piece in ipairs({ grip, guard, blade }) do
-		local weld = Instance.new("WeldConstraint")
-		weld.Part0 = arm
-		weld.Part1 = piece
-		weld.Parent = piece
-		piece.Parent = sword
+	-- the swing trail's two ends run along the blade (the mesh's long axis) from the guard to the tip
+	local handle = tool:FindFirstChild("Handle") :: BasePart?
+	if handle then
+		local half = handle.Size.Y / 2
+		local trailA = Instance.new("Attachment")
+		trailA.Name = "TrailA"
+		trailA.Position = Vector3.new(0, -half + 0.3, 0)
+		trailA.Parent = handle
+		local trailB = Instance.new("Attachment")
+		trailB.Name = "TrailB"
+		trailB.Position = Vector3.new(0, half, 0)
+		trailB.Parent = handle
 	end
-	sword.PrimaryPart = blade
-	sword.Parent = model
 end
 
 return EnemyRig

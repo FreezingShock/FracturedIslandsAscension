@@ -10,7 +10,7 @@
 	  anyReady(mob, now)                       an unconditional attack is off cooldown (the AI closes in instead of holding its ring)
 	  run(mob, option, attack, targetPlayer)   starts the attack on its own thread; mob.attacking is true until it ends
 
-	The server owns everything: hit shapes, damage (DamageService.hurtPlayer, Defense applies, damage x level multiplier), cooldowns.
+	The server owns everything: hit shapes, damage (EnemyConfig.damageOf from the mob's gear, then DamageService.hurtPlayer: the player's Defense applies), cooldowns.
 	Clients only get the RemoteEvent EnemyAttack (payload tables, they send nothing) so every player in range SEES the telegraph, swing
 	and impact (EnemyAttackFXController):
 	  { kind = "telegraph", model, attackId, shape, color, origin, dir, range, arc, radius, length, width, duration }
@@ -29,6 +29,7 @@ local ServerScriptService = game:GetService("ServerScriptService")
 local TweenService = game:GetService("TweenService")
 
 local Modules = ReplicatedStorage:WaitForChild("Modules")
+local AbilityConfig = require(Modules:WaitForChild("AbilityConfig")) :: any
 local EnemyConfig = require(Modules:WaitForChild("EnemyConfig")) :: any
 local CombatConfig = require(Modules:WaitForChild("CombatConfig")) :: any
 local DamageService = require(ServerScriptService:WaitForChild("DamageService")) :: any
@@ -103,8 +104,10 @@ local function groundPoint(mob: any): Vector3
 	return result and result.Position or (mob.root.Position - Vector3.new(0, 3, 0))
 end
 
+--- One hit on a player: the damage the mob's gear really does (EnemyConfig.damageOf), then the player's Defense (hurtPlayer).
 local function hurt(mob: any, player: Player, attack: any, multiplier: number?)
-	DamageService.hurtPlayer(player, attack.damage * mob.damageMult * (multiplier or 1), mob.model)
+	local amount = EnemyConfig.damageOf(mob.enemyType, attack, multiplier)
+	DamageService.hurtPlayer(player, amount, mob.model)
 end
 
 --- Players hit by a cone in front of the mob (range + leeway studs, arc degrees).
@@ -236,8 +239,8 @@ local function playSound(mob: any, attack: any, key: string?)
 	if type(id) ~= "string" or id == "" then
 		return
 	end
-	local sword = mob.model:FindFirstChild("Sword")
-	local parent = (sword and sword:FindFirstChild("Blade")) or mob.root
+	local tool = mob.model:FindFirstChildOfClass("Tool")
+	local parent = (tool and tool:FindFirstChild("Handle")) or mob.root
 	local sound = Instance.new("Sound")
 	sound.SoundId = id
 	sound.Volume = entry and entry.volume or 0.8
@@ -333,7 +336,8 @@ RUNNERS.combo = function(mob, attackId, attack, targetPlayer)
 			return
 		end
 		playSound(mob, attack, step.sound) -- the player's sound for this step, at the moment the blade lands
-		local multiplier = index == #steps and (attack.finisherMult or 1) or 1
+		-- the step's own damageMult (the same one a player's step has) x the finisher on the last step
+		local multiplier = (step.damageMult or 1) * (index == #steps and (attack.finisherMult or 1) or 1)
 		for _, player in ipairs(playersInCone(mob, attack)) do
 			hurt(mob, player, attack, multiplier)
 		end
@@ -407,6 +411,93 @@ RUNNERS.slam = function(mob, attackId, attack, targetPlayer)
 	end
 	pose(mob, nil)
 	pause(mob, attack.recover or 0.8)
+end
+
+--- Players in a straight strip ahead of `origin` (a line shape): `length` long, `width` across, measured from the mob.
+local function playersInLine(origin: Vector3, direction: Vector3, length: number, width: number): { Player }
+	local hits = {}
+	local side = Vector3.new(-direction.Z, 0, direction.X)
+	for _, player in ipairs(Players:GetPlayers()) do
+		local root = playerRoot(player)
+		if root then
+			local delta = flat(root.Position - origin)
+			local along = delta:Dot(direction)
+			if along >= 0 and along <= length and math.abs(delta:Dot(side)) <= width / 2 and math.abs(root.Position.Y - origin.Y) <= 8 then
+				table.insert(hits, player)
+			end
+		end
+	end
+	return hits
+end
+
+--- The telegraph geometry of an AbilityConfig shape (the same shape the player's ability hits).
+local function abilityTelegraph(shape: any, color: Color3): any
+	if shape.kind == "circle" then
+		return { range = shape.radius, radius = shape.radius, telegraph = { shape = "circle", color = color } }
+	elseif shape.kind == "cone" then
+		return { range = shape.reach, arc = shape.arc, telegraph = { shape = "cone", color = color } }
+	end
+	return { range = shape.length, length = shape.length, width = shape.width, telegraph = { shape = "line", color = color, width = shape.width } }
+end
+
+--- A weapon ability (AbilityConfig, the same entry a player's copy of the item casts). The shape, the cast time (windup), the
+--- hit frame, the dash and the knockback come from the library entry. The damage is the gear's hit x the ability's own damageMult
+--- (the same as a player's cast) x the enemy's attack.damageMult (its tuning).
+--- Not honoured for mobs yet: zones (overload, frost_nova's ground), chains (chain_lightning) and slow / burn effects.
+RUNNERS.ability = function(mob, attackId, attack, targetPlayer)
+	local ability = AbilityConfig.get(attack.ability)
+	if not ability then
+		warn("[EnemyAttacks] " .. attackId .. ": unknown ability '" .. tostring(attack.ability) .. "'")
+		return
+	end
+	local view = abilityTelegraph(ability.shape, attack.telegraph and attack.telegraph.color or Color3.fromRGB(255, 225, 120))
+	local direction = aimAt(mob, targetPlayer)
+	telegraph(mob, view, attackId, ability.castTime, direction)
+	pose(mob, attack.pose or "raise")
+	if not pause(mob, ability.castTime) then
+		return
+	end
+	mob.model:SetAttribute("Telegraph", nil)
+	broadcast(mob, { kind = "swing", duration = ability.hitFrame })
+	playSound(mob, attack)
+	if not pause(mob, ability.hitFrame) then
+		return
+	end
+	local origin = mob.root.Position
+	if ability.dash then
+		-- the dash moves the mob along its aim before the strip is measured (the player's Blink Dash works the same way)
+		local speed = ability.dash.distance / 0.15
+		mob.root.AssemblyLinearVelocity = Vector3.new(direction.X * speed, mob.root.AssemblyLinearVelocity.Y, direction.Z * speed)
+		task.wait(0.15)
+		if not alive(mob) then
+			return
+		end
+		mob.root.AssemblyLinearVelocity = Vector3.new(0, mob.root.AssemblyLinearVelocity.Y, 0)
+		origin = origin + direction * ability.dash.distance
+	end
+	local shape = ability.shape
+	local hits
+	if shape.kind == "circle" then
+		hits = playersInRadius(origin, shape.radius)
+	elseif shape.kind == "cone" then
+		hits = playersInCone(mob, { range = shape.reach, arc = shape.arc, leeway = 0 })
+	else
+		hits = playersInLine(origin, direction, shape.length, shape.width)
+	end
+	for index, player in ipairs(hits) do
+		if index > (ability.maxTargets or #hits) then
+			break
+		end
+		hurt(mob, player, attack, ability.damageMult)
+		local root = playerRoot(player)
+		if root and (ability.knockback or 0) > 0 then
+			local away = flat(root.Position - origin)
+			local push = away.Magnitude > 1e-3 and away.Unit or direction
+			root.AssemblyLinearVelocity = root.AssemblyLinearVelocity + Vector3.new(push.X * ability.knockback, 12, push.Z * ability.knockback)
+		end
+	end
+	pose(mob, nil)
+	pause(mob, attack.recover or 0.6)
 end
 
 RUNNERS.parry = function(mob, attackId, attack, targetPlayer)
@@ -493,6 +584,12 @@ function EnemyAttacks.anyReady(mob: any, now: number): boolean
 end
 
 function EnemyAttacks.run(mob: any, option: any, attack: any, attackId: string, targetPlayer: Player)
+	-- the enemy's own tuning of this move (EnemyConfig.enemies[type].moveDamage[attackId]) replaces the move's damageMult
+	local tuned = mob.entry.moveDamage and mob.entry.moveDamage[attackId]
+	if tuned then
+		attack = table.clone(attack)
+		attack.damageMult = tuned
+	end
 	local runner = RUNNERS[attack.kind]
 	if not runner then
 		warn("[EnemyAttacks] no runner for attack kind '" .. tostring(attack.kind) .. "' (" .. attackId .. ")")
@@ -521,6 +618,21 @@ function EnemyAttacks.run(mob: any, option: any, attack: any, attackId: string, 
 			mob.wake() -- decide the next move right now: no pause, no re-route between two attacks
 		end
 	end)
+end
+
+-- An "ability" attack is only legal on an enemy whose item lists that ability (the same rule the player's keys follow).
+for enemyType, entry in pairs(EnemyConfig.enemies) do
+	local itemId = entry.mob and entry.mob.weapon and entry.mob.weapon.item
+	local listed = {}
+	for _, cast in ipairs(AbilityConfig.forWeapon(itemId)) do
+		listed[cast.id] = true
+	end
+	for _, option in ipairs(entry.attacks or {}) do
+		local attack = EnemyConfig.attacks[option.attack]
+		if attack and attack.kind == "ability" and not listed[attack.ability] then
+			warn(("[EnemyAttacks] %s: attack '%s' casts '%s', which item '%s' does not list"):format(enemyType, option.attack, tostring(attack.ability), tostring(itemId)))
+		end
+	end
 end
 
 return EnemyAttacks

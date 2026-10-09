@@ -72,7 +72,7 @@ local function spawnDummy(marker: BasePart)
 	dummy.Parent = workspace
 	CollectionService:AddTag(dummy, DamageService.TAG)
 	dummy:SetAttribute("EnemyType", "dummy") -- EnemyConfig key: its hit effects, sounds and nameplate
-	dummy:SetAttribute("EnemyLevel", EnemyConfig.levelInfo("dummy").level)
+	dummy:SetAttribute("EnemyLevel", EnemyConfig.statsFor("dummy").level)
 	EnemyTags.stamp(dummy, EnemyConfig.get("dummy"))
 	CollectionService:AddTag(dummy, "Enemy") -- the nameplate controller shows a health bar over every Enemy
 	root:SetNetworkOwner(nil) -- the server owns the physics, so knockback is the same for everyone

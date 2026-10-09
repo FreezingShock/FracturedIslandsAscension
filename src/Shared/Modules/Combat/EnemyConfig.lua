@@ -36,8 +36,12 @@
 	                    mob.ai override it, per field: aggroRange, leashRange, spacing = { min, max } (hold this ring while attacks
 	                    recharge, nil = walk up and stand), flank = { chance, orbitSeconds = { a, b } } (circle the target on that ring),
 	                    returnHealSeconds (full heal while walking home after a leash), attackGap (min seconds between attacks).
-	  New enemy with its own sword: enemies.<key>.mob.weapon = { kind = "sword", bladeLength, bladeColor, ... } (EnemyRig), template = a
-	                    ServerStorage rig (R6) when you have custom modelling; phases = nil is RESERVED for bosses (not implemented).
+	  New enemy with a weapon: enemies.<key>.mob.weapon = { item = "<Items id>" } (EnemyRig). The Tool is that item's own (its model,
+	                    grip, combo and abilities), so a mob wields exactly what a player can. The item must have a toolName.
+	                    template = a ServerStorage rig (R6) when you have custom modelling; phases = nil is RESERVED for bosses.
+	  New ability attack: EnemyConfig.attacks.<id> = { kind = "ability", ability = "<AbilityConfig id>", damageMult, range, minRange,
+	                    recover, [pose], [telegraph = { color }] }. The ability must be listed on the mob's item (checked at load);
+	                    its shape, cast time, hit frame, dash and knockback come from AbilityConfig, the damage from here.
 	  New drop table:   add EnemyConfig.dropTables.<name> = { entries... } and reference it with { table = "<name>" }.
 	  New enemy type:   add enemies.<key> = { name, nameplate, sounds, [fx], [mob] }; spawn it with a model attribute
 	                    EnemyType = "<key>" (EnemyService does that for a marker in Workspace.EnemySpawns).
@@ -55,7 +59,8 @@
 	  EnemyConfig.resolve(enemyType, weaponType, weaponId, preset) -> merged preset table (cached, identical table per combo)
 	  EnemyConfig.sound(enemyType, weaponType, weaponId, slot)     -> sound entry or nil
 	  EnemyConfig.get(enemyType)                                   -> the enemy's entry (falls back to "default")
-	  EnemyConfig.levelInfo(enemyType)                             -> { level, computed, base, hpMult, damageMult, defenseMult }
+	  EnemyConfig.statsFor(enemyType)                              -> { level, maxHealth, defense, strength, critChance, hitDamage, ... }
+	  EnemyConfig.damageOf(enemyType, attack, multiplier)          -> amount, isCrit   (the damage a move really does, from the gear)
 	  EnemyConfig.dropsFor(enemyType)                              -> flat list of drop entries / pools
 --]]
 
@@ -195,27 +200,35 @@ EnemyConfig.sounds = {
 -- if it is still within range + leeway studs and inside the `arc` degrees in front of the mob; then `recover` seconds.
 -- damage is the base before the player's Defense (DamageService.hurtPlayer).
 EnemyConfig.attacks = {
-	melee_swing = { kind = "melee", range = 5, leeway = 1.5, windup = 0.6, damage = 10, arc = 120, recover = 0.5 },
+	melee_swing = { kind = "melee", range = 5, leeway = 1.5, windup = 0.6, damageMult = 1, arc = 120, recover = 0.5 },
 
 	-- Rustblade Knight moveset (see header: kinds live in EnemyAttacks)
 	-- combo: plays the steps of CombatConfig[weaponType].steps (animation, hitFrame, duration, recovery of the player's sword combo), a
-	-- cone hit per step; it keeps swinging while the target stays inside range * chainReach. damage is per step, the last step x finisherMult.
+	-- cone hit per step; it keeps swinging while the target stays inside range * chainReach. Each step hits for the gear's hit x the
+	-- step's own damageMult (CombatConfig) x damageMult here; the last step also x finisherMult.
 	knight_combo = {
-		kind = "combo", weaponType = "sword", range = 5.5, leeway = 1.5, arc = 110, damage = 14, finisherMult = 1.6,
+		kind = "combo", weaponType = "sword", range = 5.5, leeway = 1.5, arc = 110, damageMult = 0.4, finisherMult = 1.6,
 		windup = 0.5, chainWindup = 0.1, chainReach = 1.5, recover = 0.6, missChance = 0.15,
 		telegraph = { shape = "cone", color = Color3.fromRGB(255, 70, 50) },
 	},
 	-- lunge: the gap-closer. A line telegraph, then a fast dash `dash.distance` studs toward where the target stood.
 	knight_lunge = {
-		kind = "lunge", minRange = 9, range = 18, windup = 0.7, damage = 24, hitRadius = 4.5, recover = 0.7, missChance = 0.2, sound = "sword_atk3",
+		kind = "lunge", minRange = 9, range = 18, windup = 0.7, damageMult = 0.9, hitRadius = 4.5, recover = 0.7, missChance = 0.2, sound = "sword_atk3",
 		dash = { distance = 14, speed = 70 }, pose = "raise",
 		telegraph = { shape = "line", width = 4.5, color = Color3.fromRGB(255, 150, 40) },
 	},
 	-- slam: ground AoE around the knight.
 	knight_slam = {
-		kind = "slam", minRange = 0, range = 8, radius = 10, windup = 1.0, damage = 30, recover = 0.9, sound = "sword_crit4", pose = "raise",
+		kind = "slam", minRange = 0, range = 8, radius = 10, windup = 1.0, damageMult = 1.1, recover = 0.9, sound = "sword_crit4", pose = "raise",
 		telegraph = { shape = "circle", color = Color3.fromRGB(255, 60, 60) },
 	},
+	-- Weapon abilities (AbilityConfig library, the ones a player's copy of the knight's item casts). Ranges match the ability's shape.
+	-- Frost Nova's ground zone, Overload, Chain Lightning and the slow / burn effects are not applied to enemies yet.
+	knight_holy_nova = { kind = "ability", ability = "holy_nova", range = 18, damageMult = 0.15, recover = 0.8, pose = "raise" },
+	knight_blink_dash = { kind = "ability", ability = "blink_dash", range = 22, minRange = 6, damageMult = 0.1, recover = 0.6, pose = "raise" },
+	knight_thunder_clap = { kind = "ability", ability = "thunder_clap", range = 14, damageMult = 0.05, recover = 0.7, pose = "raise" },
+	knight_frost_nova = { kind = "ability", ability = "frost_nova", range = 20, damageMult = 0.2, recover = 0.7, pose = "raise" },
+
 	-- parry: a short guard. Hits the knight takes meanwhile do `damageTaken` of their damage; used right after the target swings.
 	knight_parry = {
 		kind = "parry", range = 9, windup = 0.1, duration = 0.9, damageTaken = 0.25, recover = 0.25, pose = "guard",
@@ -262,20 +275,30 @@ EnemyConfig.poses = {
 }
 
 -- ===================== 1c. LIBRARY: ENEMY LEVELS =====================
--- Every enemy has a level shown on its nameplate (EnemyConfig.levelInfo). With no `level` on the enemy it is computed:
---   power = health * weights.hp + bestAttackDps * weights.damage + defense * weights.defense
+-- Every enemy's level is estimated from its gear (EnemyConfig.statsFor), shown on its nameplate, and scales nothing:
+--   power = maxHealth * weights.hp + hitDamage * weights.damage + defense * weights.defense
 --   level = clamp(round(baseLevel + curve * power ^ exponent), baseLevel, maxLevel)
--- bestAttackDps = the strongest of its attacks: damage / average cooldown. Tune weights / curve here, once, for all enemies.
--- Level is cosmetic unless the enemy sets scales = true: then each level above its base level (levelScaling.baseLevel, default the
--- computed level of its written stats) adds scaling.hp / damage / defense (a fraction) to its health, attack damage and defense.
+-- Tune weights / curve here, once, for all enemies.
 EnemyConfig.levels = {
 	baseLevel = 1,
 	maxLevel = 100,
-	weights = { hp = 0.02, damage = 8, defense = 1.5 },
+	weights = { hp = 0.02, damage = 2, defense = 1.5 },
 	curve = 1.2,
 	exponent = 0.5,
-	scaling = { hp = 0.06, damage = 0.04, defense = 0.05 },
 }
+
+-- ===================== 1e. ENEMY GEAR (stats come from what the enemy holds) =====================
+-- A level is ESTIMATED from the gear and shown on the nameplate. It scales nothing: every number below comes from the items.
+--   weapon       mob.weapon.item: the Items id of the sword (its Damage, rarity and own stats). Without one, unarmed.
+--   equipment    enemies[type].equipment = { helmet, chestplate, leggings, boots = <Items id>, accessories = { <Items id>, ... } }
+--                Their stats are read from the same Items defs a player's copy gets (Defense, Health, Strength, CritChance, ...).
+-- Totals: flat sum, times (1 + sum of multipliers), like AttributeStatManager.
+--   maxHealth    mob.health (the body) + gear Health + Defense x 1 (a player's rule)
+--   Defense      reduces every hit it takes: damage x 100 / (100 + Defense)
+--   hit          (weapon Damage x rarity scaling + flatBase) x (1 + Strength x strengthScale) x the attack's damageMult
+--                x the move's multiplier (combo step / finisher / ability damageMult), then the CritChance roll
+-- EnemyConfig.statsFor(type) / EnemyConfig.damageOf(type, attack, multiplier) do the math.
+EnemyConfig.unarmed = { Damage = 6 } -- weapon Damage of a mob with no weapon item
 
 -- ===================== 1d. LIBRARY: DROP TABLES =====================
 -- Reference one from an enemy with { table = "<name>" }. Stats go straight to the killer's statistics when picked up.
@@ -358,8 +381,7 @@ EnemyConfig.dropTables = {
 -- ===================== 2. ENEMY TYPES =====================
 -- name        shown on the nameplate (a model attribute EnemyName overrides it)
 -- nameplate   the nameplate over its head (ReplicatedStorage.GUI.EnemyNameplate). On for every enemy; false opts out
--- level       optional manual level (else computed from its stats, EnemyConfig.levels); defense optional (default 0)
--- scales      true = the level also scales health / damage / defense (levelScaling = { hp, damage, defense, baseLevel } overrides)
+-- equipment   { helmet, chestplate, leggings, boots, accessories = { ... } }: Items ids of the gear it wears (see 1e. ENEMY GEAR)
 -- tags        list of NameplateConfig.tags ids shown as permanent chips (an element, "boss", ...); debuffs / effects are added at
 --             runtime with EnemyTags.add (server)
 -- sounds      slot -> key in EnemyConfig.sounds
@@ -376,7 +398,6 @@ EnemyConfig.enemies = {
 	dummy = {
 		name = "Training Dummy",
 		nameplate = true,
-		level = 1,
 		sounds = { hit = "enemy_hit", crit = "enemy_crit", crash = "enemy_crash", death = "enemy_death" },
 	},
 
@@ -407,7 +428,9 @@ EnemyConfig.enemies = {
 	rustblade_knight = {
 		name = "Rustblade Knight",
 		nameplate = true,
+		moveDamage = { knight_combo = 1.07, knight_lunge = 1.6, knight_slam = 2.1 },
 		tags = { "shield" },
+		equipment = { helmet = "iron_helmet", chestplate = "iron_chestplate", leggings = "iron_leggings", boots = "iron_boots", accessories = { "warriors_belt" } },
 		sounds = { hit = "enemy_hit", crit = "enemy_crit", crash = "enemy_crash", death = "enemy_death" },
 		-- weight picks among the attacks whose distance window fits; cooldown is per attack
 		attacks = {
@@ -422,8 +445,8 @@ EnemyConfig.enemies = {
 		mob = {
 			template = "RustbladeKnight", -- ServerStorage R6 rig when it exists (custom model later); else a plain R6 rig
 			bodyColor = Color3.fromRGB(150, 120, 100),
-			weapon = { kind = "sword", bladeLength = 4.2, bladeColor = Color3.fromRGB(138, 96, 70), guardColor = Color3.fromRGB(70, 60, 55), gripColor = Color3.fromRGB(50, 35, 30) },
-			health = 1500,
+			weapon = { item = "sword_basic" }, -- Iron Sword: its Tool, model, combo (no ability on the item)
+			health = 240,
 			walkSpeed = 10,
 			chaseSpeed = 15,
 			respawnSeconds = 8,
@@ -433,6 +456,137 @@ EnemyConfig.enemies = {
 				spacing = { min = 6, max = 10 },
 				flank = { chance = 0.55, orbitSeconds = { 1.2, 2.6 } },
 				attackGap = 0.12,
+			},
+		},
+	},
+
+	-- Knight variants: same moveset library as the Rustblade Knight, each with its own look, blade, stats and attack mix
+	ashen_knight = {
+		name = "Fallen Paladin",
+		nameplate = true,
+		moveDamage = { knight_combo = 0.49, knight_lunge = 0.82, knight_slam = 1.15, knight_holy_nova = 0.38 },
+		tags = { "fire" },
+		equipment = { helmet = "diamond_helmet", chestplate = "golden_chestplate", accessories = { "sapphire_amulet" } },
+		sounds = { hit = "enemy_hit", crit = "enemy_crit", crash = "enemy_crash", death = "enemy_death" },
+		attacks = {
+			{ attack = "knight_combo", weight = 5, cooldown = { 2.5, 4 } },
+			{ attack = "knight_lunge", weight = 1, cooldown = { 6, 9 } },
+			{ attack = "knight_slam", weight = 2, cooldown = { 7, 10 } },
+			{ attack = "knight_holy_nova", weight = 3, cooldown = { 8, 11 } },
+			{ attack = "knight_parry", weight = 1, cooldown = { 6, 9 } },
+		},
+		xp = { skill = "Combat", amount = 110 },
+		drops = { { table = "mob_basic" } },
+		mob = {
+			template = "RustbladeKnight",
+			bodyColor = Color3.fromRGB(62, 58, 66),
+			weapon = { item = "sword_legendary" }, -- Excalibur: Diamond model, Holy Nova
+			health = 150,
+			walkSpeed = 9,
+			chaseSpeed = 14,
+			respawnSeconds = 8,
+			ai = {
+				aggroRange = 30,
+				leashRange = 55,
+				spacing = { min = 5, max = 8 },
+				flank = { chance = 0.3, orbitSeconds = { 1, 2 } },
+				attackGap = 0.3,
+			},
+		},
+	},
+	tide_knight = {
+		name = "Tide Knight",
+		nameplate = true,
+		moveDamage = { knight_combo = 0.23, knight_lunge = 0.46, knight_blink_dash = 0.21 },
+		tags = { "storm" },
+		equipment = { boots = "golden_boots", accessories = { "phantom_membrane", "swift_gloves" } },
+		sounds = { hit = "enemy_hit", crit = "enemy_crit", crash = "enemy_crash", death = "enemy_death" },
+		attacks = {
+			{ attack = "knight_combo", weight = 3, cooldown = { 2.5, 4 } },
+			{ attack = "knight_lunge", weight = 2, cooldown = { 5, 8 } },
+			{ attack = "knight_blink_dash", weight = 4, cooldown = { 6, 9 } },
+			{ attack = "knight_parry", weight = 4, cooldown = { 4, 7 } },
+		},
+		xp = { skill = "Combat", amount = 95 },
+		drops = { { table = "mob_basic" } },
+		mob = {
+			template = "RustbladeKnight",
+			bodyColor = Color3.fromRGB(60, 110, 140),
+			weapon = { item = "blink_blade" }, -- Blink Blade: Gold model, Blink Dash
+			health = 500,
+			walkSpeed = 11,
+			chaseSpeed = 17,
+			respawnSeconds = 8,
+			ai = {
+				aggroRange = 32,
+				leashRange = 55,
+				spacing = { min = 8, max = 12 },
+				flank = { chance = 0.7, orbitSeconds = { 1, 2 } },
+				attackGap = 0.2,
+			},
+		},
+	},
+	thorn_knight = {
+		name = "Thornbound Knight",
+		nameplate = true,
+		moveDamage = { knight_combo = 0.066, knight_slam = 0.13, knight_thunder_clap = 0.088 },
+		tags = { "nature" },
+		equipment = { helmet = "solar_crown", chestplate = "iron_chestplate", accessories = { "nautilus_shell", "lucky_cloak" } },
+		sounds = { hit = "enemy_hit", crit = "enemy_crit", crash = "enemy_crash", death = "enemy_death" },
+		attacks = {
+			{ attack = "knight_combo", weight = 4, cooldown = { 2.5, 4 } },
+			{ attack = "knight_slam", weight = 2, cooldown = { 6, 9 } },
+			{ attack = "knight_thunder_clap", weight = 3, cooldown = { 8, 11 } },
+			{ attack = "knight_parry", weight = 2, cooldown = { 5, 8 } },
+		},
+		xp = { skill = "Combat", amount = 130 },
+		drops = { { table = "mob_basic" } },
+		mob = {
+			template = "RustbladeKnight",
+			bodyColor = Color3.fromRGB(90, 120, 60),
+			weapon = { item = "stormcaller" }, -- Stormcaller: Diamond model, Thunder Clap
+			health = 310,
+			walkSpeed = 8,
+			chaseSpeed = 12,
+			respawnSeconds = 8,
+			ai = {
+				aggroRange = 28,
+				leashRange = 55,
+				spacing = { min = 7, max = 9 },
+				flank = { chance = 0.2, orbitSeconds = { 1.5, 2.5 } },
+				attackGap = 0.4,
+			},
+		},
+	},
+	glacier_knight = {
+		name = "Glacier Knight",
+		nameplate = true,
+		moveDamage = { knight_combo = 0.25, knight_lunge = 0.42, knight_frost_nova = 0.38 },
+		tags = { "ice" },
+		equipment = { helmet = "iron_helmet", chestplate = "golden_chestplate", accessories = { "rabbit_foot", "nautilus_shell" } },
+		sounds = { hit = "enemy_hit", crit = "enemy_crit", crash = "enemy_crash", death = "enemy_death" },
+		attacks = {
+			{ attack = "knight_combo", weight = 4, cooldown = { 2.5, 4 } },
+			{ attack = "knight_lunge", weight = 2, cooldown = { 5, 8 } },
+			{ attack = "knight_frost_nova", weight = 3, cooldown = { 9, 12 } },
+			{ attack = "knight_parry", weight = 4, cooldown = { 4, 7 } },
+		},
+		xp = { skill = "Combat", amount = 120 },
+		drops = { { table = "mob_basic" } },
+		mob = {
+			template = "RustbladeKnight",
+			bodyColor = Color3.fromRGB(200, 230, 245),
+			weapon = { item = "frostbrand" }, -- Frostbrand: Iron model, Frost Nova
+			health = 220,
+			walkSpeed = 9,
+			chaseSpeed = 15,
+			respawnSeconds = 8,
+			ai = {
+				aggroRange = 30,
+				leashRange = 55,
+				spacing = { min = 6, max = 9 },
+				flank = { chance = 0.4, orbitSeconds = { 1, 2.2 } },
+				attackGap = 0.25,
 			},
 		},
 	},
@@ -616,44 +770,100 @@ function EnemyConfig.get(enemyType: string?): any
 	return EnemyConfig.enemies[enemyType or "default"] or EnemyConfig.enemies.default
 end
 
-local levelCache: { [any]: any } = {}
+local Modules = game:GetService("ReplicatedStorage"):WaitForChild("Modules")
+local CombatConfig = require(Modules:WaitForChild("CombatConfig")) :: any
+local Items = require(Modules:WaitForChild("Items")) :: any
+local WeaponRegistry = require(Modules:WaitForChild("WeaponRegistry")) :: any
 
---- level (shown), computed (from stats), base and hp / damage / defense multipliers for an enemy type (cached).
---- The multipliers are 1 unless the enemy sets scales = true. Server (EnemyService) and client both read this.
-function EnemyConfig.levelInfo(enemyType: string?): any
+local HEALTH_PER_DEFENSE = 1 -- the same rule as a player (ResourceConfig: Health = Health + Defense x 1)
+
+--- Adds an Items def's stats to `totals`: a number is flat, { flat, mult } is flat plus a multiplier (like AttributeStatManager).
+local function addStats(totals: { [string]: any }, def: any?)
+	for key, value in pairs(def and def.stats or {}) do
+		local total = totals[key] or { flat = 0, mult = 0 }
+		totals[key] = total
+		if type(value) == "table" then
+			total.flat += tonumber(value.flat) or 0
+			total.mult += tonumber(value.mult) or 0
+		elseif type(value) == "number" then
+			total.flat += value
+		end
+	end
+end
+
+local function totalOf(totals: { [string]: any }, key: string): number
+	local total = totals[key]
+	return total and total.flat * (1 + total.mult) or 0
+end
+
+--- The plain Damage of a weapon def (the flat part when it is written as { flat, mult }).
+local function weaponDamageOf(def: any?): number
+	local value = def and def.stats and def.stats.Damage
+	if type(value) == "table" then
+		return tonumber(value.flat) or 0
+	end
+	return tonumber(value) or 0
+end
+
+local statsCache: { [string]: any } = {}
+
+--- Everything an enemy's gear makes it (cached per type): max health, Defense, Strength, crit, the weapon's hit and the level
+--- estimated from them. Read by EnemyService (spawn), the attacks (damageOf) and the nameplate (client).
+function EnemyConfig.statsFor(enemyType: string?): any
 	local key = enemyType or "default"
-	local cached = levelCache[key]
+	local cached = statsCache[key]
 	if cached then
 		return cached
 	end
 	local entry = EnemyConfig.get(enemyType)
-	local lv = EnemyConfig.levels
-	local health = entry.mob and entry.mob.health or entry.health or 0
-	local bestDps = 0
-	for _, option in ipairs(entry.attacks or {}) do
-		local attack = EnemyConfig.attacks[option.attack]
-		if attack then
-			local cooldown = option.cooldown or { 3, 5 }
-			local average = math.max(((cooldown[1] or 3) + (cooldown[2] or cooldown[1] or 3)) / 2, 0.1)
-			bestDps = math.max(bestDps, (attack.damage or 0) / average)
-		end
+	local mob = entry.mob or {}
+	local weaponDef = mob.weapon and mob.weapon.item and Items.get(mob.weapon.item)
+	local equipment = entry.equipment or {}
+	local totals: { [string]: any } = {}
+	addStats(totals, weaponDef)
+	for _, slot in ipairs({ "helmet", "chestplate", "leggings", "boots" }) do
+		addStats(totals, equipment[slot] and Items.get(equipment[slot]))
 	end
-	local power = health * lv.weights.hp + bestDps * lv.weights.damage + (entry.defense or 0) * lv.weights.defense
-	local computed = math.clamp(math.round(lv.baseLevel + lv.curve * power ^ lv.exponent), lv.baseLevel, lv.maxLevel)
-	local level = math.clamp(math.floor(entry.level or computed), lv.baseLevel, lv.maxLevel)
-	local scaling = entry.levelScaling or {}
-	local base = scaling.baseLevel or computed
-	local steps = entry.scales and math.max(level - base, 0) or 0
+	for _, id in ipairs(equipment.accessories or {}) do
+		addStats(totals, Items.get(id))
+	end
+
+	local defense = math.max(totalOf(totals, "Defense"), 0)
+	local strength = totalOf(totals, "Strength")
+	local maxHealth = (mob.health or 0) + totalOf(totals, "Health") + defense * HEALTH_PER_DEFENSE
+	local weaponBase = WeaponRegistry.getScaledDamage(weaponDef and weaponDamageOf(weaponDef) or EnemyConfig.unarmed.Damage, weaponDef and weaponDef.rarity or 0)
+	local hitDamage = (weaponBase + CombatConfig.damage.flatBase) * (1 + strength * CombatConfig.damage.strengthScale)
+
+	local lv = EnemyConfig.levels
+	local power = maxHealth * lv.weights.hp + hitDamage * lv.weights.damage + defense * lv.weights.defense
 	local info = {
-		level = level,
-		computed = computed,
-		base = base,
-		hpMult = 1 + (scaling.hp or lv.scaling.hp) * steps,
-		damageMult = 1 + (scaling.damage or lv.scaling.damage) * steps,
-		defenseMult = 1 + (scaling.defense or lv.scaling.defense) * steps,
+		level = math.clamp(math.round(lv.baseLevel + lv.curve * power ^ lv.exponent), lv.baseLevel, lv.maxLevel),
+		maxHealth = maxHealth,
+		defense = defense,
+		strength = strength,
+		critChance = math.clamp(totalOf(totals, "CritChance"), 0, CombatConfig.damage.critChanceCap),
+		critIncrease = totalOf(totals, "CritIncrease"),
+		weaponBase = weaponBase,
+		hitDamage = math.floor(hitDamage + 0.5), -- one plain hit, before the attack's own multipliers and crit
+		weaponType = weaponDef and weaponDef.weapon and weaponDef.weapon.weaponType or nil,
 	}
-	levelCache[key] = info
+	statsCache[key] = info
 	return info
+end
+
+--- The damage one attack (or one combo step) does from the mob's gear. Same formula as a player's swing (DamageService.compute):
+--- (weapon Damage x rarity + flatBase) x (1 + Strength x strengthScale) x attack.damageMult x multiplier, then the CritChance roll.
+--- `multiplier` is the extra part of the move: a combo step's damageMult, a finisher, or an ability's own damageMult.
+--- Returns the amount and whether it crit.
+function EnemyConfig.damageOf(enemyType: string?, attack: any, multiplier: number?): (number, boolean)
+	local info = EnemyConfig.statsFor(enemyType)
+	local config = CombatConfig.damage
+	local amount = (info.weaponBase + config.flatBase) * (1 + info.strength * config.strengthScale) * (attack.damageMult or 1) * (multiplier or 1)
+	local isCrit = math.random() * 100 < info.critChance
+	if isCrit then
+		amount *= 1 + (config.critBase + info.critIncrease) * config.critScale
+	end
+	return math.max(1, math.floor(amount + 0.5)), isCrit
 end
 
 function EnemyConfig.resolve(enemyType: string?, weaponType: string?, weaponId: string?, preset: string): any

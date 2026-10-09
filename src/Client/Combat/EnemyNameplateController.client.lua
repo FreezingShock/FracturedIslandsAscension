@@ -211,7 +211,7 @@ end
 
 local function updateLevel(plate: Plate)
 	local attribute = plate.model:GetAttribute("EnemyLevel")
-	plate.level = type(attribute) == "number" and attribute or EnemyConfig.levelInfo(plate.model:GetAttribute("EnemyType")).level
+	plate.level = type(attribute) == "number" and attribute or EnemyConfig.statsFor(plate.model:GetAttribute("EnemyType")).level
 	if plate.levelLabel then
 		plate.levelLabel.Text = "LV " .. plate.level
 	end

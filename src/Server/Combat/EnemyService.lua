@@ -58,8 +58,8 @@ local function spawnMob(marker: BasePart)
 		return
 	end
 	model.Name = entry.name
-	local levelInfo = EnemyConfig.levelInfo(enemyType)
-	humanoid.MaxHealth = cfg.health * levelInfo.hpMult
+	local stats = EnemyConfig.statsFor(enemyType) -- health, defense and level come from the gear (see EnemyConfig 1e)
+	humanoid.MaxHealth = stats.maxHealth
 	humanoid.Health = humanoid.MaxHealth
 	humanoid.WalkSpeed = cfg.walkSpeed
 	humanoid.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
@@ -68,7 +68,8 @@ local function spawnMob(marker: BasePart)
 	model:PivotTo(marker.CFrame * CFrame.new(0, 3.1, 0)) -- roughly right; placeOnGround sets the exact height from the real floor
 	EnemyRig.placeOnGround(model, marker)
 	model:SetAttribute("EnemyType", enemyType)
-	model:SetAttribute("EnemyLevel", levelInfo.level) -- the nameplate shows it; with entry.scales it also scaled health / damage
+	model:SetAttribute("EnemyLevel", stats.level) -- the nameplate shows it (estimated from the gear; it scales nothing)
+	model:SetAttribute("Defense", stats.defense) -- DamageService: every hit the mob takes is x 100 / (100 + Defense)
 	model.Parent = workspace
 	EnemyTags.stamp(model, entry) -- after the parent: tags need a live model for their expiry timers
 	CollectionService:AddTag(model, DamageService.TAG)
@@ -86,8 +87,7 @@ local function spawnMob(marker: BasePart)
 		entry = entry,
 		enemyType = enemyType,
 		ai = EnemyConfig.aiFor(enemyType),
-		level = levelInfo.level,
-		damageMult = levelInfo.damageMult,
+		level = stats.level,
 		state = "idle",
 		nextWander = 0,
 		nextAttackAt = 0,
