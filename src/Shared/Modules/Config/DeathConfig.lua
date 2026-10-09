@@ -22,7 +22,8 @@
 	  A boss:           EnemyConfig.enemies.<key>.death = { deathType = "boss" }
 	  New death type:   add DeathConfig.types.<name> = { ...fields to change... } and reference it with deathType
 	  Another colour:   death = { burst = { colors = { Color3..., ... } }, glitch = { tint = Color3... } }
-	  Sounds:           library.sounds.glitch.id / burst.id = "rbxassetid://..."  (silent until set)
+	  Sounds:           library.sounds.glitch.id / burst.id = "rbxassetid://..."  (silent until set); library.sounds.sao = the death sound
+	                    (forward on death, its reversed copy on the reveal; see the comment there)
 	  Respawn reveal:   library.respawn (timeline, radius, sounds) + library.selfRespawn (camera / screen); a player's reveal is
 	                    the death played backwards, so burst.* and glitch.* shape it too. Players.RespawnTime = respawnSeconds().
 --]]
@@ -103,6 +104,12 @@ DeathConfig.library = {
 	sounds = { -- silent until you set an id; 3D at the body
 		glitch = { id = "", volume = 0.8, pitch = { 0.95, 1.05 } },
 		burst = { id = "", volume = 1, pitch = { 0.95, 1.05 } },
+		-- The death sound: plays FORWARD when the death starts and fitted to the death sequence, and its REVERSED copy plays when the
+		-- reveal starts (Roblox cannot play a sound backwards: upload the audio reversed, e.g. Audacity > Effect > Reverse, and put its id in
+		-- reverseId; until then the reveal is silent). fit = change the playback speed (between minSpeed and maxSpeed) so the sound lasts
+		-- exactly as long as the animation; if it is still longer, it fades out over `fade` seconds when the animation ends.
+		-- To silence it for one kind: kinds.enemy = { sounds = { sao = { id = "", reverseId = "" } } }.
+		sao = { id = "rbxassetid://128025726296262", reverseId = "", volume = 1, rolloff = 110, fit = true, minSpeed = 0.75, maxSpeed = 1.5, fade = 0.4 },
 	},
 
 	player = {

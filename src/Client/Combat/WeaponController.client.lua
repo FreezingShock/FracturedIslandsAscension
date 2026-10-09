@@ -199,7 +199,8 @@ local function startSwing()
 
 	combo.step = stepIndex
 	combo.busyUntil = now + swingTime
-	combo.expiresAt = combo.busyUntil + typeConfig.comboWindow
+	combo.expiresAt = combo.busyUntil + CombatConfig.comboWindowFor(typeConfig, swingTime, speed)
+	combo.startedAt = now
 	combo.buffered = false
 
 	faceCursor()
@@ -231,14 +232,41 @@ local function onAttackInput()
 	end
 end
 
+-- HOLD TO ATTACK (CombatConfig <type>.holdToAttack): while left click stays down the combo keeps going. Unlike a click (which may be
+-- buffered a little before the swing ends) a held button waits for the attack bar to be FULL (ChargeTime seconds after the last swing began),
+-- so every held swing is a full-damage one.
+local holdingAttack = false
+
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
 	if gameProcessed or input.UserInputType ~= Enum.UserInputType.MouseButton1 then
 		return
 	end
+	holdingAttack = true
 	onAttackInput()
 end)
 
+UserInputService.InputEnded:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1 then
+		holdingAttack = false
+	end
+end)
+
 RunService.Heartbeat:Connect(function()
+	local now0 = os.clock()
+	if holdingAttack and currentWeapon and now0 >= combo.busyUntil then
+		local typeConfig = CombatConfig.get(currentWeapon.weaponType)
+		local humanoid = player.Character and player.Character:FindFirstChildOfClass("Humanoid")
+		local grounded = humanoid ~= nil and humanoid.FloorMaterial ~= Enum.Material.Air
+		local charge = player:GetAttribute("ChargeTime")
+		local charged = type(charge) ~= "number" or combo.startedAt == nil or now0 - combo.startedAt >= charge
+		if typeConfig and typeConfig.holdToAttack and grounded and charged and comboAllowed() then
+			startSwing()
+			return
+		end
+		if not UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) then
+			holdingAttack = false -- the release was missed (menu opened, focus lost)
+		end
+	end
 	if combo.buffered and os.clock() >= combo.busyUntil then
 		if comboAllowed() then
 			startSwing()
@@ -261,7 +289,8 @@ SwordSwingEvent.OnClientEvent:Connect(function(swinger, stepIndex, speed, weapon
 			combo.awaitUntil = nil
 			local now = os.clock()
 			combo.busyUntil = now + CombatConfig.swingTime(step, speed)
-			combo.expiresAt = combo.busyUntil + typeConfig.comboWindow
+			combo.expiresAt = combo.busyUntil + CombatConfig.comboWindowFor(typeConfig, CombatConfig.swingTime(step, speed), speed)
+			combo.startedAt = now
 			combo.buffered = false
 			faceCursor()
 			CombatAnimator.play(player.Character, weaponType, stepIndex, speed, weaponId, crash == true)

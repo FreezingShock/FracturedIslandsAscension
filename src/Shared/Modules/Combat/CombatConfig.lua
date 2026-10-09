@@ -62,6 +62,8 @@
 	  moveSpeedFactor           WalkSpeed multiplier while swinging
 	  finisherMoveSpeedFactor   same for the last step of the combo
 	  bufferTime                a click this close to the end of a swing is remembered and fires when it ends
+	  holdToAttack              true = holding left click keeps swinging and the whole combo loops; each swing waits until the attack
+	                            bar is FULL again (CombatConfig.chargeTime), unlike spam-clicking which swings as soon as the swing ends
 	  steps[i].duration         animation length in seconds at attack speed 1
 	  steps[i].hitFrame         seconds into the swing where damage will be applied (hook: WeaponManager.onSwingHit)
 	  steps[i].recovery         extra seconds after the animation before the next swing may start
@@ -223,6 +225,7 @@ CombatConfig.sword = {
 	moveSpeedFactor = 0.6,
 	finisherMoveSpeedFactor = 0.4,
 	bufferTime = 0.35,
+	holdToAttack = true,
 	steps = {
 		{ name = "SlashDownLeft", animation = "sword_combo1", duration = 0.50, hitFrame = 0.20, recovery = 0.05,
 			reach = 9, arc = 130, damageMult = 1.0, knockback = 14, maxTargets = 4,
@@ -406,6 +409,16 @@ function CombatConfig.timingTier(sinceLast: number, attackSpeed: number?): any
 	end
 	local last = tiers[#tiers]
 	return { mult = last.mult, full = last.full == true, color = last.color, index = #tiers }
+end
+
+--- Seconds after a swing ends in which the next swing still continues the combo. A held button waits for the full charge bar, so for
+--- holdToAttack weapons the window is at least the time the bar needs after the swing (+ a margin): the combo never drops while held.
+function CombatConfig.comboWindowFor(typeConfig: any, swingTime: number, attackSpeed: number?): number
+	local window = typeConfig.comboWindow
+	if typeConfig.holdToAttack then
+		window = math.max(window, CombatConfig.chargeTime(attackSpeed) - swingTime + 0.35)
+	end
+	return window
 end
 
 --- Seconds of rest at `attackSpeed` for the charge bar to be full (where the last tier starts).

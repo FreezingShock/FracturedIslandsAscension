@@ -346,6 +346,65 @@ local function playBurst(model: Model, cfg: any, reduced: boolean, rng: Random, 
 	Debris:AddItem(anchor, cfg.timeline.burst + burst.lingerSeconds)
 end
 
+--- A long sound that has to last as long as an animation: `entry` = DeathConfig sounds.sao. Plays 3D at `position`; when entry.fit the
+--- playback speed is set so its length matches `seconds` (clamped), and a sound that is still longer fades out when the animation ends.
+--- `reversed` plays entry.reverseId (the audio uploaded backwards: Roblox cannot reverse a sound); silent while it is not set.
+local warnedReverse = false
+local function playTimed(entry: any, position: Vector3, seconds: number, reversed: boolean)
+	if type(entry) ~= "table" then
+		return
+	end
+	local id = reversed and entry.reverseId or entry.id
+	if type(id) ~= "string" or id == "" then
+		if reversed and not warnedReverse and entry.id ~= "" then
+			warnedReverse = true
+			warn("[DeathFX] sounds.sao.reverseId is not set: the reveal is silent (upload the death sound reversed and set it in DeathConfig)")
+		end
+		return
+	end
+	local part = Instance.new("Part")
+	part.Name = "SaoSound"
+	part.Anchored = true
+	part.CanCollide = false
+	part.CanQuery = false
+	part.CanTouch = false
+	part.Transparency = 1
+	part.Size = Vector3.one
+	part.CFrame = CFrame.new(position)
+	part.Parent = fxFolder()
+	local sound = Instance.new("Sound")
+	sound.SoundId = id
+	sound.Volume = entry.volume or 1
+	sound.RollOffMaxDistance = entry.rolloff or 110
+	sound.Parent = part
+	Debris:AddItem(part, seconds + 12) -- (replaced below once the real length is known)
+	task.spawn(function()
+		if not sound.IsLoaded then
+			game:GetService("ContentProvider"):PreloadAsync({ sound })
+		end
+		if not part.Parent then
+			return
+		end
+		local length = sound.TimeLength
+		local speed = 1
+		if entry.fit and length > 0 and seconds > 0 then
+			speed = math.clamp(length / seconds, entry.minSpeed or 0.75, entry.maxSpeed or 1.5)
+		end
+		sound.PlaybackSpeed = speed
+		sound:Play()
+		local playSeconds = length > 0 and length / speed or seconds
+		if playSeconds > seconds + 0.05 then
+			task.delay(seconds, function()
+				if sound.Parent then
+					local fade = TweenService:Create(sound, TweenInfo.new(entry.fade or 0.4), { Volume = 0 })
+					fade:Play()
+				end
+			end)
+		end
+		Debris:AddItem(part, math.max(playSeconds, seconds) + (entry.fade or 0.4) + 1)
+	end)
+end
+
 -- ===================== REVEAL (the death played backwards, for a respawning player) =====================
 local reveals: { [Model]: () -> () } = {} -- model -> cancel, so a second death mid-reveal can take the body back
 
@@ -592,6 +651,9 @@ function DeathFX.playReverse(model: Model, kind: string?, seed: number?, delay: 
 			return
 		end
 		playConverge(model, cfg, reduced, rng, lod)
+		if not lod then
+			playTimed(cfg.sounds.sao, model:GetPivot().Position, timeline.converge + timeline.solidify, true) -- the reversed death sound, fitted to the reveal
+		end
 		task.wait(timeline.converge)
 		if not alive then
 			return
@@ -665,6 +727,10 @@ function DeathFX.play(model: Model, kind: string?, deathType: string?, seed: num
 		sound.Parent = fxFolder()
 		sound:Play()
 		Debris:AddItem(sound, 3)
+	end
+
+	if not lod then
+		playTimed(cfg.sounds.sao, origin, timeline.glitch + timeline.burst, false) -- the death sound, fitted to the whole death
 	end
 
 	local function burst()

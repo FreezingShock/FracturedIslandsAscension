@@ -183,7 +183,7 @@ function WeaponManager.TrySwing(player, crash: boolean?, hitIn: number?): (boole
 	local ticket = c.ticket
 	c.step = stepIndex
 	c.busyUntil = now + swingTime
-	c.expiresAt = c.busyUntil + typeConfig.comboWindow
+	c.expiresAt = c.busyUntil + CombatConfig.comboWindowFor(typeConfig, swingTime, speed)
 	player:SetAttribute("ComboStep", stepIndex)
 
 	-- slower walking while swinging (the finisher is heavier); a Crash never slows you
@@ -209,7 +209,7 @@ function WeaponManager.TrySwing(player, crash: boolean?, hitIn: number?): (boole
 			restoreWalkSpeed(player, c)
 		end
 	end)
-	task.delay(swingTime + typeConfig.comboWindow, function()
+	task.delay(swingTime + CombatConfig.comboWindowFor(typeConfig, swingTime, speed), function()
 		if c.ticket == ticket then
 			c.step = 0
 			player:SetAttribute("ComboStep", 0)
