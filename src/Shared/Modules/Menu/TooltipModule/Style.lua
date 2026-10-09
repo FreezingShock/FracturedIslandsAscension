@@ -21,6 +21,11 @@ Style.FONT_BODY = "rbxassetid://12187370747" -- descriptions
 Style.FONT_DYNAMIC = Style.FONT_PIXEL
 Style.DYNAMIC_TEXT_SIZE = 20
 
+-- Text sizes of the Template (tools/studio/build_tooltip_fonts.luau writes them into StarterGui.TooltipMenu.Template; change here AND
+-- rerun the builder with FORCE). Titles, stats, bars, level bar, pills and the footer are Silkscreen; the description body is Noto Sans (bold).
+Style.SIZE = { title = 24, tag = 16, description = 22, stat = 22, progress = 20, level = 20, dynamic = 20, footer = 18, click = 18, details = 16 }
+Style.FONT_BODY_WEIGHT = Enum.FontWeight.Bold
+
 -- Minecraft color codes (&a, &7 ... also accepted as §a) -> hex.
 Style.MC_CODES = {
 	["0"] = "#000000", ["1"] = "#0000AA", ["2"] = "#00AA00", ["3"] = "#00AAAA",
@@ -89,6 +94,66 @@ Style.CLICK_HINTS = {
 	unequip = { text = "TO UNEQUIP", color = "#55FF55", icon = "rmb" },
 	drag = { text = "TO DRAG", color = "#55FFFF", icon = "lmb" },
 }
+
+-- ===================== READABLE COLOURS =====================
+-- Dark gray (#555555) is hard to read on the tooltip: text that must be read uses the lighter partner.
+Style.READABLE = { ["#555555"] = "#8E8E8E" }
+
+--- Replace every unreadable colour in a rich-text string.
+function Style.readable(text: any): any
+	if type(text) ~= "string" then
+		return text
+	end
+	return (text:gsub('#%x%x%x%x%x%x', function(hex)
+		return Style.READABLE[hex:upper()] or hex
+	end))
+end
+
+-- ===================== STAT COLOURS (one place) =====================
+-- library -> attribute -> override: Style.statColor(attribute) / Style.statLine(attribute, amount) colour a stat the same way in
+-- every tooltip. `name` / `color` / `icon` default to the attribute definition (Attributes.get); an entry here overrides them.
+Style.STATS = {
+	Health = { color = "#FF5555" },
+	Defense = { color = "#55FF55" },
+	Intelligence = { color = "#55FFFF" },
+	Mana = { color = "#55FFFF" },
+	Speed = { color = "#FFFFFF" },
+	Strength = { color = "#FF5555" },
+	Wisdom = { color = "#55FFFF" },
+}
+Style.GENERIC_STAT = { color = "#FFFFFF", icon = { 0, 0 } } -- an attribute with no entry and no definition
+
+local attributesModule: any = nil
+local function attributeDef(attribute: string): any
+	if attributesModule == nil then
+		local modules = script.Parent.Parent -- Style -> TooltipModule -> Modules (flat in Studio: every module is a direct child)
+		local found = modules:FindFirstChild("Attributes")
+		attributesModule = found and require(found) or false
+	end
+	return attributesModule and attributesModule.get(attribute) or nil
+end
+
+--- { name, color (hex), icon } of an attribute.
+function Style.statInfo(attribute: string): any
+	local def = attributeDef(attribute)
+	local override = Style.STATS[attribute] or {}
+	return {
+		name = override.name or (def and def.name) or attribute,
+		color = Style.hex(override.color or (def and def.color) or Style.GENERIC_STAT.color),
+		icon = override.icon or (def and def.icon) or Style.GENERIC_STAT.icon,
+	}
+end
+
+function Style.statColor(attribute: string): string
+	return Style.statInfo(attribute).color
+end
+
+--- "+5 Health" as rich text in the stat's colour (the value in green when `gain`, like SkyBlock).
+function Style.statLine(attribute: string, amount: number, gain: boolean?): string
+	local info = Style.statInfo(attribute)
+	local sign = amount >= 0 and "+" or ""
+	return string.format('<font color="%s">%s%s</font> <font color="%s">%s</font>', gain and "#55FF55" or info.color, sign, tostring(amount), info.color, info.name)
+end
 
 -- ===================== COLOR HELPERS =====================
 

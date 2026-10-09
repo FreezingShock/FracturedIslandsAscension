@@ -109,56 +109,85 @@ NexusConfig.page = {
 	},
 }
 
--- Tooltip text (Minecraft colour codes). title / lines are rich text; tokens in braces are filled by the page:
--- {level} {xp} {total} {pct} {max} {bar} {done} {milestones} {milestone} {reward}. The page adds the dynamic blocks (reward lines, sources) itself.
+-- ===================== TOOLTIPS (structured data, rendered by TooltipModule) =====================
+-- Each entry is a TooltipModule config (title, titleColor, tags, description, statsTitle, stats, progress, footer, click, details)
+-- plus a few dynamic markers the page resolves from the Player attributes:
+--   {level} {total} {maxXp} {pct} {max} {milestone} {milestones} {milestoneTotal} {xp} {tier}    tokens in any string
+--   statsFrom = "rewards" | "milestoneRewards" | "sources"    stats rows built from NexusConfig.rewardsFor / the categories
+--   progress.pct = "xp" | "milestones" | "total"               the bar: progress inside the level / milestones done / total XP of the max
+--   click / clickAlt                                          { text, color, icon }; clickAlt shows while the milestone preview is on
+-- Colours: Minecraft palette (see Style.statColor for attribute colours).
 NexusConfig.tooltips = {
 	ranking = {
-		title = '<font color="#55FF55">Your Nexus Level Ranking</font>',
-		lines = {
-			'<font color="#555555">Classic Mode</font>',
-			"",
-			'<font color="#FFFFFF">Your level: </font><font color="#FFFF55">{level}</font>',
-			'<font color="#FFFFFF">You have: </font><font color="#55FFFF">{total} XP</font>',
-			"",
-			'<font color="#AAAAAA">You have completed </font><font color="#55FFFF">{pct}%</font><font color="#AAAAAA"> of the total Nexus XP Tasks.</font>',
-			"",
-			'<font color="#AAAAAA">Ranking information requires Nexus Level 10 or higher.</font>',
-			'<font color="#555555">Level rankings may take time to refresh.</font>',
+		title = "Your Nexus Level Ranking",
+		titleColor = "#55FF55",
+		tags = { { text = "CLASSIC MODE", color = "#AAAAAA" } },
+		statsTitle = "YOUR LEVEL",
+		stats = {
+			{ name = "Your level", value = "{level}", color = "#FFFF55" },
+			{ name = "You have", value = "{total} XP", color = "#55FFFF" },
+			{ name = "Completed", value = "{pct}%", color = "#55FF55" },
 		},
+		progress = { pct = "total", label = "{total} / {maxXp} XP", color = "#55FFFF" },
+		footer = "&7Ranking information requires Nexus Level 10 or higher.",
+		details = { { key = "Note", value = "Level rankings may take time to refresh.", color = "#AAAAAA" } },
 	},
-	comingSoon = { title = '<font color="#FF5555">Coming Soon</font>', lines = {} },
+	comingSoon = {
+		title = "Coming Soon",
+		titleColor = "#FF5555",
+		description = "&7This slot is not available yet.",
+		footer = "&cCOMING SOON",
+	},
 	rewards = {
-		title = '<font color="#55FF55">Leveling Rewards</font>',
-		lines = {
-			'<font color="#AAAAAA">View all the rewards you can unlock by leveling up your Nexus Level.</font>',
-			"",
-			'<font color="#AAAAAA">Progress to Max: </font><font color="#55FFFF">{pct}%</font>',
-			"{bar}",
-			"",
-			'<font color="#FFFF55">Click to view rewards!</font>',
-		},
+		title = "Leveling Rewards",
+		titleColor = "#55FF55",
+		description = "&7View all the rewards you can unlock by leveling up your Nexus Level.",
+		progress = { pct = "milestones", label = "{milestones} / {milestoneTotal} Milestones", color = "#FFAA00" },
+		click = { text = "CLICK TO VIEW REWARDS!", color = "#FFFF55", icon = "lmb" },
 	},
 	sources = {
-		title = '<font color="#FFAA00">XP Sources</font>',
-		lines = { '<font color="#AAAAAA">Where your Nexus XP came from.</font>', "", "{sources}", "", '<font color="#FFFFFF">Total: </font><font color="#FFFF55">{total} XP</font>' },
+		title = "XP Sources",
+		titleColor = "#FFAA00",
+		description = "&7Where your Nexus XP came from.",
+		statsTitle = "SOURCES",
+		statsFrom = "sources",
+		progress = { pct = "total", label = "{total} / {maxXp} XP", color = "#55FFFF" },
 	},
 	emblems = {
-		title = '<font color="#55FF55">Prefix Emblems</font>',
-		lines = {
-			'<font color="#AAAAAA">Add some spice by having an emblem next to your name in chat and in tab!</font>',
-			"",
-			'<font color="#AAAAAA">Emblems are unlocked through various activities such as leveling up or completing achievements!</font>',
-			"",
-			'<font color="#FF5555">Coming Soon</font>',
-		},
+		title = "Prefix Emblems",
+		titleColor = "#55FF55",
+		description = "&7Add some spice by having an emblem next to your name in chat and in tab!\n\n&7Emblems are unlocked through various activities such as leveling up or completing achievements!",
+		footer = "&cCOMING SOON",
 	},
 	milestone = {
-		title = '<font color="#FFAA00">Next Milestone: Level {milestone}</font>',
-		lines = { '<font color="#AAAAAA">Reward:</font>', "{reward}", "", '<font color="#FFFF55">Click to preview!</font>' },
+		title = "Next Milestone: Level {milestone}",
+		titleColor = "#FFAA00",
+		tags = { { text = "MILESTONE", color = "#FFAA00" } },
+		statsTitle = "REWARD",
+		statsFrom = "milestoneRewards",
+		click = { text = "CLICK TO PREVIEW!", color = "#FFFF55", icon = "lmb" },
+		clickAlt = { text = "CLICK TO RETURN!", color = "#55FFFF", icon = "lmb" },
 	},
-	pane = {
-		title = '<font color="#55FF55">Level {level}</font>',
-		lines = { '<font color="#AAAAAA">Reward:</font>', "{reward}", "", "{xp}", '<font color="#FFFF55">Click to view rewards!</font>' },
+	pane = { -- one of the 5 preview slots (the page adds the FINISHED / IN PROGRESS / LOCKED tag and the milestone tag)
+		title = "Level {level}",
+		statsTitle = "REWARD",
+		statsFrom = "rewards",
+		click = { text = "CLICK TO VIEW REWARDS!", color = "#FFFF55", icon = "lmb" },
+	},
+	paneTags = {
+		done = { text = "FINISHED", color = "#55FF55" },
+		current = { text = "IN PROGRESS", color = "#FFFF55" },
+		todo = { text = "LOCKED", color = "#FF5555" },
+		milestone = { text = "MILESTONE", color = "#FFAA00" },
+	},
+	nexus = { -- the Nexus home + Profile AethericNexus buttons
+		title = "Aetheric Nexus Level {level}",
+		titleColor = "{tier}",
+		description = "&7Your account level, earned from skill level-ups and collections.",
+		statsTitle = "XP SOURCES",
+		statsFrom = "sources",
+		progress = { pct = "xp", label = "{xp}", color = "#FF55FF" },
+		click = { text = "CLICK TO VIEW!", color = "#FFFF55", icon = "lmb" },
 	},
 }
 

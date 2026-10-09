@@ -41,7 +41,7 @@ local UIClick = UISounds:WaitForChild("Click")
 
 local M = {}
 
-local TooltipModule: any = nil
+local TooltipModule: any = require(Modules:WaitForChild("TooltipModule")) -- the same instance CentralizedMenuController loaded
 local templates: { [string]: Instance? } = {}
 -- what the open page shows: `milestoneView` = the preview is centred on the next milestone instead of the current level
 local state = { milestoneView = false }
@@ -79,85 +79,105 @@ local function xpText(s): string
 	return string.format("%s%s%s %s", rich("#FFFF55", number(s.into)), rich("#FFAA00", "/"), rich("#FFFF55", number(s.need)), rich("#AAAAAA", "XP"))
 end
 
---- "+5 Health" lines of a level's rewards (Minecraft colours), or "None".
-local function rewardLines(level: number): string
-	local rewards = NexusConfig.rewardsFor(level)
-	if #rewards == 0 then
-		return rich("#555555", "None")
-	end
-	local lines = {}
-	for _, reward in ipairs(rewards) do
-		local stat = NexusConfig.rewards.stats[reward.stat]
-		table.insert(lines, string.format("%s %s", rich("#55FF55", "+" .. reward.amount), rich(stat and stat.color or "#FFFFFF", stat and stat.name or reward.stat)))
-	end
-	return table.concat(lines, "\n")
-end
-
-local function barText(done: number, total: number): string
-	local width = 20
-	local filled = total > 0 and math.floor(done / total * width + 0.5) or 0
-	return rich("#55FF55", string.rep("=", filled)) .. rich("#555555", string.rep("=", width - filled)) .. " " .. rich("#55FFFF", done .. "/" .. total)
-end
-
-local function sourcesText(): string
-	local lines = {}
-	for _, id in ipairs(NexusConfig.categoryOrder()) do
-		local category = NexusConfig.categories[id]
-		table.insert(lines, string.format("%s: %s", rich(category.color, category.name), rich("#FFFFFF", number(player:GetAttribute(ATTR.categoryPrefix .. id) or 0))))
-	end
-	return table.concat(lines, "\n")
-end
-
---- A NexusConfig.tooltips entry as a TooltipModule config, tokens filled from the snapshot (`extra` adds / overrides tokens).
-local function tooltipFor(id: string, extra: { [string]: string }?): any
+--- A NexusConfig.tooltips entry as a full TooltipModule config: tokens filled from the Player attributes, stats rows from
+--- Tooltip.Build, the progress bar from the entry's `progress.pct` kind. `ctx` = { level, status, milestone, alt }.
+local function tooltipFor(id: string, ctx: any?): any
 	local entry = NexusConfig.tooltips[id]
+	local Tooltip = TooltipModule
+	local Build, Rich = Tooltip.Build, Tooltip.Rich
+	ctx = ctx or {}
 	local s = snapshot()
-	local milestone = NexusConfig.nextMilestone(s.level)
+	local nextMilestone = NexusConfig.nextMilestone(s.level) or NexusConfig.curve.maxLevel
 	local done, all = NexusConfig.milestoneCount(s.level)
+	local level = ctx.level or s.level
+	local tier = NexusConfig.colorFor(s.level)
 	local tokens: { [string]: string } = {
-		level = tostring(s.level),
+		level = tostring(level),
 		total = number(s.total),
-		xp = xpText(s),
+		maxXp = number(NexusConfig.maxXp()),
 		pct = tostring(math.floor(s.total / NexusConfig.maxXp() * 100)),
 		max = tostring(NexusConfig.curve.maxLevel),
-		bar = barText(done, all),
+		milestone = tostring(nextMilestone),
 		milestones = tostring(done),
-		milestone = tostring(milestone or NexusConfig.curve.maxLevel),
-		reward = rewardLines(milestone or NexusConfig.curve.maxLevel),
-		sources = sourcesText(),
+		milestoneTotal = tostring(all),
+		xp = Rich.strip(xpText(s)),
+		tier = tier,
 	}
-	for key, value in pairs(extra or {}) do
-		tokens[key] = value
-	end
-	local function fill(text: string): string
+	local function fill(text: any): any
+		if type(text) ~= "string" then
+			return text
+		end
 		return (text:gsub("{(%w+)}", function(key)
 			return tokens[key] or ""
 		end))
 	end
-	local lines = {}
-	for _, line in ipairs(entry.lines) do
-		table.insert(lines, fill(line))
+	local function text(value: any): any -- {tokens} + Minecraft & codes
+		return type(value) == "string" and Rich.mc(fill(value)) or value
 	end
-	local last = lines[#lines] or ""
-	local click = ""
-	if last:find("Click", 1, true) then -- the trailing "Click to ...!" line is the tooltip's own click row
-		click = last
-		table.remove(lines)
-		if lines[#lines] == "" then
-			table.remove(lines)
+
+	local config: any = {
+		title = fill(entry.title),
+		titleColor = fill(entry.titleColor),
+		description = text(entry.description),
+		statsTitle = entry.statsTitle,
+		footer = text(entry.footer),
+		details = entry.details,
+	}
+
+	-- tags (the preview panes add their own status / milestone tag)
+	local tags = {}
+	for _, tag in ipairs(entry.tags or {}) do
+		table.insert(tags, tag)
+	end
+	if id == "pane" then
+		local paneTags = NexusConfig.tooltips.paneTags
+		table.insert(tags, 1, paneTags[ctx.status or "todo"])
+		if level > 0 and level % NexusConfig.rewards.milestoneEvery == 0 then
+			table.insert(tags, paneTags.milestone)
 		end
+		config.titleColor = NexusConfig.colorFor(level)
 	end
-	return { title = fill(entry.title), desc = table.concat(lines, "\n"), click = click }
+	config.tags = #tags > 0 and tags or nil
+
+	-- stats rows
+	local rows = {}
+	if entry.statsFrom == "rewards" or entry.statsFrom == "milestoneRewards" then
+		local rewardLevel = entry.statsFrom == "rewards" and level or nextMilestone
+		rows = Build.rewardList(NexusConfig.rewardsFor(rewardLevel))
+		if #rows == 0 then
+			rows = { Build.row("None", "", "#AAAAAA") }
+		end
+	elseif entry.statsFrom == "sources" then
+		for _, categoryId in ipairs(NexusConfig.categoryOrder()) do
+			local category = NexusConfig.categories[categoryId]
+			table.insert(rows, Build.row(category.name, number(player:GetAttribute(ATTR.categoryPrefix .. categoryId) or 0), category.color))
+		end
+		table.insert(rows, Build.row("Total", number(s.total) .. " XP", "#FFFF55"))
+	end
+	for _, row in ipairs(entry.stats or {}) do
+		table.insert(rows, Build.row(row.name, fill(row.value), row.color, row.icon))
+	end
+	config.stats = #rows > 0 and rows or nil
+
+	-- progress bar
+	local progress = entry.progress
+	if id == "pane" then
+		progress = ctx.status == "current" and { pct = "xp", label = "{xp}", color = "#FFFF55" } or nil
+	end
+	if progress then
+		local pct = progress.pct == "xp" and s.progress or (progress.pct == "milestones" and (all > 0 and done / all or 0) or (s.total / NexusConfig.maxXp()))
+		config.progress = Build.progress(pct, fill(progress.label), { color = progress.color })
+	end
+
+	-- click pill
+	local click = (ctx.alt and entry.clickAlt) or entry.click
+	config.click = click and { text = click.text, color = click.color, icon = click.icon } or nil
+	return config
 end
 
 --- Tooltip of the Nexus buttons (home + Profile).
 function M.tooltipText()
-	local s = snapshot()
-	return {
-		title = string.format("%s %s", rich("#FF55FF", "<b>Aetheric Nexus Level</b>"), rich(NexusConfig.colorFor(s.level), "<b>" .. s.level .. "</b>")),
-		desc = rich("#AAAAAA", "Your account level, earned from skill level-ups and collections.") .. "\n" .. xpText(s),
-		click = rich("#FFFF55", "Click to view!"),
-	}
+	return tooltipFor("nexus")
 end
 
 -- ===================== SLOTS =====================
@@ -270,7 +290,7 @@ function M.populate(frame: Instance)
 			if id == "milestone" then
 				live.milestoneSlot = slot
 				bind(slot, function()
-					return tooltipFor("milestone")
+					return tooltipFor("milestone", { alt = state.milestoneView })
 				end, function()
 					state.milestoneView = not state.milestoneView
 					refreshPreview()
@@ -298,9 +318,8 @@ function M.populate(frame: Instance)
 			place(cell(PAGE.preview.row, col), slot)
 			bind(slot, function()
 				local s = snapshot()
-				local extra = { level = tostring(entry.level), reward = rewardLines(entry.level), xp = entry.level == s.level and xpText(s) or "" }
-				local config = tooltipFor("pane", extra)
-				return config
+				local status = entry.level < s.level and "done" or (entry.level == s.level and "current" or "todo")
+				return tooltipFor("pane", { level = entry.level, status = status })
 			end)
 		end
 	end
@@ -354,8 +373,7 @@ function M.reset()
 	M.depopulate()
 end
 
-function M.init(refs: any)
-	TooltipModule = refs.TooltipModule
+function M.init(_refs: any)
 	local temporary = player:WaitForChild("PlayerGui"):WaitForChild("CentralizedAscensionMenu"):WaitForChild("TemporaryMenus")
 	templates.NexusSlot = temporary:FindFirstChild("NexusSlot") or temporary:FindFirstChild("CollectionStatSlot")
 	templates.BlankSlot = temporary:FindFirstChild("BlankSlot")

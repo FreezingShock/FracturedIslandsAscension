@@ -34,6 +34,8 @@
 	               to expand collapsible ones
 	               (ability / rewards / breakdown sections)
 	  footer       small-caps note below the blocks
+	  details      { {key=, value=, color=, keyColor=}, ... }  small pixel-font key/value lines under the footer
+	               (Obtained: ..., Source: ...), like SkyBlock's bottom lines
 	  click        string | {text=, color=, icon="lmb"|"rmb"} | array of those
 	  dividers     { d1=, d2=, d3= } force a divider on/off (default automatic)
 
@@ -54,12 +56,14 @@ local Style = require(script:WaitForChild("Style"))
 local Rich = require(script:WaitForChild("Rich"))
 local Items = require(script:WaitForChild("Items"))
 local Sections = require(script:WaitForChild("Sections"))
+local Build = require(script:WaitForChild("Build"))
 
 local API = {}
 API.Style = Style
 API.Rich = Rich
 API.Sections = Sections
 API.Items = Items
+API.Build = Build -- Tooltip.Build.stat / rewardList / progress / tag / row (see TooltipModule/Build)
 API.STAT_SPRITESHEET = Style.SPRITE -- kept for modules that draw their own stat icons
 
 -- ===================== CONFIG =====================
@@ -781,7 +785,37 @@ local function renderBlocks(cfg): boolean
 		f.Text = text:find("<sc>", 1, true) and text or Rich.sc(text)
 		f.Parent = rewardsFrame
 	end
-	rewardsFrame.Visible = hasBlocks or hasFooter
+	local hasDetails = type(cfg.details) == "table" and #cfg.details > 0
+	if hasDetails and protos.blockText then
+		local lines = {}
+		for _, line in ipairs(cfg.details) do
+			table.insert(
+				lines,
+				string.format(
+					'<font color="%s">%s: </font><font color="%s">%s</font>',
+					Style.hex(line.keyColor or "#AAAAAA"),
+					tostring(line.key),
+					Style.hex(line.color or "#FFFFFF"),
+					tostring(line.value)
+				)
+			)
+		end
+		local d = protos.blockText:Clone()
+		d.Name = "Block_details"
+		d.Position = UDim2.new()
+		d.AnchorPoint = Vector2.zero
+		d.Size = UDim2.new(1, 0, 0, 0)
+		d.AutomaticSize = Enum.AutomaticSize.Y
+		d.LayoutOrder = 1001
+		d.FontFace = Font.new(Style.FONT_DYNAMIC)
+		d.TextSize = Style.SIZE.details
+		d.TextWrapped = true
+		d.RichText = true
+		d.TextXAlignment = Enum.TextXAlignment.Left
+		d.Text = table.concat(lines, "\n")
+		d.Parent = rewardsFrame
+	end
+	rewardsFrame.Visible = hasBlocks or hasFooter or hasDetails
 	return hasBlocks
 end
 
@@ -916,6 +950,18 @@ local function normalize(cfg: any)
 	end
 	if type(n.level) == "number" then
 		n.level = { text = "LV. " .. n.level }
+	end
+	-- legacy "Coming Soon" click line -> the red footer (no click pill: nothing happens on click)
+	if type(n.click) == "string" and Rich.strip(n.click):lower():find("coming soon", 1, true) then
+		n.footer = n.footer or '<font color="#FF5555">COMING SOON</font>'
+		n.click = nil
+	end
+	-- dark gray text is never readable on the tooltip: every text field gets the readable partner
+	for _, field in ipairs({ "title", "description", "footer", "statsTitle" }) do
+		n[field] = Style.readable(n[field])
+	end
+	if type(n.level) == "table" then
+		n.level = { text = Style.readable(n.level.text) }
 	end
 	Sections.resolve(n, shiftHeld)
 	n.click = normalizeClick(n.click)

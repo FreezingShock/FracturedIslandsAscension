@@ -353,8 +353,13 @@ local NEXUS_TOOLTIP = {
 if NexusLevelPageModule then
 	local NexusConfig = require(Modules:WaitForChild("Config"):WaitForChild("NexusConfig")) :: any
 	local function refreshNexusTooltip()
-		local text = NexusLevelPageModule.tooltipText()
-		NEXUS_TOOLTIP.title, NEXUS_TOOLTIP.desc, NEXUS_TOOLTIP.click = text.title, text.desc, text.click
+		local config = NexusLevelPageModule.tooltipText()
+		for key in pairs(NEXUS_TOOLTIP) do
+			NEXUS_TOOLTIP[key] = nil
+		end
+		for key, value in pairs(config) do
+			NEXUS_TOOLTIP[key] = value
+		end
 	end
 	refreshNexusTooltip()
 	for _, attribute in ipairs({ NexusConfig.attributes.level, NexusConfig.attributes.progress, NexusConfig.attributes.total }) do
@@ -968,9 +973,9 @@ local NEXUS_BLANK_GROUPS = {
 	{ layoutOrder = 1, count = 4 },
 	{ layoutOrder = 3, count = 5 },
 	{ layoutOrder = 11, count = 4 },
-	{ layoutOrder = 15, count = 13 }, -- the retired hotbar-toggle button's cell is blank now
-	{ layoutOrder = 17, count = 2 },
-	{ layoutOrder = 22, count = 2 },
+	{ layoutOrder = 15, count = 12 }, -- (the retired hotbar-toggle button has no cell any more) the blanks up to the bottom row
+	{ layoutOrder = 17, count = 2 }, -- bottom row: 2 blanks, then WarpMap, Close, Settings, BoosterOil
+	{ layoutOrder = 22, count = 3 },
 }
 
 local NEXUS_ITEM_ORDERS = {
