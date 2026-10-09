@@ -56,12 +56,74 @@ local DodgeEvent = ReplicatedStorage:WaitForChild("DodgeEvent")
 local MenuBridge = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("MenuBridge")) :: any
 local player = Players.LocalPlayer
 local DODGE_KEY = MovementConfig.dodge.key
+local DODGE = MovementConfig.dodge
+local SECTORS = { "f", "fr", "r", "br", "b", "bl", "l", "fl" }
 
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
 	if input.KeyCode == DODGE_KEY and not gameProcessed and not MenuBridge.isOpen() then
 		DodgeRequest:FireServer()
 	end
 end)
+
+-- every roll clip (every dodge type) is downloaded at launch and a track per clip is loaded into each new character's Animator,
+-- so the first roll plays without a hitch
+local rollAnimations: { [string]: Animation } = {}
+local rollTracks: { [string]: AnimationTrack } = {}
+
+local function collectRollAnimations(animations: any)
+	if type(animations) ~= "table" then
+		return
+	end
+	for _, set in pairs(animations) do
+		if type(set) == "table" then
+			for _, id in pairs(set) do
+				if type(id) == "string" and id ~= "" and not rollAnimations[id] then
+					local animation = Instance.new("Animation")
+					animation.AnimationId = id
+					rollAnimations[id] = animation
+				end
+			end
+		end
+	end
+end
+
+collectRollAnimations(MovementConfig.dodge.animations)
+for _, typeConfig in pairs(MovementConfig.dodge.types) do
+	collectRollAnimations(typeConfig.animations)
+end
+
+task.spawn(function()
+	local list = {}
+	for _, animation in pairs(rollAnimations) do
+		table.insert(list, animation)
+	end
+	if #list > 0 then
+		game:GetService("ContentProvider"):PreloadAsync(list)
+	end
+end)
+
+local function loadRollTracks(character: Model)
+	table.clear(rollTracks)
+	local humanoid = character:WaitForChild("Humanoid", 10) :: Humanoid?
+	local animator = humanoid and (humanoid:FindFirstChildOfClass("Animator") or humanoid:WaitForChild("Animator", 10)) :: Animator?
+	if not animator then
+		return
+	end
+	for id, animation in pairs(rollAnimations) do
+		local ok, track = pcall(function()
+			return animator:LoadAnimation(animation)
+		end)
+		if ok and track then
+			track.Priority = Enum.AnimationPriority.Action
+			rollTracks[id] = track
+		end
+	end
+end
+
+player.CharacterAdded:Connect(loadRollTracks)
+if player.Character then
+	task.spawn(loadRollTracks, player.Character)
+end
 
 --- The roll direction: where the player is steering, else where the character faces (flat).
 local function rollDirection(root: BasePart, humanoid: Humanoid): Vector3
@@ -83,7 +145,7 @@ local function playSound(root: BasePart, id: string)
 	game:GetService("Debris"):AddItem(sound, 3)
 end
 
-DodgeEvent.OnClientEvent:Connect(function(roller, distance, duration, soundId, animationId)
+DodgeEvent.OnClientEvent:Connect(function(roller, distance, duration, soundId, animations)
 	if typeof(roller) ~= "Instance" or not roller:IsA("Player") or type(distance) ~= "number" or type(duration) ~= "number" then
 		return
 	end
@@ -99,16 +161,38 @@ DodgeEvent.OnClientEvent:Connect(function(roller, distance, duration, soundId, a
 	if roller ~= player then
 		return
 	end
-	if type(animationId) == "string" and animationId ~= "" then
+	local direction = rollDirection(root, humanoid)
+	-- the clip: ground or air set, the sector (45 degrees each) of the roll direction relative to where the character faces
+	local delay = 0
+	if type(animations) == "table" then
+		local set = animations[humanoid.FloorMaterial == Enum.Material.Air and "air" or "ground"]
+		local look = Vector3.new(root.CFrame.LookVector.X, 0, root.CFrame.LookVector.Z)
+		local id = nil
+		if type(set) == "table" and look.Magnitude > 0.01 then
+			look = look.Unit
+			local right = Vector3.new(-look.Z, 0, look.X) -- look x up
+			local angle = math.deg(math.atan2(direction:Dot(right), direction:Dot(look)))
+			id = set[SECTORS[(math.floor((angle + 22.5) / 45) % 8) + 1]]
+		end
 		local animator = humanoid:FindFirstChildOfClass("Animator")
-		if animator then
-			local animation = Instance.new("Animation")
-			animation.AnimationId = animationId
-			animator:LoadAnimation(animation):Play()
+		if type(id) == "string" and id ~= "" and animator then
+			local track = rollTracks[id]
+			if not track then -- not loaded yet (or an id only the server knows): load it now
+				local animation = Instance.new("Animation")
+				animation.AnimationId = id
+				track = animator:LoadAnimation(animation)
+				track.Priority = Enum.AnimationPriority.Action
+				rollTracks[id] = track
+			end
+			local speed = DODGE.animationDuration / math.max(duration, 0.05)
+			delay = DODGE.animationDashStart / speed -- the clip crouches first, the dash starts when the roll does
+			track:Play(0.04, 1, speed)
 		end
 	end
 	-- the dash: a velocity that covers `distance` in `duration`, removed afterwards (the server never moves the character)
-	local direction = rollDirection(root, humanoid)
+	if delay > 0 then
+		task.wait(delay)
+	end
 	local attachment = Instance.new("Attachment")
 	attachment.Parent = root
 	local velocity = Instance.new("LinearVelocity")

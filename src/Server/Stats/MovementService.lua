@@ -13,7 +13,7 @@
 	  Dodge roll: the client sends only intent (RemoteEvent DodgeRequest, no arguments). The server checks the rate limit, a living
 	  grounded character, the cooldown and Stamina (MovementConfig.dodgeFor(type)), spends the cost, writes the Player attribute
 	  DodgeUntil (server time: enemy hits resolved before it deal 0, see DamageService.hurtPlayer) and tells every client through
-	  DodgeEvent (roller, distance, duration, sound, animation) so the roller's client plays the roll and everyone hears it.
+	  DodgeEvent (roller, distance, duration, sound, animations) so the roller's client plays the roll and everyone hears it.
 
 	API
 	  MovementService.IsDodging(player)
@@ -188,7 +188,7 @@ DodgeRequest.OnServerEvent:Connect(function(player)
 	local bonus = tonumber(AttributeStatManager.GetFinalValue(player, dodge.statDistance)) or 0
 	local distance = math.max(0, dodge.distance + bonus)
 	player:SetAttribute("DodgeUntil", workspace:GetServerTimeNow() + dodge.iframes)
-	DodgeEvent:FireAllClients(player, distance, dodge.duration, dodge.sound, dodge.animation)
+	DodgeEvent:FireAllClients(player, distance, dodge.duration, dodge.sound, dodge.animations)
 end)
 
 local allowed = RateLimiter.new(10, 8)

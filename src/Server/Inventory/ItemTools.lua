@@ -9,6 +9,7 @@
 
 	  ItemTools.ensure(toolName) -> Tool or nil   (finds or creates)
 	  ItemTools.ensureAll()      -> number created
+	  ItemTools.repairHandle(tool) -> true when the Tool has a Handle again (a held Tool whose parts were destroyed by falling off the map is rebuilt from its ServerStorage template)
 --]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -177,6 +178,22 @@ function ItemTools.ensure(toolName: string): Tool?
 		return build(def)
 	end
 	return nil
+end
+
+function ItemTools.repairHandle(tool: Tool): boolean
+	if tool:FindFirstChild("Handle") then
+		return true
+	end
+	local template = ItemTools.ensure(tool.Name)
+	if not template then
+		return false
+	end
+	for _, child in ipairs(template:GetChildren()) do
+		if not tool:FindFirstChild(child.Name) and (child:IsA("BasePart") or child:IsA("Model") or child:IsA("Weld") or child:IsA("Attachment")) then
+			child:Clone().Parent = tool
+		end
+	end
+	return tool:FindFirstChild("Handle") ~= nil
 end
 
 function ItemTools.ensureAll(): number

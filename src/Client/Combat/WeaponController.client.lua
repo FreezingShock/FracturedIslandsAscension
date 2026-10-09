@@ -189,6 +189,10 @@ local function faceCursor()
 end
 
 local function startSwing()
+	local dodgeUntil = player:GetAttribute("DodgeUntil")
+	if type(dodgeUntil) == "number" and workspace:GetServerTimeNow() < dodgeUntil then
+		return -- no swinging while rolling
+	end
 	local typeConfig = CombatConfig.get(currentWeapon.weaponType)
 	local now = os.clock()
 	local stepCount = #typeConfig.steps

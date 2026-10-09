@@ -116,6 +116,7 @@ local function stashTools(player): number
 	if player.Character then
 		for _, child in ipairs(player.Character:GetChildren()) do
 			if child:IsA("Tool") then
+				ItemTools.repairHandle(child) -- a fall off the map destroys the Handle: the Tool must come back whole
 				child.Parent = backpack or stash -- the few held Tools join the Backpack that is about to be parked
 				moved += 1
 			end
@@ -1389,6 +1390,23 @@ local function onPlayerReady(player)
 		end
 		char.ChildAdded:Connect(function(child)
 			if child:IsA("Tool") then
+				-- a held weapon must never be lost: the engine drops a Tool into the Workspace when its Handle is destroyed (the void
+				-- below FallenPartsDestroyHeight, a death); take it back into the inventory and rebuild the Handle
+				-- Falling into the void unparents the held Tool (parent = nil) WITHOUT destroying it; a deliberate Destroy() (drop, trash) fires
+				-- Destroying first, so that is the difference between a rescue and a delete
+				local deleted = false
+				child.Destroying:Connect(function()
+					deleted = true
+				end)
+				child.AncestryChanged:Connect(function(_, parent)
+					if deleted or not player.Parent then
+						return
+					end
+					if parent == workspace or parent == nil then
+						ItemTools.repairHandle(child)
+						child.Parent = player:FindFirstChildOfClass("Backpack") or getStash(player, true)
+					end
+				end)
 				scheduleUpdate(player)
 			end
 		end)

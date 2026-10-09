@@ -23,6 +23,7 @@
 	  iframes          seconds after the roll starts during which enemy hits deal 0 damage (Player attribute DodgeUntil, server time)
 	  cooldown         seconds between rolls (measured from the start of the previous one)
 	  requireGround    true = no rolling in the air
+	  animations       { ground = {f=,fr=,r=,br=,b=,bl=,l=,fl=}, air = {...} } asset ids of the 8 directional clips (Blender: tools/blender/gen_dodge_roll_r6.py)
 	  statDistance     a stat-chain attribute whose value is ADDED to the distance (DodgeDistance: a boot enchant later; 0 when nobody has it)
 	  sound / animation  asset ids ("" = silent / no animation until you have them): sound plays 3D at the roller for everybody
 	  type / types     LAYERS: dodge (library) < dodge.types[<type>] < the Player attribute `DodgeType` (set by the server, e.g. for armor
@@ -50,10 +51,35 @@ MovementConfig.dodge = {
 	duration = 0.28,
 	iframes = 0.22,
 	cooldown = 0.9,
-	requireGround = true,
+	requireGround = false, -- true = no rolling in the air (false: the air clips play)
 	statDistance = "DodgeDistance",
 	sound = "", -- whoosh: silent until you set an id
-	animation = "", -- roll animation: none until you set an id
+	-- the 8 roll clips, picked by the angle between the roll direction and where the character faces (f = forward, fr, r, br, b, bl, l, fl);
+	-- `air` plays when the roller is not standing on anything. A type may override any of it (dodge.types.heavy.animations = {...}).
+	animations = {
+		ground = {
+			f = "rbxassetid://109782061774123",
+			fr = "rbxassetid://139065912490102",
+			r = "rbxassetid://89731343433947",
+			br = "rbxassetid://100039428146587",
+			b = "rbxassetid://121367520278861",
+			bl = "rbxassetid://115604823499926",
+			l = "rbxassetid://129952270481506",
+			fl = "rbxassetid://74166854028412",
+		},
+		air = {
+			f = "rbxassetid://107315233101713",
+			fr = "rbxassetid://122827429084307",
+			r = "rbxassetid://72581392122109",
+			br = "rbxassetid://119210140360871",
+			b = "rbxassetid://120476070242479",
+			bl = "rbxassetid://86967347179960",
+			l = "rbxassetid://74242401533663",
+			fl = "rbxassetid://125374623391694",
+		},
+	},
+	animationDashStart = 2 / 30, -- seconds into the clip where the dash must start (clips are authored with the crouch first)
+	animationDuration = 0.28, -- the dash time the clips were authored for; other durations play the clip at animationDuration / duration
 	type = "light",
 	types = {
 		light = {},
