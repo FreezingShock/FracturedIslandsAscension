@@ -10,7 +10,13 @@
 	    MovementConfig.sprint.drainPerSecond per second and holds a session-only flat boost on the Speed attribute
 	    (+speedBonus), so the stat chain itself reads 16 -> 32. The Player attribute `Sprinting` tells clients (FOV).
 
+	  Dodge roll: the client sends only intent (RemoteEvent DodgeRequest, no arguments). The server checks the rate limit, a living
+	  grounded character, the cooldown and Stamina (MovementConfig.dodgeFor(type)), spends the cost, writes the Player attribute
+	  DodgeUntil (server time: enemy hits resolved before it deal 0, see DamageService.hurtPlayer) and tells every client through
+	  DodgeEvent (roller, distance, duration, sound, animation) so the roller's client plays the roll and everyone hears it.
+
 	API
+	  MovementService.IsDodging(player)
 	  MovementService.SetFactor(player, source, factor)   multiply walk speed by factor (nil removes it), e.g. ("combat", 0.6)
 	  MovementService.IsSprinting(player)
 --]]
@@ -33,6 +39,7 @@ local MovementService = {}
 
 -- [player] = { want = bool (a sprint key is held), sprinting = bool, exhausted = bool, factors = { [source] = number } }
 local states: { [Player]: any } = {}
+local lastDodge: { [Player]: number } = {} -- [player] = os.clock() of the last dodge roll
 
 local SetSprintEvent = ReplicatedStorage:FindFirstChild("SetSprint")
 if not SetSprintEvent then
@@ -127,11 +134,61 @@ for _, player in ipairs(Players:GetPlayers()) do
 end
 Players.PlayerRemoving:Connect(function(player)
 	states[player] = nil
+	lastDodge[player] = nil
 end)
 
 -- the Speed attribute changed (equipment, boosts, our own sprint boost): re-apply
 AttributeStatManager.Changed.Event:Connect(function(player)
 	applySpeed(player)
+end)
+
+-- ===================== DODGE ROLL =====================
+local DodgeRequest = ReplicatedStorage:FindFirstChild("DodgeRequest")
+if not DodgeRequest then
+	DodgeRequest = Instance.new("RemoteEvent")
+	DodgeRequest.Name = "DodgeRequest"
+	DodgeRequest.Parent = ReplicatedStorage
+end
+local DodgeEvent = ReplicatedStorage:FindFirstChild("DodgeEvent")
+if not DodgeEvent then
+	DodgeEvent = Instance.new("RemoteEvent")
+	DodgeEvent.Name = "DodgeEvent"
+	DodgeEvent.Parent = ReplicatedStorage
+end
+
+local dodgeAllowed = RateLimiter.new(4, 2) -- a burst of 4, then 2 requests per second at most
+
+function MovementService.IsDodging(player: Player): boolean
+	local untilTime = player:GetAttribute("DodgeUntil")
+	return type(untilTime) == "number" and workspace:GetServerTimeNow() < untilTime
+end
+
+DodgeRequest.OnServerEvent:Connect(function(player)
+	if not dodgeAllowed(player) or not states[player] then
+		return
+	end
+	local humanoid = humanoidOf(player)
+	local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+	if not (humanoid and root) or humanoid.Health <= 0 then
+		return
+	end
+	local typeName = player:GetAttribute("DodgeType") -- only the server writes it
+	local dodge = MovementConfig.dodgeFor(type(typeName) == "string" and typeName or nil)
+	if dodge.requireGround and humanoid.FloorMaterial == Enum.Material.Air then
+		return
+	end
+	local now = os.clock()
+	if lastDodge[player] and now - lastDodge[player] < dodge.cooldown then
+		return
+	end
+	if not ResourceService.Spend(player, SPRINT.resource, dodge.staminaCost) then
+		return -- not enough Stamina: nothing happens (the stamina strip shows why)
+	end
+	lastDodge[player] = now
+	local bonus = tonumber(AttributeStatManager.GetFinalValue(player, dodge.statDistance)) or 0
+	local distance = math.max(0, dodge.distance + bonus)
+	player:SetAttribute("DodgeUntil", workspace:GetServerTimeNow() + dodge.iframes)
+	DodgeEvent:FireAllClients(player, distance, dodge.duration, dodge.sound, dodge.animation)
 end)
 
 local allowed = RateLimiter.new(10, 8)

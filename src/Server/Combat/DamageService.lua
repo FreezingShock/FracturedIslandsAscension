@@ -257,6 +257,11 @@ function DamageService.hurtPlayer(player: Player, amount: number, source: Instan
 	if not (humanoid and root) or humanoid.Health <= 0 then
 		return 0
 	end
+	-- dodge roll i-frames (MovementService writes DodgeUntil in server time): the hit deals nothing
+	local dodgeUntil = player:GetAttribute("DodgeUntil")
+	if type(dodgeUntil) == "number" and workspace:GetServerTimeNow() < dodgeUntil then
+		return 0
+	end
 	local defense = math.max(tonumber(AttributeStatManager.GetFinalValue(player, "Defense")) or 0, 0)
 	local dealt = math.max(1, math.floor(amount * 100 / (100 + defense) + 0.5))
 	humanoid:TakeDamage(dealt)
