@@ -109,7 +109,7 @@ DeathConfig.library = {
 		-- reverseId; until then the reveal is silent). fit = change the playback speed (between minSpeed and maxSpeed) so the sound lasts
 		-- exactly as long as the animation; if it is still longer, it fades out over `fade` seconds when the animation ends.
 		-- To silence it for one kind: kinds.enemy = { sounds = { sao = { id = "", reverseId = "" } } }.
-		sao = { id = "rbxassetid://128025726296262", reverseId = "", volume = 1, rolloff = 110, fit = true, minSpeed = 0.75, maxSpeed = 1.5, fade = 0.4 },
+		sao = { id = "rbxassetid://128025726296262", reverseId = "rbxassetid://134268534307752", volume = 1, rolloff = 110, fit = true, minSpeed = 0.75, maxSpeed = 1.5, fade = 0.4 },
 	},
 
 	player = {
