@@ -25,12 +25,12 @@ Roblox incremental/progression game (Hypixel SkyBlock-style skills + stats). Sol
 Naming: `*.client.lua` = LocalScript, `*.server.lua` = Script, plain `.lua` = ModuleScript.
 
 ## Workflow automation (committed in `.claude/`, works on any machine after `git clone`)
-- **Skills:** `/fia-ideate <idea>` (idea -> spec) -> `/fia-feature <idea>` (branch, build, verify, review) -> `/fia-verify` (token-lean playtest) -> `/fia-ship` (commit, vault log, push). `/fia-skill <idea or restriction>` creates or changes skills, hooks, subagents, permissions and rules.
-- **Subagent:** `lua-explorer` (read-only code search). Verification runs inline via `/fia-verify`; large-feature reviews use the `fia-reviewer` subagent (haiku, low effort); `/code-review high` only with his explicit permission.
+- **Skills:** `/fia:fia-ideate <idea>` (idea -> spec) -> `/fia:fia-feature <idea>` (branch, build, verify, review) -> `/fia:fia-verify` (token-lean playtest) -> `/fia:fia-ship` (commit, vault log, push). `/fia:fia-skill <idea or restriction>` creates or changes skills, hooks, subagents, permissions and rules.
+- **Subagent:** `lua-explorer` (read-only code search). Verification runs inline via `/fia:fia-verify`; large-feature reviews use the `fia-reviewer` subagent (haiku, low effort); `/code-review high` only with his explicit permission.
 - **Review checklist:** async callbacks that mutate reused state check `PlaybackState`/generation (tween `Completed` fires on Cancel); saved-data changes backfill via `Reconcile`; server never trusts client values; new RemoteEvents type-check inputs; GUI is looked up by name, so renames break scripts; script names are unique per realm.
 - **Hooks:** blocks hand edits to generated files; regenerates `default.project.json` when a script is added; Stop is blocked while the project file is stale; a small context pack loads at session start.
-- **How Nate drives it:** `/fia-ideate <topic list>` -> answers 3-4 questions -> pastes the `/fia-feature` prompt -> "connected, verify it" (or tests it himself) -> small follow-ups. Once a change is verified, commit + push to `main` + vault session log happen automatically (his call, 2026-10-04); never ship unverified or failing code. Specs always state config shape (library -> type -> override), out of scope, and verification.
-- **Token rules:** never call `get_console_output` (use `/fia-verify`); `Grep`/partial reads instead of whole files; text assertions over screenshots; `/clear` between features.
+- **How Nate drives it:** `/fia:fia-ideate <topic list>` -> answers 3-4 questions -> pastes the `/fia:fia-feature` prompt -> "connected, verify it" (or tests it himself) -> small follow-ups. Once a change is verified, commit + push to `main` + vault session log happen automatically (his call, 2026-10-04); never ship unverified or failing code. Specs always state config shape (library -> type -> override), out of scope, and verification.
+- **Token rules:** never call `get_console_output` (use `/fia:fia-verify`); `Grep`/partial reads instead of whole files; text assertions over screenshots; `/clear` between features.
 - Install the skills user-wide with `python tools/install_skills.py`; validate with `python tools/check_skills.py`.
 
 ## Architecture
@@ -65,6 +65,8 @@ The `obsidian-second-brain` MCP (`mcp__plugin_obsidian-second-brain_vault__*`) i
 - Main thread only; no subagents for vault writes.
 
 ## Working agreements
+- Keybinds in use (check before binding a new key): Q = drop (`InventoryController`), F = dodge roll (`MovementConfig.dodge.key`).
+
 - Commit and push to `main` automatically once a change is verified (standing instruction, 2026-10-04); otherwise don't. Commit messages follow the repo's style: `3.31.1 - Short description of changes`.
 - Prefer editing existing modules over adding new ones; follow the `init/open/close/reset` page-module contract.
 - Verify UI changes in a playtest (`start_stop_play`, `get_console_output`, `screen_capture`) before calling them done.

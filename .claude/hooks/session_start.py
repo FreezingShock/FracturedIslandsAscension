@@ -49,8 +49,8 @@ if logs:
 else:
     lines.append("Vault not found on this machine (set OBSIDIAN_VAULT_PATH) - skip vault steps.")
 
-lines.append("Workflow skills: /fia-ideate (idea -> spec) /fia-feature (build) /fia-verify (playtest) "
-             "/fia-ship (commit+log) /fia-skill (create or change skills/hooks/rules).")
+lines.append("Workflow skills: /fia:fia-ideate (idea -> spec) /fia:fia-feature (build) /fia:fia-verify (playtest) "
+             "/fia:fia-ship (commit+log) /fia:fia-skill (create or change skills/hooks/rules).")
 lines.append("Rules: default.project.json is generated (python tools/gen_project.py); "
-             "Studio GUI is not in Rojo; verify with /fia-verify, never paste full console logs.")
+             "Studio GUI is not in Rojo; verify with /fia:fia-verify, never paste full console logs.")
 print("\n".join(lines))
