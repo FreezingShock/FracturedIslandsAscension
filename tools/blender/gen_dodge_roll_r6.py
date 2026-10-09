@@ -13,8 +13,14 @@ not typed in: they are FITTED from the sword combo (its actions + combo_motor6d_
 The torso translation is the same fit: Transform t = (-x, z, y) of the pose-bone location.
 
 THE CLIPS are authored in Roblox part space (x right, y up, z back, forward = -z) and converted to the bones:
-  roll direction d (0 = forward, 90 = right ...), roll axis w = up x d; the torso turns 360 degrees about w while it drops;
-  crouch (0-3) -> tuck + roll (2-10) -> rise (10-14); every clip starts and ends in the exact standing pose (all joints identity).
+  roll direction d (0 = forward, 90 = right ...), roll axis w = up x d; the torso turns 360 degrees about w.
+  A REAL ROLL ON THE GROUND: (1) GROUNDED - on every frame the torso is lowered until the lowest point of the body just touches the floor
+  (the body mesh is evaluated), so it never floats and never sinks; the Humanoid keeps the HumanoidRootPart at hip height over the terrain,
+  so the roll follows slopes and steps. (2) ROLLING ACROSS - the code dashes the HumanoidRootPart DASH_DISTANCE studs in DASH_FRAMES; the body
+  rolls without slipping, i.e. its centre advances DASH_DISTANCE * (roll progress) along the direction, so the torso is offset from the root by
+  DASH_DISTANCE * (roll progress - dash progress): it leads / trails the root a little and the contact point stays put on the floor.
+  Timeline: crouch + tuck (0-2), roll (0.5-8.5, one full turn, nearly constant speed), rise (9-13), stand (13-14). Every clip starts and ends in
+  the exact standing pose (all joints identity, no offset).
 """
 import json
 import math
@@ -37,11 +43,11 @@ CLIPS = [("F", 0), ("FR", 45), ("R", 90), ("BR", 135), ("B", 180), ("BL", 225), 
 
 # ---- tuning (degrees / studs) -------------------------------------------------------------------------------------------------------
 TUCK = {"Head": -40.0, "Arm": -100.0, "ArmIn": 25.0, "Leg": -110.0, "LegIn": 6.0}
-DROP = 1.25  # starting drop of the torso (studs); each clip then gets its own so the lowest point of the body just touches the floor (FLOOR_MARGIN)
-FLOOR_MARGIN = 0.05  # studs the body may dip below the floor (the floor is z = 0 in Blender, the HumanoidRootPart height above the soles in Roblox)
+DASH_DISTANCE = 14.0  # studs: MovementConfig.dodge.distance (the roll rolls exactly this far without slipping)
+DASH_FRAMES = 8.4  # frames the dash lasts: MovementConfig.dodge.duration (0.28 s) * 30 fps
 LEAN = 18.0
-ROLL_START, ROLL_END = 2.0, 10.0
-TUCK_IN, TUCK_OUT_START, TUCK_OUT_END = 3.0, 10.0, 14.0
+ROLL_START, ROLL_END = 0.5, 8.5
+TUCK_IN, TUCK_OUT_START, TUCK_OUT_END = 2.0, 9.0, 13.0
 
 
 def smooth(x: float) -> float:
@@ -143,17 +149,21 @@ def pose_value(frames, bone_name, d_world: Quaternion) -> Quaternion:
     return local.to_quaternion()
 
 
-def clip_pose(angle_deg: float, f: float, drop: float = DROP):
-    """{part: (Quaternion rotation in Roblox-axes-converted world, Vector part-space translation)} for frame f."""
+def clip_pose(angle_deg: float, f: float):
+    """{part: (Quaternion rotation in Roblox-axes-converted world, Vector part-space translation)} for frame f, WITHOUT the grounding drop
+    (build() lowers the torso so the body touches the floor). The torso translation is the rolling offset against the dashing root."""
     a = math.radians(angle_deg)
     d = (math.sin(a), 0.0, -math.cos(a))  # roll direction in part space (forward = -z, right = +x)
     w = (d[2], 0.0, -d[0])  # up x d
     tuck = smooth(f / TUCK_IN) * (1 - smooth((f - TUCK_OUT_START) / (TUCK_OUT_END - TUCK_OUT_START)))
-    roll = smooth((f - ROLL_START) / (ROLL_END - ROLL_START))
-    lean = LEAN * math.sin(math.pi * max(0.0, min(1.0, f / 4.0)))
+    linear = max(0.0, min(1.0, (f - ROLL_START) / (ROLL_END - ROLL_START)))
+    roll = 0.8 * linear + 0.2 * smooth(linear)  # nearly constant speed: the ground contact does not slide
+    dash = max(0.0, min(1.0, f / DASH_FRAMES))
+    lean = LEAN * math.sin(math.pi * max(0.0, min(1.0, f / 3.0)))
     phi = 360.0 * roll + lean
+    offset = DASH_DISTANCE * (roll - dash)  # rolled distance minus what the root has travelled: along d
     pose = {}
-    pose["Torso"] = (axis_angle(w, phi), Vector((0.0, -drop * tuck, 0.0)))
+    pose["Torso"] = (axis_angle(w, phi), Vector((d[0] * offset, 0.0, d[2] * offset)))
     X, Z = (1, 0, 0), (0, 0, 1)
     pose["Head"] = (axis_angle(X, TUCK["Head"] * tuck), Vector())
     pose["Right Arm"] = (axis_angle(X, TUCK["Arm"] * tuck) @ axis_angle(Z, -TUCK["ArmIn"] * tuck), Vector())
@@ -163,8 +173,22 @@ def clip_pose(angle_deg: float, f: float, drop: float = DROP):
     return pose
 
 
-def build(rig, maps, drops=None):
-    drops = drops or {}
+def lowest_now(rig) -> float:
+    """The lowest world z of the body meshes in the CURRENT pose."""
+    bpy.context.view_layer.update()
+    depsgraph = bpy.context.evaluated_depsgraph_get()
+    low = 9.0
+    for obj in bpy.data.objects:
+        if obj.name.startswith("Prev_"):
+            evaluated = obj.evaluated_get(depsgraph)
+            mesh = evaluated.to_mesh()
+            for vertex in mesh.vertices:
+                low = min(low, (obj.matrix_world @ vertex.co).z)
+            evaluated.to_mesh_clear()
+    return low
+
+
+def build(rig, maps):
     frames_rest = rest_frames(rig)
     for action in list(bpy.data.actions):
         bpy.data.actions.remove(action)
@@ -182,57 +206,51 @@ def build(rig, maps, drops=None):
             pb.rotation_mode = "QUATERNION"
         frames = []
         prev = {}
+        lows = []
+        drops = []
         for f in range(LAST + 1):
-            pose = clip_pose(angle, float(f), drops.get(name, DROP))
+            pose = clip_pose(angle, float(f))
+
+            def apply(drop: float):
+                for part in PARTS:
+                    rot, trans = pose[part]
+                    q = pose_value(frames_rest, part, rot)
+                    if part in prev and prev[part].dot(q) < 0:
+                        q.negate()
+                    bone = rig.pose.bones[part]
+                    bone.rotation_quaternion = q
+                    shift = trans + (Vector((0.0, -drop, 0.0)) if part == "Torso" else Vector())
+                    rrel, pm3 = frames_rest[part]
+                    bone.location = rrel.inverted() @ (pm3.inverted() @ rob_to_bl(shift))
+
+            apply(0.0)
+            drop = max(0.0, lowest_now(rig))  # GROUNDED: lower the torso until the lowest point of the body touches the floor
+            if drop < 0.02:
+                drop = 0.0  # the standing frames
+            apply(drop)
+            lows.append(round(lowest_now(rig), 3))
+            drops.append(round(drop, 2))
             entry = {}
             for part in PARTS:
-                rot, trans = pose[part]
-                q = pose_value(frames_rest, part, rot)
-                if part in prev and prev[part].dot(q) < 0:
-                    q.negate()  # keep the quaternion continuous between frames
-                prev[part] = q.copy()
                 bone = rig.pose.bones[part]
-                bone.rotation_quaternion = q
-                bl = rob_to_bl(trans)
-                rrel, pm3 = frames_rest[part]
-                bone.location = rrel.inverted() @ (pm3.inverted() @ bl)
+                prev[part] = bone.rotation_quaternion.copy()
                 bone.keyframe_insert("rotation_quaternion", frame=f, group=part)
                 if part == "Torso":
                     bone.keyframe_insert("location", frame=f, group=part)
                 entry[part] = to_json(part, bone, maps)
             frames.append(entry)
         result["DodgeRoll_" + name] = frames
-        # verification: first and last frame = the standing pose
-        worst = 0.0
+        worst = 0.0  # verification: first and last frame = the standing pose
         for fi in (0, LAST):
             for part in PARTS:
                 j = frames[fi][part]
-                angle_deg = math.degrees(2 * math.acos(min(1.0, abs(j[3]))))
-                worst = max(worst, angle_deg, max(abs(x) for x in j[4:7]))
-        report[name] = round(worst, 4)
+                worst = max(worst, math.degrees(2 * math.acos(min(1.0, abs(j[3])))), max(abs(x) for x in j[4:7]))
         assert worst < 0.5, f"clip {name} does not start/end in the standing pose ({worst})"
-        # after the first clip the rest pose of the rig for the next one
+        report[name] = {"standing": round(worst, 4), "lowest": min(lows), "rollLowest": [min(lows[2:11]), max(lows[2:11])], "maxDrop": max(drops)}
         for pb in rig.pose.bones:
             pb.rotation_quaternion = (1, 0, 0, 0)
             pb.location = (0, 0, 0)
     return result, report
-
-
-def lowest_point(rig, clip_name: str, first: int = 4, last: int = 10) -> float:
-    """The lowest world z of the body meshes while it is rolling (frames first..last: the start and the end are the standing pose)."""
-    rig.animation_data.action = bpy.data.actions[clip_name]
-    low = 9.0
-    for f in range(first, last + 1):
-        bpy.context.scene.frame_set(f)
-        depsgraph = bpy.context.evaluated_depsgraph_get()
-        for obj in bpy.data.objects:
-            if obj.name.startswith("Prev_"):
-                evaluated = obj.evaluated_get(depsgraph)
-                mesh = evaluated.to_mesh()
-                for vertex in mesh.vertices:
-                    low = min(low, (obj.matrix_world @ vertex.co).z)
-                evaluated.to_mesh_clear()
-    return low
 
 
 def luau(result) -> str:
@@ -312,14 +330,7 @@ def main():
     rig = open_base()
     maps = fit_maps(rig)
     result, report = build(rig, maps)
-    drops = {name: DROP for name, _ in CLIPS}
-    for _ in range(4):  # fit: every clip lowers the body just enough that it does not sink into the floor (a few passes: the lowest point moves as it turns)
-        for name, _angle in CLIPS:
-            low = lowest_point(rig, "DodgeRoll_" + name)
-            drops[name] = max(0.0, drops[name] - max(0.0, -low - FLOOR_MARGIN))
-        result, report = build(rig, maps, drops)
-    print("fitted drops:", {k: round(v, 2) for k, v in drops.items()})
-    print("lowest point after the fit:", {name: round(lowest_point(rig, "DodgeRoll_" + name), 2) for name, _ in CLIPS})
+    result, report = build(rig, maps)
     # leave the rig on the first clip, pose reset, scene 0..14 @ 30 fps
     rig.animation_data.action = bpy.data.actions["DodgeRoll_F"]
     scene = bpy.context.scene
@@ -332,7 +343,9 @@ def main():
     with open(OUT_LUAU, "w", encoding="utf-8", newline="\n") as handle:
         handle.write(luau(result))
     print("axis maps:", maps)
-    print("standing-pose check (max deg / studs at frames 0 and 14):", report)
+    print("per clip (standing = deviation at frames 0 and 14 in deg; lowest = lowest z over the clip; rollLowest = [min, max] of the lowest z over frames 2-10, ~0 = on the floor):")
+    for name, entry in report.items():
+        print("  ", name, entry)
     print("wrote", OUT_BLEND, OUT_JSON, OUT_LUAU)
 
 
