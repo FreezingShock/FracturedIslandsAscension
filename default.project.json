@@ -19,9 +19,6 @@
       "ButtonServerManager": {
         "$path": "src/Server/Buttons/ButtonServerManager.server.lua"
       },
-      "ChatInit": {
-        "$path": "src/Server/Chat/ChatInit.server.lua"
-      },
       "ChatService": {
         "$path": "src/Server/Chat/ChatService.lua"
       },
