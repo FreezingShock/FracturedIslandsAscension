@@ -112,4 +112,49 @@ NameplateConfig.tags = {
 	empower = { kind = "effect", name = "Empower", color = "#FFD24A", glyph = "M", icon = "rbxassetid://109814746839733" },
 }
 
+-- ===================== KINDS AND TYPES (layered overrides) =====================
+--[[
+	NameplateConfig.resolve(kind, typeId) -> { show, intro, hp, cameraModes?, badge? } for one plate.
+	Layers, later ones win per field:  the shared defaults above  ->  kinds[kind]  ->  types[typeId]
+	  kind   = "enemy" | "npc" | "player" | "self"   (the controller decides it from who owns the model)
+	  typeId = the EnemyConfig key of an enemy / NPC (nil for players)
+	Recipes:
+	  Change every plate:            edit show / intro / hp above (enemies, NPCs and players all follow)
+	  New player or self look:       kinds.player / kinds.self  (e.g. badge = { top, bottom, stroke, text })
+	  Look for one enemy or NPC:     types.<EnemyConfig key> = { show = { heightOffset = 3 } }
+	  Self plate visibility:         kinds.self.cameraModes (CameraController phases: "first" | "shoulder" | "free")
+	  badge: a fixed level badge tint (no combat-level compare); without it the badge uses tintFor (the levelTints above).
+--]]
+
+NameplateConfig.kinds = {
+	enemy = {},
+	npc = {}, -- hostile / passive NPCs: no passive flag in EnemyConfig yet, so nothing classifies as npc today
+	player = {
+		badge = { top = "#55FFFF", bottom = "#2A8C8C", stroke = "#0E3A3A", text = "#FFFFFF" }, -- Nexus level badge, not compared to combat level
+	},
+	self = {
+		cameraModes = { free = true }, -- the plate shows only in these camera phases: third-person free orbit, never first person
+		badge = { top = "#55FFFF", bottom = "#2A8C8C", stroke = "#0E3A3A", text = "#FFFFFF" },
+	},
+}
+
+NameplateConfig.types = {}
+
+local SECTIONS = { "show", "intro", "hp" }
+
+function NameplateConfig.resolve(kind: string, typeId: string?): any
+	local out: any = { show = {}, intro = {}, hp = {} }
+	local sources = { NameplateConfig, NameplateConfig.kinds[kind] or {}, NameplateConfig.types[typeId or ""] or {} }
+	for _, source in ipairs(sources) do
+		for _, section in ipairs(SECTIONS) do
+			for key, value in pairs(source[section] or {}) do
+				out[section][key] = value
+			end
+		end
+		out.cameraModes = source.cameraModes or out.cameraModes
+		out.badge = source.badge or out.badge
+	end
+	return out
+end
+
 return NameplateConfig

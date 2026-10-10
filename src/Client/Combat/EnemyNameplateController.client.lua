@@ -2,14 +2,17 @@
 	EnemyNameplateController (LocalScript, Client)
 	Place inside: StarterPlayer > StarterPlayerScripts
 
-	The nameplate over every model tagged "Enemy" (every enemy has one unless its EnemyConfig entry says nameplate = false):
+	One plate system for every model tagged "Enemy" (enemies, dummies, NPCs) and every model tagged "Nameplated" (players):
 	name, level badge, health bar with the HP number, and a row of tag chips (element, debuffs, active effects).
+	Enemies and players share the same template, tweens and death; the look and distances per kind come from NameplateConfig.resolve.
 	Cloned from the hand-made templates ReplicatedStorage.GUI.EnemyNameplate and EnemyNameplate_Tag (restyle them in Studio,
-	tools/studio/build_enemy_nameplate.luau lists the names this script looks up). No UI is built here. All numbers: Config/NameplateConfig.
+	tools/studio/build_enemy_nameplate.luau lists the names this script looks up). No UI is built here.
 
 	Reads only server state: Humanoid health, the model attributes EnemyLevel / EnemyName / EnemyType and Tag_<id>
-	("stacks|expiry", written by EnemyTags on the server). One shared loop (distance fades, tag timers, HP counting) runs for every plate.
-	Level badge tint = enemy level vs the player's Combat level (SkillUpdated payload).
+	("stacks|expiry", written by EnemyTags on the server); for a player the Player attributes NexusLevel and CameraMode.
+	One shared loop (distance fades, tag timers, HP counting) runs for every plate.
+	Level badge tint = enemy level vs the player's Combat level (SkillUpdated payload); a kind with a fixed badge (players) skips that.
+	The self plate (your own character) shows only in the camera phases kinds.self.cameraModes allows.
 --]]
 
 local CollectionService = game:GetService("CollectionService")
@@ -20,6 +23,8 @@ local TweenService = game:GetService("TweenService")
 
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local EnemyConfig = require(Modules:WaitForChild("EnemyConfig")) :: any
+local ResourceConfig = require(Modules:WaitForChild("ResourceConfig")) :: any
+local LevelBadge = require(Modules:WaitForChild("LevelBadge")) :: any -- the badge painting, shared with the chat
 local CFG = require(Modules:WaitForChild("Config"):WaitForChild("NameplateConfig")) :: any
 local DeathConfig = require(Modules:WaitForChild("Config"):WaitForChild("DeathConfig")) :: any
 local guiFolder = ReplicatedStorage:WaitForChild("GUI")
@@ -30,12 +35,17 @@ local shardTemplate = guiFolder:WaitForChild("EnemyNameplate_Shard") :: ImageLab
 
 local TAG_PREFIX = "Tag_"
 local combatLevel = 1
+local localPlayer = Players.LocalPlayer
 
 type Plate = {
 	model: Model,
 	gui: BillboardGui,
 	humanoid: Humanoid,
 	head: BasePart,
+	kind: string, -- "enemy" | "npc" | "player" | "self"
+	cfg: any, -- NameplateConfig.resolve(kind, type): show / intro / hp for this plate
+	player: Player?, -- the owner of a player / self plate (nil for enemies)
+	badge: any?, -- fixed level-badge row for this kind (nil = tint by combat level)
 	title: CanvasGroup,
 	titlePad: UIPadding?,
 	titleScale: UIScale?,
@@ -43,8 +53,7 @@ type Plate = {
 	fullAt: number?,
 	nameLabel: TextLabel?,
 	levelLabel: TextLabel?,
-	badgeStroke: UIStroke?,
-	badgeGradient: UIGradient?,
+	badgeRoot: Instance?, -- the LevelBadge frame LevelBadge.paint fills in
 	barGroup: CanvasGroup,
 	barScale: UIScale?,
 	fill: Frame,
@@ -90,9 +99,9 @@ local function play(plate: Plate, key: string, instance: Instance?, seconds: num
 	return tween
 end
 
-local function formatHp(value: number): string
+local function formatHp(value: number, units: { any }): string
 	value = math.max(value, 0)
-	for _, unit in ipairs(CFG.hp.units) do
+	for _, unit in ipairs(units) do
 		if value >= unit[1] then
 			local text = string.format("%.1f", math.floor(value / unit[1] * 10) / 10)
 			return (string.gsub(text, "%.0$", "")) .. unit[2]
@@ -102,15 +111,18 @@ local function formatHp(value: number): string
 end
 
 local function hpText(plate: Plate, value: number): string
-	local text = formatHp(value)
-	if CFG.hp.showMax then
-		text ..= "/" .. formatHp(plate.humanoid.MaxHealth)
+	local text = formatHp(value, plate.cfg.hp.units)
+	if plate.cfg.hp.showMax then
+		text ..= "/" .. formatHp(plate.humanoid.MaxHealth, plate.cfg.hp.units)
 	end
 	return text
 end
 
-local function tintFor(level: number): any
-	local difference = level - combatLevel
+local function tintFor(plate: Plate): any
+	if plate.badge then
+		return plate.badge
+	end
+	local difference = plate.level - combatLevel
 	for _, row in ipairs(CFG.levelTints) do
 		if difference <= row.upTo then
 			return row
@@ -125,7 +137,7 @@ local function setName(plate: Plate, on: boolean, seconds: number?)
 		return
 	end
 	plate.nameShown = on
-	local intro = CFG.intro
+	local intro = plate.cfg.intro
 	local rise = UDim.new(0, intro.nameRise)
 	if on then
 		play(plate, "titleFade", plate.title, intro.nameSeconds, { GroupTransparency = 0 })
@@ -142,7 +154,7 @@ local function setBar(plate: Plate, on: boolean, seconds: number?)
 		return
 	end
 	plate.barShown = on
-	local intro = CFG.intro
+	local intro = plate.cfg.intro
 	-- the slot between the name and the tags is 0 high while hidden: opening it pushes the two apart
 	if on then
 		play(plate, "barSlot", plate.barGroup, intro.barSeconds, { Size = UDim2.new(1, 0, 0, plate.barHeight), GroupTransparency = 0 })
@@ -160,7 +172,7 @@ local function setTags(plate: Plate, on: boolean, seconds: number?)
 		return
 	end
 	plate.tagsShown = on
-	local intro = CFG.intro
+	local intro = plate.cfg.intro
 	local chips = {}
 	for _, entry in pairs(plate.chips) do
 		table.insert(chips, entry.chip)
@@ -196,24 +208,26 @@ end
 
 -- ===================== LEVEL =====================
 local function applyTint(plate: Plate, animate: boolean)
-	local row = tintFor(plate.level)
+	local row = tintFor(plate)
 	local seconds = animate and CFG.tintSeconds or 0
-	if plate.badgeGradient then
-		plate.badgeGradient.Color = ColorSequence.new(Color3.fromHex(row.top), Color3.fromHex(row.bottom)) -- a ColorSequence cannot be tweened
-	end
-	if plate.badgeStroke then
-		play(plate, "tintStroke", plate.badgeStroke, seconds, { Color = Color3.fromHex(row.stroke) }, Enum.EasingStyle.Linear)
-	end
-	if plate.levelLabel then
-		play(plate, "tintText", plate.levelLabel, seconds, { TextColor3 = Color3.fromHex(row.text) }, Enum.EasingStyle.Linear)
+	if plate.badgeRoot then
+		LevelBadge.paint(plate.badgeRoot, row, function(instance: Instance, property: string, value: any)
+			play(plate, property == "Color" and "tintStroke" or "tintText", instance, seconds, { [property] = value }, Enum.EasingStyle.Linear)
+		end)
 	end
 end
 
 local function updateLevel(plate: Plate)
-	local attribute = plate.model:GetAttribute("EnemyLevel")
-	plate.level = type(attribute) == "number" and attribute or EnemyConfig.statsFor(plate.model:GetAttribute("EnemyType")).level
+	if plate.player then
+		-- a player's badge shows their Nexus level (the Player attribute NexusService publishes)
+		local nexus = plate.player:GetAttribute(ResourceConfig.nexusLevelAttribute)
+		plate.level = type(nexus) == "number" and nexus or 0
+	else
+		local attribute = plate.model:GetAttribute("EnemyLevel")
+		plate.level = type(attribute) == "number" and attribute or EnemyConfig.statsFor(plate.model:GetAttribute("EnemyType")).level
+	end
 	if plate.levelLabel then
-		plate.levelLabel.Text = "LV " .. plate.level
+		plate.levelLabel.Text = LevelBadge.text(plate.level)
 	end
 	applyTint(plate, false)
 end
@@ -278,7 +292,7 @@ local function removeChip(plate: Plate, id: string)
 	local chip = entry.chip
 	local scale = chip:FindFirstChildOfClass("UIScale")
 	if scale and chip.Parent then
-		local tween = TweenService:Create(scale, TweenInfo.new(CFG.intro.tagSeconds, Enum.EasingStyle.Quint, Enum.EasingDirection.In), { Scale = 0 })
+		local tween = TweenService:Create(scale, TweenInfo.new(plate.cfg.intro.tagSeconds, Enum.EasingStyle.Quint, Enum.EasingDirection.In), { Scale = 0 })
 		tween.Completed:Connect(function()
 			local group = chip.Parent
 			chip:Destroy()
@@ -320,11 +334,11 @@ local function createChip(plate: Plate, id: string, def: any, stacks: number, ex
 	end
 	local scale = chip:FindFirstChildOfClass("UIScale")
 	if scale then
-		scale.Scale = CFG.intro.tagStartScale
+		scale.Scale = plate.cfg.intro.tagStartScale
 	end
 	chip.Parent = group
 	if scale and plate.tagsShown then
-		TweenService:Create(scale, TweenInfo.new(CFG.intro.tagSeconds, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1 }):Play()
+		TweenService:Create(scale, TweenInfo.new(plate.cfg.intro.tagSeconds, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1 }):Play()
 	end
 	plate.chips[id] = { chip = chip, expiry = expiry, stacks = stacks, token = 0 }
 	plate.chipCount += 1
@@ -412,7 +426,7 @@ local function playDeath(plate: Plate)
 	local model, gui = plate.model, plate.gui
 	local stack = find(gui, "Stack") :: Frame?
 	local enemyType = model:GetAttribute("EnemyType")
-	local kind = enemyType == "dummy" and "dummy" or "enemy"
+	local kind = plate.player and "player" or enemyType == "dummy" and "dummy" or "enemy"
 	local cfg = DeathConfig.resolve(kind, type(enemyType) == "string" and EnemyConfig.get(enemyType) or nil)
 	local hud = cfg.hud
 	local glitchSeconds = cfg.timeline.glitch
@@ -536,13 +550,13 @@ local function onHealth(plate: Plate)
 	plate.gen += 1
 	local gen = plate.gen
 	local size = UDim2.fromScale(fraction, 1)
-	play(plate, "fill", plate.fill, healing and CFG.hp.healSeconds or CFG.hp.fillSeconds, { Size = size })
+	play(plate, "fill", plate.fill, healing and plate.cfg.hp.healSeconds or plate.cfg.hp.fillSeconds, { Size = size })
 	if healing then
-		play(plate, "ghost", plate.ghost, CFG.hp.healSeconds, { Size = size })
+		play(plate, "ghost", plate.ghost, plate.cfg.hp.healSeconds, { Size = size })
 	else
-		task.delay(CFG.hp.ghostDelay, function()
+		task.delay(plate.cfg.hp.ghostDelay, function()
 			if plate.gen == gen and not plate.dead and plate.ghost.Parent then
-				play(plate, "ghost", plate.ghost, CFG.hp.ghostSeconds, { Size = size })
+				play(plate, "ghost", plate.ghost, plate.cfg.hp.ghostSeconds, { Size = size })
 			end
 		end)
 	end
@@ -556,7 +570,7 @@ local function stepCount(plate: Plate, now: number)
 		counting[plate] = nil
 		return
 	end
-	local alpha = math.clamp((now - count.start) / CFG.hp.countSeconds, 0, 1)
+	local alpha = math.clamp((now - count.start) / plate.cfg.hp.countSeconds, 0, 1)
 	alpha = 1 - (1 - alpha) ^ 3
 	plate.shownHp = count.from + (count.to - count.from) * alpha
 	if plate.hpLabel then
@@ -573,18 +587,24 @@ local function attach(model: Instance)
 	if not model:IsA("Model") or plates[model] or model:FindFirstChild("EnemyNameplate") then
 		return
 	end
-	local entry = EnemyConfig.get(model:GetAttribute("EnemyType"))
+	-- a player's character (kind "player" or "self") has no enemy entry: it takes its look from the player kinds
+	local owner = Players:GetPlayerFromCharacter(model)
+	local rawType = model:GetAttribute("EnemyType")
+	local typeId = if owner == nil and type(rawType) == "string" then rawType else nil
+	local entry = if owner == nil then EnemyConfig.get(typeId) else nil
 	local humanoid = model:WaitForChild("Humanoid", 5) :: Humanoid?
 	local head = model:WaitForChild("Head", 5) :: BasePart?
-	if entry.nameplate == false or not (humanoid and head) or plates[model] then
+	if (entry and entry.nameplate == false) or not (humanoid and head) or plates[model] then
 		return
 	end
+	local kind = if owner == nil then "enemy" elseif owner == localPlayer then "self" else "player"
+	local cfg = CFG.resolve(kind, typeId)
 
 	local gui = template:Clone()
 	gui.Name = "EnemyNameplate"
 	gui.Adornee = head
-	gui.MaxDistance = CFG.show.nameDistance + 10
-	gui.StudsOffsetWorldSpace = Vector3.new(0, CFG.show.heightOffset, 0)
+	gui.MaxDistance = cfg.show.nameDistance + 10
+	gui.StudsOffsetWorldSpace = Vector3.new(0, cfg.show.heightOffset, 0)
 	local title = find(gui, "Title") :: CanvasGroup?
 	local barGroup = find(gui, "BarGroup") :: CanvasGroup?
 	local fill = find(gui, "Fill") :: Frame?
@@ -600,14 +620,17 @@ local function attach(model: Instance)
 		gui = gui,
 		humanoid = humanoid,
 		head = head,
+		kind = kind,
+		cfg = cfg,
+		player = owner,
+		badge = cfg.badge,
 		title = title,
 		titlePad = title:FindFirstChildOfClass("UIPadding"),
 		titleScale = title:FindFirstChildOfClass("UIScale"),
 		barHeight = barGroup.Size.Y.Offset,
 		nameLabel = find(gui, "NameLabel") :: TextLabel?,
 		levelLabel = find(gui, "LevelLabel") :: TextLabel?,
-		badgeStroke = find(gui, "BadgeStroke") :: UIStroke?,
-		badgeGradient = find(gui, "BadgeGradient") :: UIGradient?,
+		badgeRoot = find(gui, "LevelBadge"),
 		barGroup = barGroup,
 		barScale = (find(gui, "BarRoot") and find(gui, "BarRoot"):FindFirstChildOfClass("UIScale")) :: UIScale?,
 		fill = fill,
@@ -635,23 +658,29 @@ local function attach(model: Instance)
 	-- start hidden: the loop fades the parts in when the player gets close
 	title.GroupTransparency = 1
 	if plate.titlePad then
-		plate.titlePad.PaddingTop = UDim.new(0, CFG.intro.nameRise)
+		plate.titlePad.PaddingTop = UDim.new(0, plate.cfg.intro.nameRise)
 	end
 	barGroup.GroupTransparency = 1
 	barGroup.Size = UDim2.new(1, 0, 0, 0)
 	if plate.barScale then
-		plate.barScale.Scale = CFG.intro.barStartScale
+		plate.barScale.Scale = plate.cfg.intro.barStartScale
 	end
 	if plate.tagsGroup then
 		plate.tagsGroup.GroupTransparency = 1
 	end
 	if plate.tagsPad then
 		plate.tagsBase = plate.tagsPad.PaddingTop.Offset
-		plate.tagsPad.PaddingTop = UDim.new(0, plate.tagsBase + CFG.intro.tagRise)
+		plate.tagsPad.PaddingTop = UDim.new(0, plate.tagsBase + plate.cfg.intro.tagRise)
 	end
 
+	local function nameText(): string
+		if owner then
+			return owner.DisplayName
+		end
+		return model:GetAttribute("EnemyName") or entry.name
+	end
 	if plate.nameLabel then
-		plate.nameLabel.Text = model:GetAttribute("EnemyName") or entry.name
+		plate.nameLabel.Text = nameText()
 	end
 	updateLevel(plate)
 	local fraction = setFraction(plate)
@@ -678,9 +707,15 @@ local function attach(model: Instance)
 		elseif name == "EnemyLevel" or name == "EnemyType" then
 			updateLevel(plate)
 		elseif name == "EnemyName" and plate.nameLabel then
-			plate.nameLabel.Text = model:GetAttribute("EnemyName") or entry.name
+			plate.nameLabel.Text = nameText()
 		end
 	end)
+	if owner then
+		-- the player's Nexus level is a Player attribute, not a model one
+		owner:GetAttributeChangedSignal(ResourceConfig.nexusLevelAttribute):Connect(function()
+			updateLevel(plate)
+		end)
+	end
 	model.AncestryChanged:Connect(function()
 		if not model:IsDescendantOf(game) then
 			plates[model] = nil
@@ -705,6 +740,15 @@ task.spawn(function()
 end)
 
 -- ===================== SHARED LOOP =====================
+-- the self plate only shows in the camera phases its kind allows (kinds.self.cameraModes); every other plate always may
+local function allowedNow(plate: Plate, mode: any): boolean
+	if plate.kind ~= "self" then
+		return true
+	end
+	local modes = plate.cfg.cameraModes
+	return modes ~= nil and modes[mode] == true
+end
+
 local accumulator = 0
 local timerAccumulator = 0
 RunService.Heartbeat:Connect(function(dt)
@@ -726,7 +770,7 @@ RunService.Heartbeat:Connect(function(dt)
 		return
 	end
 	local cameraPosition = camera.CFrame.Position
-	local show = CFG.show
+	local cameraMode = localPlayer:GetAttribute("CameraMode")
 	local doTimers = timerAccumulator >= CFG.tagsCfg.timerStep
 	if doTimers then
 		timerAccumulator = 0
@@ -734,13 +778,15 @@ RunService.Heartbeat:Connect(function(dt)
 	local serverNow = workspace:GetServerTimeNow()
 	for _, plate in pairs(plates) do
 		if not plate.dead then
+			local show = plate.cfg.show
+			local shown = allowedNow(plate, cameraMode)
 			local distance = (plate.head.Position - cameraPosition).Magnitude
 			local hysteresis = show.hysteresis
 			local nameRange = show.nameDistance + (plate.nameShown and hysteresis or 0)
 			local barRange = show.barDistance + (plate.barShown and hysteresis or 0)
 			local tagRange = show.tagDistance + (plate.tagsShown and hysteresis or 0)
 			local damaged = plate.humanoid.Health < plate.humanoid.MaxHealth - 0.5
-			setName(plate, distance <= nameRange)
+			setName(plate, shown and distance <= nameRange)
 			if damaged then
 				plate.fullAt = nil
 			elseif not plate.fullAt then
@@ -748,8 +794,8 @@ RunService.Heartbeat:Connect(function(dt)
 			end
 			-- the bar only exists while the enemy is hurt (and a moment after it is whole again)
 			local keep = damaged or (plate.barShown and plate.fullAt ~= nil and os.clock() - plate.fullAt < show.fullHideDelay)
-			setBar(plate, keep and distance <= barRange)
-			setTags(plate, plate.chipCount > 0 and distance <= tagRange)
+			setBar(plate, shown and keep and distance <= barRange)
+			setTags(plate, shown and plate.chipCount > 0 and distance <= tagRange)
 			if doTimers and plate.chipCount > 0 then
 				updateTimers(plate, serverNow)
 			end
@@ -779,9 +825,12 @@ task.spawn(function()
 end)
 Players.LocalPlayer.CharacterAdded:Connect(function() end) -- keeps the module a LocalScript with a player dependency
 
-for _, model in ipairs(CollectionService:GetTagged("Enemy")) do
-	task.spawn(attach, model)
+-- "Enemy" = enemies, dummies and NPCs; "Nameplated" = player characters (the server tags them, DeathService)
+for _, tag in ipairs({ "Enemy", "Nameplated" }) do
+	for _, model in ipairs(CollectionService:GetTagged(tag)) do
+		task.spawn(attach, model)
+	end
+	CollectionService:GetInstanceAddedSignal(tag):Connect(function(model)
+		task.spawn(attach, model)
+	end)
 end
-CollectionService:GetInstanceAddedSignal("Enemy"):Connect(function(model)
-	task.spawn(attach, model)
-end)

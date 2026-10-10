@@ -246,6 +246,9 @@
         "Items": {
           "$path": "src/Shared/Modules/Inventory/Items"
         },
+        "LevelBadge": {
+          "$path": "src/Shared/Modules/Util/LevelBadge.lua"
+        },
         "LiquidGlassHandler": {
           "$path": "src/Shared/Modules/Menu/LiquidGlassHandler"
         },

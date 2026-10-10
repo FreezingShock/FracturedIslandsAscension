@@ -18,6 +18,7 @@
 --]]
 
 local CollectionService = game:GetService("CollectionService")
+local CollectionService = game:GetService("CollectionService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
@@ -200,8 +201,23 @@ function DeathService.revealBody(model: Model, kind: string, enemyEntry: any?): 
 	return announce(model, root, humanoid, kind, enemyEntry, nil)
 end
 
+-- every player character gets the "Nameplated" tag: the client's nameplate controller draws a plate over it (not "Enemy", which
+-- DamageService and the enemy AI treat as targets). The tag replicates with the character; nothing else reads it.
+-- and Roblox's own name / health tag is switched off, so the plate is the only one over a player's head
+local function tagCharacter(character: Model)
+	CollectionService:AddTag(character, "Nameplated")
+	task.spawn(function()
+		local humanoid = character:WaitForChild("Humanoid", 10) :: Humanoid?
+		if humanoid then
+			humanoid.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
+			humanoid.HealthDisplayType = Enum.HumanoidHealthDisplayType.AlwaysOff
+		end
+	end)
+end
+
 local function watchPlayer(player: Player)
 	player.CharacterAdded:Connect(function(character)
+		tagCharacter(character)
 		task.spawn(DeathService.watch, character)
 		if hasDied[player] then
 			task.spawn(reveal, player, character)
@@ -213,6 +229,7 @@ local function watchPlayer(player: Player)
 		end
 	end)
 	if player.Character then
+		tagCharacter(player.Character)
 		task.spawn(DeathService.watch, player.Character)
 	end
 end

@@ -222,7 +222,7 @@ ChatConfig.Templates = {
 ChatConfig.Visual = {
 	-- Panel layout (bottom-left anchor)
 	PanelWidth = 480, -- used until the HUD is found
-	PanelHeight = 300,
+	PanelHeight = 450,
 	-- The width follows FIAHUD: the chat fills the gutter between the left margin and the HUD's left edge (never over the hotbar),
 	-- clamped to MinWidth / MaxWidth. HudGap = px kept clear of the HUD. Set FollowHud = false for a fixed PanelWidth.
 	FollowHud = true,
@@ -263,12 +263,20 @@ ChatConfig.Visual = {
 	NameColors = { "#FF5555", "#FFAA00", "#FFFF55", "#55FF55", "#55FFFF", "#5555FF", "#FF55FF", "#00AAAA" }, -- a player's name colour is picked from these by UserId
 	SelfNameColor = nil, -- e.g. "#55FFFF" to give your own name a fixed colour
 
-	-- Message fade (only when the chat is NOT focused / hovered)
-	FadeStartAge = 10, -- seconds before the fade begins
-	FadeEndAge = 14, -- fully transparent at this age
-	StrokeTransparency = 0.45, -- the UIStroke of every line (fades with the text)
+	StrokeTransparency = 0.45, -- the UIStroke of every line
 
-	-- Scroll
+	-- Top fade: the newest lines are solid; the top FadeTopFraction of the log fades from invisible at the top edge to solid.
+	-- It is a UIGradient transparency on the log's CanvasGroup (FadeGroup in tools/studio/build_chat_gui.luau), so it fades children.
+	FadeTopFraction = 0.3,
+
+	-- Level badge: each player line starts with the nameplate's LevelBadge (cloned from GUI.EnemyNameplate). Its text is scaled
+	-- so "LV n" sits at the chat's FontSize (the nameplate name is the reference size); BadgeGap = px between badge and name.
+	BadgeGap = 6,
+	-- The tint row a chat badge uses comes from NameplateConfig.kinds.player.badge (the same row players get on their plate).
+
+	-- Scroll: a thin scrollbar that stays visible, and the wheel step in px (desktop wheel is handled by ChatController)
+	ScrollBarThickness = 6,
+	WheelStep = 60,
 	AutoScrollThreshold = 20,
 }
 

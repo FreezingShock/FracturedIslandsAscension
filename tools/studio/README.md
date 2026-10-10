@@ -31,7 +31,8 @@ restyling) unless you set `local FORCE = true` at the top.
 | `build_scoreboard.luau` | `StarterGui.FIAScoreboard` (Panel: Board > Lines, Template; tooltip look) | `ScoreboardController` |
 | `build_actionbar.luau` | `FIAHUD.Root.ActionBar` (CanvasGroup > Label (+ Pop UIScale, Stroke), Sub (+ Stroke)); sizes from `HudTheme.actionBar` | `ActionBarClient` |
 | `build_notifications.luau` | `StarterGui.FIANotifications` (Stack + Templates: Slot, CardLevelUp, CardCollection, CardPickup, CardSystem, RewardLine; tooltip look from the Figma file "FIA Notifications") | `NotificationController` |
-| `build_chat_gui.luau` | `ReplicatedStorage.GUI.FIAChatGui` (Panel > Body > LogFrame, InputBar (InputBox, CharCount, SendBtn), NewMsgBtn; Templates: Entry, Line, Spacer; tooltip look) | `ChatController` |
+| `build_chat_gui.luau` | `ReplicatedStorage.GUI.FIAChatGui` (Panel 480x450 > Body > FadeGroup (CanvasGroup, UIGradient top fade) > LogFrame, InputBar (InputBox, CharCount, SendBtn), NewMsgBtn; Templates: Entry, Row, Line (UIFlexItem), Spacer; tooltip look) | `ChatController` |
+| `migrate_chat_fade.luau` | Brings an existing `FIAChatGui` up to the fading, taller layout in place (FadeGroup, Row, Line Flex, 450px panel); idempotent, keeps Studio restyles | `ChatController` |
 
 Rule: whenever Claude generates anything (Studio GUI / template / marker / rig, a Blender model or animation, an
 icon), the script that generated it is saved in `tools/` in the same turn (`tools/studio`, `tools/blender`, ...) and

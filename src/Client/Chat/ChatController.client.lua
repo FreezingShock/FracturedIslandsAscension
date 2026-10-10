@@ -10,9 +10,10 @@
 	              (ChatService: level-ups / join / leave), ChatBridge.postRaw / postLocal (client-only lines).
 	  KEYS        "/" shows / hides the whole chat (same as the topbar pill), Enter highlights the input (and opens the chat if it is
 	              hidden), Enter again sends, Esc leaves the box, Up / Down recall what you sent. Press Enter, then type "/give ...".
-	  IDLE        faint panel; old lines fade by age; focus or hover makes the panel solid and brings every line back.
+	  IDLE        faint panel; the top of the log fades out (FadeGroup's UIGradient); focus or hover makes the panel solid.
+	  BADGE       each player line starts with the nameplate's level badge ("LV n", the sender's Nexus level); notices have none.
 
-	Messages are cloned from FIAChatGui.Templates (Entry / Line / Spacer); nothing is built in code.
+	Messages are cloned from FIAChatGui.Templates (Entry / Row / Line / Spacer) and the nameplate's LevelBadge; nothing is built in code.
 --]]
 
 local Debris = game:GetService("Debris")
@@ -31,6 +32,9 @@ local playerGui = player:WaitForChild("PlayerGui")
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local ChatConfig = require(Modules:WaitForChild("Config"):WaitForChild("ChatConfig")) :: any
 local ChatBridge = require(Modules:WaitForChild("ChatBridge")) :: any
+local CFG = require(Modules:WaitForChild("Config"):WaitForChild("NameplateConfig")) :: any
+local ResourceConfig = require(Modules:WaitForChild("ResourceConfig")) :: any -- the Nexus level attribute name
+local LevelBadge = require(Modules:WaitForChild("LevelBadge")) :: any
 local Topbar = require(ReplicatedStorage:WaitForChild("TopbarPlus")) :: any
 local SystemMsg = ReplicatedStorage:WaitForChild("SystemMessage") :: RemoteEvent
 
@@ -69,7 +73,8 @@ ChatGui.Enabled = true
 
 local Panel = ChatGui:WaitForChild("Panel") :: Frame
 local Body = Panel:WaitForChild("Body") :: Frame
-local LogFrame = Body:WaitForChild("LogFrame") :: ScrollingFrame
+local FadeGroup = Body:WaitForChild("FadeGroup") :: CanvasGroup -- the log's top fades through its UIGradient
+local LogFrame = FadeGroup:WaitForChild("LogFrame") :: ScrollingFrame
 local InputBar = Body:WaitForChild("InputBar") :: Frame
 local InputBox = InputBar:WaitForChild("InputBox") :: TextBox
 local CharCount = InputBar:WaitForChild("CharCount") :: TextLabel
@@ -81,6 +86,21 @@ local Templates = ChatGui:WaitForChild("Templates")
 local EntryT = Templates:WaitForChild("Entry") :: Frame
 local LineT = Templates:WaitForChild("Line") :: TextLabel
 local SpacerT = Templates:WaitForChild("Spacer") :: Frame
+local RowT = Templates:WaitForChild("Row") :: Frame -- a player line: [level badge] [name: text]
+
+-- The level badge is the nameplate's own LevelBadge (GUI.EnemyNameplate), so Studio edits to it show on plates and in chat.
+-- Its text is scaled to the chat's FontSize (the nameplate's name size is the reference). Missing template = no badge.
+local nameplateTemplate = guiRoot and guiRoot:WaitForChild("EnemyNameplate", 10)
+local badgeTemplate = nameplateTemplate and nameplateTemplate:FindFirstChild("LevelBadge", true)
+local nameTemplate = nameplateTemplate and nameplateTemplate:FindFirstChild("NameLabel", true) :: TextLabel?
+local badgeLabelTemplate = badgeTemplate and badgeTemplate:FindFirstChild("LevelLabel") :: TextLabel?
+if not (badgeTemplate and nameTemplate and badgeLabelTemplate) then
+	warn("[ChatController] GUI.EnemyNameplate has no LevelBadge / NameLabel: player lines get no level badge")
+end
+local badgeTextSize = (nameTemplate and badgeLabelTemplate)
+	and math.max(6, math.round(badgeLabelTemplate.TextSize * V.FontSize / nameTemplate.TextSize))
+	or V.FontSize
+local PLAYER_BADGE = CFG.resolve("player", nil).badge -- the tint a player's plate gets (NameplateConfig.kinds.player.badge)
 
 NewMsgBtn.Visible = false
 InputBox.FontFace = V.ChatFont
@@ -134,7 +154,7 @@ local function applyLayout()
 		Panel.Position = chatOpen and restPosition(s) or offPosition()
 	end
 	InputBar.Size = UDim2.new(1, -16, 0, V.InputBarHeight)
-	LogFrame.Size = UDim2.new(1, 0, 1, -(V.InputBarHeight + 16))
+	FadeGroup.Size = UDim2.new(1, 0, 1, -(V.InputBarHeight + 16))
 end
 applyLayout()
 local layoutClock = 0
@@ -232,19 +252,6 @@ local focusLostAt = 0
 local panelTween: Tween? = nil
 local bodyTween: Tween? = nil
 
-local function showEverything()
-	for _, record in ipairs(messages) do
-		record.fadeAlpha = nil
-		for _, line in ipairs(record.labels) do
-			line.TextTransparency = 0
-			local stroke = line:FindFirstChildOfClass("UIStroke")
-			if stroke then
-				stroke.Transparency = V.StrokeTransparency
-			end
-		end
-	end
-end
-
 local function updateFocusState()
 	local active = isFocused or isHovered
 	local info = TweenInfo.new(V.TransitionTime, Enum.EasingStyle.Quad)
@@ -264,9 +271,6 @@ local function updateFocusState()
 			inputStroke.Thickness = V.FocusPulse
 			TweenService:Create(inputStroke, TweenInfo.new(0.35, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), { Thickness = 2 }):Play()
 		end
-	end
-	if active then
-		showEverything()
 	end
 end
 
@@ -318,6 +322,30 @@ NewMsgBtn.MouseButton1Click:Connect(function()
 	scrollToBottom()
 end)
 
+-- Scrollbar always visible at the configured thickness. The wheel steps WheelStep px per notch (Roblox's native wheel is too
+-- small), so the native wheel is off on desktop while the pointer is over the log; touch keeps the native drag.
+LogFrame.ScrollBarThickness = V.ScrollBarThickness
+LogFrame.ScrollBarImageTransparency = 0
+LogFrame.ScrollingEnabled = UserInputService.TouchEnabled
+local rowLayout = RowT:FindFirstChildOfClass("UIListLayout")
+if rowLayout then
+	rowLayout.Padding = UDim.new(0, V.BadgeGap) -- the gap between a player's badge and name (ChatConfig.Visual.BadgeGap)
+end
+local logHovered = false
+LogFrame.MouseEnter:Connect(function()
+	logHovered = true
+end)
+LogFrame.MouseLeave:Connect(function()
+	logHovered = false
+end)
+UserInputService.InputChanged:Connect(function(input)
+	if input.UserInputType ~= Enum.UserInputType.MouseWheel or not logHovered then
+		return
+	end
+	local maxY = math.max(0, LogFrame.AbsoluteCanvasSize.Y - LogFrame.AbsoluteSize.Y)
+	LogFrame.CanvasPosition = Vector2.new(0, math.clamp(LogFrame.CanvasPosition.Y - input.Position.Z * V.WheelStep, 0, maxY))
+end)
+
 -- ===================== RENDERING =====================
 local function nameColorFor(userId: number?): string
 	if userId == player.UserId and V.SelfNameColor then
@@ -334,6 +362,13 @@ local function newLine(entry: Frame, order: number, rich: string): TextLabel
 	line.FontFace = V.ChatFont
 	line.TextSize = V.FontSize
 	line.Text = rich
+	if entry.Name ~= "Row" then
+		-- only a row (badge + name) fills the width left over by the badge; a plain line keeps its template size
+		local flex = line:FindFirstChildOfClass("UIFlexItem")
+		if flex then
+			flex:Destroy()
+		end
+	end
 	local stroke = line:FindFirstChildOfClass("UIStroke")
 	line.TextTransparency = 1 -- fades in
 	if stroke then
@@ -357,6 +392,21 @@ local function playSound(id: string?)
 	Debris:AddItem(s, 5)
 end
 
+--- A fresh level badge for one player line: the nameplate's LevelBadge, filled with "LV n" and the player tint row.
+local function badgeFor(level: number): Frame?
+	if not badgeTemplate or not badgeLabelTemplate then
+		return nil
+	end
+	local badge = badgeTemplate:Clone() :: Frame
+	local label = badge:FindFirstChild("LevelLabel") :: TextLabel?
+	if label then
+		label.TextSize = badgeTextSize
+		label.Text = LevelBadge.text(level)
+	end
+	LevelBadge.paint(badge, PLAYER_BADGE)
+	return badge
+end
+
 local function renderPayload(payload: any)
 	layoutOrder += 1
 	local entry = EntryT:Clone()
@@ -378,7 +428,20 @@ local function renderPayload(payload: any)
 			V.PlayerTextColor:ToHex(),
 			payload.text or ""
 		)
-		table.insert(labels, newLine(entry, 1, rich))
+		if payload.type == "player" then
+			-- a player line is a row: the level badge, then the name and text. Notices have no badge.
+			local row = RowT:Clone()
+			row.Name = "Row"
+			row.Parent = entry
+			local badge = badgeFor(payload.level or 0)
+			if badge then
+				badge.LayoutOrder = 1
+				badge.Parent = row
+			end
+			table.insert(labels, newLine(row, 2, rich))
+		else
+			table.insert(labels, newLine(entry, 1, rich))
+		end
 	else
 		for i, lineText in ipairs(payload.lines or {}) do
 			if lineText == "" then
@@ -398,12 +461,9 @@ local function renderPayload(payload: any)
 	entry.Parent = LogFrame
 	playSound(payload.sound)
 
-	table.insert(messages, { frame = entry, labels = labels, timestamp = payload.timestamp or os.time(), fadeAlpha = 0 })
+	table.insert(messages, { frame = entry, labels = labels })
 	if #messages > B.MaxHistory then
 		table.remove(messages, 1).frame:Destroy()
-	end
-	if isFocused or isHovered then
-		showEverything()
 	end
 	if autoScroll then
 		task.defer(scrollToBottom)
@@ -418,37 +478,6 @@ ChatBridge.registerRenderer(renderPayload)
 local function notice(text: string, hexColor: string?)
 	renderPayload({ type = "system", lines = { text }, colors = { [1] = hexColor or "FF5555" }, timestamp = os.time() })
 end
-
--- ===================== FADE =====================
-local FADE_INTERVAL = 0.2
-local fadeAccum = 0
-RunService.Heartbeat:Connect(function(dt)
-	fadeAccum += dt
-	if fadeAccum < FADE_INTERVAL or isFocused or isHovered then
-		return
-	end
-	fadeAccum = 0
-	local now = os.time()
-	for _, record in ipairs(messages) do
-		local age = now - record.timestamp
-		local alpha = 0
-		if age > V.FadeEndAge then
-			alpha = 1
-		elseif age >= V.FadeStartAge then
-			alpha = (age - V.FadeStartAge) / (V.FadeEndAge - V.FadeStartAge)
-		end
-		if record.fadeAlpha ~= alpha then
-			record.fadeAlpha = alpha
-			for _, line in ipairs(record.labels) do
-				line.TextTransparency = alpha
-				local stroke = line:FindFirstChildOfClass("UIStroke")
-				if stroke then
-					stroke.Transparency = V.StrokeTransparency + (1 - V.StrokeTransparency) * alpha
-				end
-			end
-		end
-	end
-end)
 
 -- ===================== SENDING =====================
 local function trySend()
@@ -595,10 +624,13 @@ TextChatService.MessageReceived:Connect(function(msg)
 		return
 	end
 	local sender = Players:GetPlayerByUserId(source.UserId)
+	-- the sender's Nexus level: the server's Player attribute (the nameplate reads the same one); the client never writes it
+	local nexus = sender and sender:GetAttribute(ResourceConfig.nexusLevelAttribute)
 	renderPayload({
 		type = "player",
 		playerName = sender and sender.DisplayName or source.Name,
 		userId = source.UserId,
+		level = type(nexus) == "number" and nexus or 0,
 		text = msg.Text, -- filtered and rich-text escaped by TextChatService
 		timestamp = os.time(),
 	})

@@ -7,19 +7,23 @@
 --]]
 
 return {
-	version = "3.89.0",
+	version = "3.90.0",
 	date = "2026-10-09", -- the commit's date
-	commit = "Skill breakdown grid: title slot, snake of levels, page arrows; Nexus Star opens the menu", -- the commit title (short)
+	commit = "Player and self nameplates, chat level badge, taller chat with top fade and scroll polish", -- the commit title (short)
 	-- what this commit added / changed / fixed: shown in chat when a player joins (ChatService.sendReleaseNotes)
 	summary = {
 		added = {
-			"Skill breakdowns are a grid: the skill's title top-left, every level in the Hypixel snake, and page arrows for levels past the first page",
-			"Hover a level for its rewards and status, or hover the title for XP, wisdom and the next reward",
-			"Clicking the Nexus Star in the hotbar equips it and opens the Nexus menu",
+			"Other players have the same overhead plate as enemies: name, Nexus level badge, tag row and health bar",
+			"Your own plate shows in third-person free camera and hides in first person",
+			"Each player's chat line starts with their Nexus level badge, matching the nameplate",
+			"Players die with the same shard dissolve as enemies",
 		},
 		changed = {
-			"The old Skill page with the scrolling level strip is gone; Farming and Combat run to level 60 on three pages",
+			"The chat panel is taller (450px) and its top fades out over the older lines",
+			"The chat scrollbar stays visible and the mouse wheel moves further per notch",
 		},
-		fixed = {},
+		fixed = {
+			"Player plates no longer show Roblox's own name and health tag on top of ours",
+		},
 	},
 }

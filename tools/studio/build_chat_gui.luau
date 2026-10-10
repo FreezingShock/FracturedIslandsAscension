@@ -4,12 +4,15 @@
 --   FIAChatGui (ScreenGui)
 --     Panel (Frame = the 4px outer border; bottom-left, UIScale "Scale")
 --       Body (Frame, black glass + 2px border)
---         LogFrame (ScrollingFrame, UIListLayout)       messages are cloned into it from Templates
+--         FadeGroup (CanvasGroup, UIGradient "FadeGradient")  the log's top fades: the gradient runs 1 -> 0 over the top 30%
+--           LogFrame (ScrollingFrame, UIListLayout)      messages are cloned into it from Templates
 --         InputBar (Frame) > InputBox (TextBox), CharCount (TextLabel, Silkscreen), SendBtn (ImageButton)
 --         NewMsgBtn (TextButton)                         "New messages" pill, shown while scrolled up
 --     Templates (Folder)
---       Entry (Frame, UIListLayout)   one message; Line (TextLabel RichText + UIStroke) and Spacer (Frame) are cloned into it
--- All sizes/positions/transparencies at runtime come from Modules/Config/ChatConfig.Visual.
+--       Entry (Frame, UIListLayout)   one message; Row (Frame, horizontal UIListLayout) holds a player line's badge + name
+--       Line (TextLabel RichText + UIStroke + UIFlexItem "Flex") and Spacer (Frame) are cloned into Entry or Row
+--   The level badge is NOT in this template: ChatController clones it from GUI.EnemyNameplate.LevelBadge at runtime.
+-- All sizes/positions/transparencies at runtime come from Modules/Config/ChatConfig.Visual. FADE_TOP must match FadeTopFraction there.
 -- Run on the Edit datamodel with the Studio MCP (stop Play first). Skips when the template exists unless FORCE = true.
 local FORCE = false
 
@@ -49,7 +52,7 @@ local panel = new("Frame", {
 	Name = "Panel",
 	AnchorPoint = Vector2.new(0, 1),
 	Position = UDim2.new(0, 16, 1, -16),
-	Size = UDim2.fromOffset(480, 300),
+	Size = UDim2.fromOffset(480, 450),
 	BackgroundColor3 = hex("#4B4B4B"),
 	BackgroundTransparency = 0.8,
 	BorderSizePixel = 0,
@@ -62,18 +65,38 @@ local body = new("Frame", { Name = "Body", Size = UDim2.fromScale(1, 1), Backgro
 new("UICorner", { CornerRadius = UDim.new(0, 4) }, body)
 new("UIStroke", { Thickness = 2, Color = hex("#AAAAAA"), ApplyStrokeMode = Enum.ApplyStrokeMode.Border }, body)
 
-local log = new("ScrollingFrame", {
-	Name = "LogFrame",
+-- the log sits in a CanvasGroup so its UIGradient fades the top of the log (children included): 1 at the top edge, solid by FADE_TOP
+local FADE_TOP = 0.3 -- = ChatConfig.Visual.FadeTopFraction
+local fade = new("CanvasGroup", {
+	Name = "FadeGroup",
 	Size = UDim2.new(1, 0, 1, -54),
 	BackgroundTransparency = 1,
 	BorderSizePixel = 0,
-	ScrollBarThickness = 4,
+	GroupTransparency = 0,
+}, body)
+new("UIGradient", {
+	Name = "FadeGradient",
+	Rotation = 90, -- first key point at the top
+	Transparency = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 1),
+		NumberSequenceKeypoint.new(FADE_TOP, 0),
+		NumberSequenceKeypoint.new(1, 0),
+	}),
+}, fade)
+
+local log = new("ScrollingFrame", {
+	Name = "LogFrame",
+	Size = UDim2.fromScale(1, 1),
+	BackgroundTransparency = 1,
+	BorderSizePixel = 0,
+	ScrollBarThickness = 6,
 	ScrollBarImageColor3 = hex("#AAAAAA"),
+	ScrollBarImageTransparency = 0,
 	CanvasSize = UDim2.new(),
 	AutomaticCanvasSize = Enum.AutomaticSize.Y,
 	ScrollingDirection = Enum.ScrollingDirection.Y,
 	VerticalScrollBarPosition = Enum.VerticalScrollBarPosition.Right,
-}, body)
+}, fade)
 new("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 2) }, log)
 new("UIPadding", { PaddingLeft = UDim.new(0, 10), PaddingRight = UDim.new(0, 12), PaddingTop = UDim.new(0, 6), PaddingBottom = UDim.new(0, 4) }, log)
 
@@ -153,6 +176,8 @@ textStroke(pill)
 local templates = new("Folder", { Name = "Templates" }, gui)
 local entry = new("Frame", { Name = "Entry", Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, BackgroundTransparency = 1, BorderSizePixel = 0 }, templates)
 new("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 2) }, entry)
+local row = new("Frame", { Name = "Row", Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y, BackgroundTransparency = 1, BorderSizePixel = 0 }, templates)
+new("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, SortOrder = Enum.SortOrder.LayoutOrder, VerticalAlignment = Enum.VerticalAlignment.Top, Padding = UDim.new(0, 6) }, row)
 local line = new("TextLabel", {
 	Name = "Line",
 	Size = UDim2.new(1, 0, 0, 0),
@@ -168,6 +193,7 @@ local line = new("TextLabel", {
 	Text = "",
 }, templates)
 textStroke(line)
+new("UIFlexItem", { Name = "Flex", FlexMode = Enum.UIFlexMode.Fill }, line) -- a row's name fills the width left of the badge
 new("Frame", { Name = "Spacer", Size = UDim2.new(1, 0, 0, 6), BackgroundTransparency = 1, BorderSizePixel = 0 }, templates)
 
-return "built ReplicatedStorage.GUI.FIAChatGui (Panel > Body > LogFrame, InputBar, NewMsgBtn; Templates: Entry, Line, Spacer)"
+return "built ReplicatedStorage.GUI.FIAChatGui (Panel > Body > FadeGroup > LogFrame, InputBar, NewMsgBtn; Templates: Entry, Row, Line, Spacer)"
