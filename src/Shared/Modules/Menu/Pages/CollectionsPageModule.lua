@@ -123,12 +123,40 @@ local function paint(slot: any, colorHex: string, icon: string?)
 end
 
 --- The text label of a slot: Amount (reward), LevelLabel (inside BG) or ItemCount.
-local function setLabel(slot: Instance, text: string)
+local function setLabel(slot: Instance, text: string, color: Color3?)
 	local label = slot:FindFirstChild("Amount", true)
 		or slot:FindFirstChild("LevelLabel", true)
 		or slot:FindFirstChild("ItemCount", true)
 	if label and label:IsA("TextLabel") then
 		label.Text = text
+		if color then
+			label.TextColor3 = color
+		end
+	end
+end
+
+--- Reward icon: a rbxassetid string, or a {col, row} cell of the stat spritesheet (attributes use those, as ProfilePage does).
+--- Tinted by `color`; an empty icon hides the picture instead of showing a stray tint.
+local function setIcon(slot: Instance, icon: any, color: Color3)
+	local image: any = slot:FindFirstChild("Icon")
+	if not image then
+		return
+	end
+	image.ImageColor3 = color
+	if type(icon) == "table" and TooltipModule and TooltipModule.STAT_SPRITESHEET then
+		local sheet = TooltipModule.STAT_SPRITESHEET
+		local cell = sheet.cellSize
+		image.Image = sheet.assetId
+		image.ImageRectSize = Vector2.new(cell, cell)
+		image.ImageRectOffset = Vector2.new((icon[1] or 0) * cell, (icon[2] or 0) * cell)
+		image.ImageTransparency = 0
+	elseif type(icon) == "string" and icon ~= "" then
+		image.Image = icon
+		image.ImageRectSize = Vector2.zero
+		image.ImageRectOffset = Vector2.zero
+		image.ImageTransparency = 0
+	else
+		image.ImageTransparency = 1
 	end
 end
 
@@ -558,8 +586,10 @@ function M.populateTier(frame: Instance)
 		local slot = cloneTemplate("rewardSlot", "statSlot")
 		if slot then
 			slot.Name = "Reward_" .. i
-			paint(slot, info.color or "#FFFFFF", info.icon or "")
-			setLabel(slot, info.short or "")
+			local tint = hexToColor3(info.color or "#FFFFFF")
+			paint(slot, info.color or "#FFFFFF") -- background + stroke; the icon and amount are set below
+			setIcon(slot, info.icon, tint)
+			setLabel(slot, info.short or "", tint)
 			place(frame, occupied, cell(LAYOUT.rewardRow, column), slot)
 			bind(slot, function()
 				UIClick3:Play()

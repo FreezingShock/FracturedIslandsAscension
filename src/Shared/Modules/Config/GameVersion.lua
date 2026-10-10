@@ -7,24 +7,24 @@
 --]]
 
 return {
-	version = "3.87.0",
+	version = "3.88.0",
 	date = "2026-10-09", -- the commit's date
-	commit = "Camera feel: lean and roll into strafes, trailing blink, shake tiers; layered ability FX", -- the commit title (short)
+	commit = "Collection milestone rewards and attribute breakdown: stacked sources, paging, item icons", -- the commit title (short)
 	-- what this commit added / changed / fixed: shown in chat when a player joins (ChatService.sendReleaseNotes)
 	summary = {
 		added = {
-			"Camera feel: the body leans and the camera rolls into strafing (first person too), with a lagged over-the-shoulder drift",
-			"Camera shake tiers from sword hits, abilities and deaths, falling off with distance",
-			"Sword swings kick the view, and the blink dash whips the view toward its direction with a short FOV punch",
-			"Layered ability effects: every ability has its own stacked visuals (see docs/FX_GUIDE.md)",
-			"Wood and stone swords, and icons for every sword",
+			"Attribute breakdowns page through every source: 28 per page, with Prev and Next",
+			"Items in an attribute breakdown show their own icon",
+			"Collection and skill sources stack: every tier of a collection and every level of a skill is one slot, marked x7",
+			"Milestone reward slots show the attribute or statistic icon in its colour",
 		},
 		changed = {
-			"The blink dash is trailed by the camera, so it slides after you instead of snapping",
-			"Earthshatter's slam is the strongest ability shake",
+			"Collection and skill sources in the breakdown read Collection and Skill, with capital letters in every title",
+			"The amount under each breakdown slot is larger",
 		},
 		fixed = {
-			"The camera froze for a moment whenever a shake ran",
+			"Milestone reward pages built with the wrong icons and colours, and stopped partway through",
+			"Collection rewards now re-apply when you join, not only after a stat changes",
 		},
 	},
 }

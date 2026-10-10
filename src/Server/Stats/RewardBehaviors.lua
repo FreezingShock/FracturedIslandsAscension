@@ -20,6 +20,7 @@ local ServerStorage = game:GetService("ServerStorage")
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local Config = require(Modules:WaitForChild("CollectionsConfig")) :: any
 local CollectionRewards = require(Modules:WaitForChild("CollectionRewards")) :: any
+local Attributes = require(Modules:WaitForChild("Attributes")) :: any
 local StatisticsDataManager = require(ServerScriptService:WaitForChild("StatisticsDataManager")) :: any
 
 local RewardBehaviors = {}
@@ -48,10 +49,15 @@ CollectionRewards.register("crossStatGain", { derive = gainDerive })
 
 CollectionRewards.register("gameStat", {
 	derive = function(reward, ctx, acc)
+		local def = Attributes.get(reward.attr)
 		local entry = {
 			id = string.format("%s.%d", ctx.id, ctx.index),
 			label = ctx.label,
-			color = ctx.color or "#55FFFF",
+			-- the source the boost came from (statistic / skill) when given, else the attribute itself
+			color = ctx.color or (def and def.color) or "#55FFFF",
+			icon = ctx.icon or (def and def.icon),
+			group = ctx.group, -- boosts with the same group stack into one breakdown slot
+			groupLabel = ctx.groupLabel,
 			attr = reward.attr,
 		}
 		if finiteNumber(reward.flat) then

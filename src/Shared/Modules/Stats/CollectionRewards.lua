@@ -73,7 +73,7 @@ local function gainDescription(reward: any, skill: string?, key: string?)
 		),
 		name = name .. " gain",
 		icon = config and config.icon or "",
-		color = "#55FF55",
+		color = color, -- the statistic's own colour, the same as its Menu2 / Menu3 slots
 	}
 end
 

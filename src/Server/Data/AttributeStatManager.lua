@@ -514,6 +514,9 @@ function AttributeStatManager.ApplySource(player, prefix, entries, sourceType)
 				id = prefix .. item.id,
 				label = item.label,
 				color = item.color,
+				icon = item.icon,
+				group = item.group,
+				groupLabel = item.groupLabel,
 				sourceType = sourceType,
 			}
 			if item.flat then

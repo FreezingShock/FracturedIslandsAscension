@@ -99,7 +99,11 @@ local function rebuild(player: Player, collections)
 								index = index,
 								where = string.format("%s.%s tier %d", skill, key, tier),
 								id = string.format("%s.%s.%d", skill, key, tier),
-								label = string.format("%s collection %s", statConfig.name, Config.ROMAN_NUMERALS[tier]),
+								label = string.format("%s Collection %s", statConfig.name, Config.ROMAN_NUMERALS[tier]),
+								group = "collection:" .. skill .. "." .. key, -- every tier of one statistic's collection stacks into one slot
+								groupLabel = statConfig.name .. " Collection",
+								color = statConfig.color, -- the collected statistic's colour and icon, shown on its breakdown slot
+								icon = statConfig.icon,
 							}, acc)
 						end
 					end
@@ -204,6 +208,24 @@ StatisticsDataManager.OnFlush(function(player)
 		CollectionService.sync(player)
 	end
 end)
+
+--- A player who never changes a statistic never flushes, so the buffs would stay as they were saved. Sync once on join
+--- (after the stats have loaded) so a change to the reward rules shows up at once.
+local function syncWhenLoaded(player: Player)
+	task.spawn(function()
+		local waited = 0
+		while player.Parent and not StatisticsDataManager.GetData(player) and waited < ATTRIBUTE_WAIT do
+			waited += task.wait(0.5)
+		end
+		if player.Parent then
+			CollectionService.sync(player)
+		end
+	end)
+end
+for _, player in ipairs(Players:GetPlayers()) do
+	syncWhenLoaded(player)
+end
+Players.PlayerAdded:Connect(syncWhenLoaded)
 
 Players.PlayerRemoving:Connect(function(player)
 	building[player] = nil

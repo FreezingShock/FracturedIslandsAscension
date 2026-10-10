@@ -98,8 +98,10 @@ local function rebuild(player: Player, rewards)
 							index = index,
 							where = string.format("%s level %d", skill, level),
 							id = string.format("%s.%d", skill, level),
-							label = string.format("%s level %s", config.name, SkillsConfig.roman(level)),
+							label = string.format("%s Level %s", config.name, SkillsConfig.roman(level)),
 							color = config.color,
+							group = "skill:" .. skill, -- every level of one skill stacks into one breakdown slot
+							groupLabel = config.name .. " Skill",
 						}, acc)
 					end
 				end

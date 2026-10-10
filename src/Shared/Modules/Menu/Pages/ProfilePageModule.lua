@@ -52,6 +52,7 @@ local Items = require(Modules:WaitForChild("Items")) :: any
 local Attributes = require(Modules:WaitForChild("Attributes")) :: any
 local Sources = require(Modules:WaitForChild("Sources")) :: any
 local SlotFx = require(Modules:WaitForChild("SlotFx")) :: any
+local ItemIcons = require(Modules:WaitForChild("ItemIcons")) :: any
 local UIClick = workspace:WaitForChild("UISounds"):WaitForChild("Click")
 
 -- ===================== CONFIG REFERENCES =====================
@@ -100,6 +101,8 @@ local attributeClickHandler = nil -- fn(skillName, attrConfig)
 -- because both buffers can briefly exist during the crossfade.
 local detailSlots = {}
 local detailConnections = {}
+local detailFrame = nil -- the ProfileMenu3 buffer being built (the pager rebuilds it in place)
+local detailPage = 1 -- which page of sources is shown; reset when a new attribute is opened
 
 -- ===================== TOOLTIP LAZY-RESOLVE =====================
 -- TooltipModule is set via init(sharedRefs), but if init timing shifts
@@ -700,6 +703,41 @@ end
 
 local FONT_PIXEL = "rbxassetid://12187371840"
 
+--- The small text under a slot's picture (StatSlot's PageLabel, which lives in the Studio template).
+local function setPageText(slot: Instance, text: string?)
+	local label = slot:FindFirstChild("PageLabel")
+	if label and label:IsA("TextLabel") then
+		label.Text = text or ""
+		label.Visible = text ~= nil
+	end
+end
+
+--- A footer pager button at `layoutOrder`, or a blank cell when there is no page to go to.
+local function placePager(frame: Instance, layoutOrder: number, text: string, enabled: boolean, onClick: () -> ())
+	local slot
+	if enabled then
+		slot = statSlotTemplate:Clone()
+		slot.Name = "Pager"
+		setupStatSlotIcon(slot, { color = "#FFFF55" }) -- tinted frame, no picture
+		setPageText(slot, text)
+		table.insert(detailConnections, SlotFx.bind(slot))
+		table.insert(
+			detailConnections,
+			slot.MouseButton1Click:Connect(function()
+				UIClick:Play()
+				onClick()
+			end)
+		)
+	else
+		slot = blankSlotTemplate:Clone()
+		slot.Name = "DynBlank"
+	end
+	slot.LayoutOrder = layoutOrder
+	slot.Visible = true
+	slot.Parent = frame
+	table.insert(detailSlots, slot)
+end
+
 local function buildSourceSlot(source, attrConfig, dataKey, breakdown, layoutOrder, frame)
 	local hex = Sources.hex(source)
 
@@ -707,11 +745,26 @@ local function buildSourceSlot(source, attrConfig, dataKey, breakdown, layoutOrd
 	slot.Name = "Source_" .. tostring(source.id or source.type)
 	slot.LayoutOrder = layoutOrder
 	slot.Visible = true
-	setupStatSlotIcon(slot, { color = hex }) -- tint only (no icon)
+	-- A source with a picture (a collection statistic, a skill) shows it in the source's colour; others show initials.
+	setupStatSlotIcon(slot, { color = hex, icon = source.icon })
+
+	-- Stacked sources (every tier of one collection, every level of one skill) show how many boosts went in: x7.
+	-- The PageLabel of the StatSlot template is moved to the top-right corner for this.
+	if source.stacked and source.count > 1 then
+		local count = slot:FindFirstChild("PageLabel")
+		if count and count:IsA("TextLabel") then
+			count.AnchorPoint = Vector2.new(1, 0)
+			count.Position = UDim2.new(1, -4, 0, 4)
+			count.TextXAlignment = Enum.TextXAlignment.Right
+			count.Text = "x" .. source.count
+			count.Visible = true
+		end
+	end
 
 	-- Initials in the source's color; amount along the bottom.
 	local letters = Instance.new("TextLabel")
 	letters.Name = "Letters"
+	letters.Visible = source.icon == nil and source.itemId == nil
 	letters.BackgroundTransparency = 1
 	letters.AnchorPoint = Vector2.new(0.5, 0)
 	letters.Position = UDim2.new(0.5, 0, 0, 5)
@@ -730,14 +783,21 @@ local function buildSourceSlot(source, attrConfig, dataKey, breakdown, layoutOrd
 	value.BackgroundTransparency = 1
 	value.AnchorPoint = Vector2.new(0.5, 1)
 	value.Position = UDim2.new(0.5, 0, 1, -3)
-	value.Size = UDim2.new(1, -2, 0, 12)
+	value.Size = UDim2.new(1, -2, 0, 18)
 	value.FontFace = Font.new(FONT_PIXEL)
-	value.TextSize = 11
+	value.TextSize = 15
 	value.TextColor3 = Color3.fromHex(attrConfig.color or "#FFFFFF")
 	value.TextStrokeTransparency = 0.3
 	value.Text = amount
 	value.ZIndex = 10
 	value.Parent = slot
+
+	-- An item shows its own icon (equipment), in place of the initials.
+	if source.itemId then
+		local picture = ItemIcons.ensureImage(slot, { size = UDim2.fromScale(0.62, 0.62), position = UDim2.fromScale(0.5, 0.42), zIndex = 9 })
+		ItemIcons.apply(picture, source.itemId)
+		picture.Visible = true
+	end
 
 	slot.Parent = frame
 	table.insert(detailSlots, slot)
@@ -754,6 +814,9 @@ local function buildSourceSlot(source, attrConfig, dataKey, breakdown, layoutOrd
 					amount = amount,
 					breakdown = breakdown,
 					totalText = Attributes.format(dataKey, breakdown.final),
+					formatAmount = function(part)
+						return Attributes.amountText(dataKey, part)
+					end,
 				}),
 				STAT_TOOLTIP_SOURCE,
 				slot
@@ -777,6 +840,7 @@ end
 function M.setPendingAttribute(skillName, attrConfig)
 	pendingSkill = skillName
 	pendingAttr = attrConfig
+	detailPage = 1 -- a new attribute always starts on its first page of sources
 end
 
 function M.getPendingSkill()
@@ -808,6 +872,7 @@ function M.openAttributeDetail(frame)
 		warn("[ProfilePageModule] openAttributeDetail: missing frame / attribute / templates")
 		return
 	end
+	detailFrame = frame
 
 	-- ── Row 0: the attribute itself (row 1, slot 5) ──
 	local header = statSlotTemplate:Clone()
@@ -833,12 +898,16 @@ function M.openAttributeDetail(frame)
 		end)
 	)
 
-	-- ── Rows 1-4: one slot per source, then blanks ──
+	-- ── Rows 1-4: one page of sources (28 per page), then blanks ──
 	local dataKey = resolveDataKey(attrConfig.key)
 	local breakdown = Attributes.breakdown(dataKey, cachedAttributeData[dataKey])
 	local sources = breakdown.sources
+	local perPage = #ProfileConfig.PROFILE_MENU3_CONTENT_SLOTS
+	local pageCount = math.max(1, math.ceil(#sources / perPage))
+	detailPage = math.clamp(detailPage, 1, pageCount)
+	local first = (detailPage - 1) * perPage
 	for i, layoutOrder in ipairs(ProfileConfig.PROFILE_MENU3_CONTENT_SLOTS) do
-		local source = sources[i]
+		local source = sources[first + i]
 		if source then
 			buildSourceSlot(source, attrConfig, dataKey, breakdown, layoutOrder, frame)
 		else
@@ -850,6 +919,20 @@ function M.openAttributeDetail(frame)
 			table.insert(detailSlots, blank)
 		end
 	end
+
+	-- ── Footer: Prev / Next around Back and Close (only when there is more than one page) ──
+	local orders = ProfileConfig.PROFILE_MENU3_PAGER_ORDERS
+	placePager(frame, orders.prev, "< Prev", detailPage > 1, function()
+		detailPage -= 1
+		M.openAttributeDetail(detailFrame)
+	end)
+	placePager(frame, orders.next, "Next >", detailPage < pageCount, function()
+		detailPage += 1
+		M.openAttributeDetail(detailFrame)
+	end)
+	if pageCount > 1 then
+		setPageText(header, ("Page %d/%d"):format(detailPage, pageCount))
+	end
 end
 
 function M.closeAttributeDetail()
@@ -857,6 +940,7 @@ function M.closeAttributeDetail()
 		TooltipModule.forceHide()
 	end
 	cleanupDetail()
+	detailFrame = nil
 end
 
 -- ===================== QUERY API =====================

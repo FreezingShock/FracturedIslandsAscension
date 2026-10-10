@@ -85,7 +85,7 @@ Sources.register("collection", {
 	rank = 20,
 	label = "Collection",
 	color = "#55FFFF",
-	description = "A permanent reward for completing a collection tier.",
+	description = "A permanent reward for completing a Collection tier.",
 })
 
 Sources.register("skill", {
@@ -134,32 +134,43 @@ function Sources.build(attrKey: string, data: any, baseValue: number): { any }
 	end
 
 	local byId, ordered = {}, {}
+	-- Boosts with the same group (every tier of one collection, every level of one skill) stack into ONE source:
+	-- `count` is how many boosts went in, `parts` what each one was (the tooltip lists them).
 	local function sourceFor(boost)
-		local id = boost.id or ("label:" .. tostring(boost.label))
+		local id = boost.group or boost.id or ("label:" .. tostring(boost.label))
 		local src = byId[id]
 		if not src then
 			src = {
 				type = classify(boost),
 				id = id,
-				label = boost.label or "Unknown",
+				label = boost.groupLabel or boost.label or "Unknown",
 				color = boost.color,
+				icon = boost.icon, -- the picture the slot shows instead of initials (collection and skill sources)
 				itemId = boost.itemId,
 				slotId = boost.slotId,
 				order = #ordered + 1,
+				stacked = boost.group ~= nil,
+				count = 0,
+				parts = {},
 			}
 			byId[id] = src
 			table.insert(ordered, src)
 		end
+		src.count += 1
 		return src
 	end
 
 	for _, boost in ipairs(data and data.flatBoosts or {}) do
 		local src = sourceFor(boost)
-		src.flat = (src.flat or 0) + (tonumber(boost.value) or 0)
+		local value = tonumber(boost.value) or 0
+		src.flat = (src.flat or 0) + value
+		table.insert(src.parts, { label = boost.label or "Bonus", flat = value })
 	end
 	for _, boost in ipairs(data and data.multipliers or {}) do
 		local src = sourceFor(boost)
-		src.mult = (src.mult or 1) + ((tonumber(boost.value) or 1) - 1)
+		local value = tonumber(boost.value) or 1
+		src.mult = (src.mult or 1) + (value - 1)
+		table.insert(src.parts, { label = boost.label or "Bonus", mult = value })
 	end
 
 	local slotRank = {}
@@ -184,9 +195,17 @@ function Sources.build(attrKey: string, data: any, baseValue: number): { any }
 end
 
 -- ===================== PRESENTATION =====================
+--- Every word starts with a capital (Bronze Coins Collection V, Combat Level III).
+local function titleCase(text: string): string
+	return (text:gsub("(%a)([%w']*)", function(first, rest)
+		return first:upper() .. rest
+	end))
+end
+
 function Sources.name(source: any): string
 	local spec = Sources.Types[source.type]
-	return spec and spec.nameOf and spec.nameOf(source) or source.label or "?"
+	local name = spec and spec.nameOf and spec.nameOf(source) or source.label or "?"
+	return titleCase(name)
 end
 
 function Sources.hex(source: any): string
@@ -212,6 +231,8 @@ function Sources.initials(source: any): string
 	local text = #words >= 2 and (words[1]:sub(1, 1) .. words[2]:sub(1, 1)) or (words[1] or "?"):sub(1, 2)
 	return text:upper()
 end
+
+local STACK_ROWS = 12 -- rows listed before a stacked source says "+N more"
 
 function Sources.tooltip(source: any, attrDef: any, ctx: any): any
 	ctx = ctx or {}
@@ -267,6 +288,23 @@ function Sources.tooltip(source: any, attrDef: any, ctx: any): any
 		rows = rows,
 		first = true,
 	})
+	-- A stacked source lists what went into it, one row per boost (ctx.formatAmount turns a part into its amount text).
+	if source.stacked and ctx.formatAmount and #source.parts > 0 then
+		local parts = {}
+		for i, part in ipairs(source.parts) do
+			if i > STACK_ROWS then
+				table.insert(parts, { label = string.format("+%d more", #source.parts - STACK_ROWS), value = "", color = "#AAAAAA" })
+				break
+			end
+			table.insert(parts, { label = titleCase(part.label), value = ctx.formatAmount(part), color = Sources.hex(source) })
+		end
+		table.insert(config.sections, 2, {
+			type = "list",
+			title = string.format("Stacked x%d", source.count),
+			color = Sources.hex(source),
+			rows = parts,
+		})
+	end
 	return config
 end
 

@@ -685,8 +685,18 @@ ProfileConfig.PROFILE_MENU3_ITEM_ORDERS = {
 	CloseSlot = 49,
 }
 ProfileConfig.PROFILE_MENU3_CONTENT_SLOTS = ProfileConfig.PROFILE_MENU2_CONTENT_SLOTS
--- Static blanks: row 0 (all but the attribute cell) + borders + footer.
-ProfileConfig.PROFILE_MENU3_BLANK_GROUPS = ProfileConfig.PROFILE_MENU2_BLANK_GROUPS
+-- Static blanks: row 0 (all but the attribute cell) + borders + footer, except the two footer cells that hold the
+-- pager (47 = Prev, 50 = Next). ProfilePage fills those two with a pager button or a blank, depending on the page count.
+ProfileConfig.PROFILE_MENU3_PAGER_ORDERS = { prev = 47, next = 50 }
+ProfileConfig.PROFILE_MENU3_BLANK_GROUPS = {}
+for _, group in ipairs(ProfileConfig.PROFILE_MENU2_BLANK_GROUPS) do
+	if group.layoutOrder < 45 then -- rows 0-4
+		table.insert(ProfileConfig.PROFILE_MENU3_BLANK_GROUPS, group)
+	end
+end
+for _, layoutOrder in ipairs({ 45, 46, 51, 52, 53 }) do -- footer cells left and right of the pager
+	table.insert(ProfileConfig.PROFILE_MENU3_BLANK_GROUPS, { layoutOrder = layoutOrder, count = 1 })
+end
 
 -- Skill name → top bar title shown when ProfileMenu2 is active.
 ProfileConfig.PROFILE_MENU2_TITLES = {
