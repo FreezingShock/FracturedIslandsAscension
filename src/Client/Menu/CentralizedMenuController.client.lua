@@ -14,6 +14,7 @@ local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local LiquidGlassHandler = require(Modules:WaitForChild("LiquidGlassHandler")) :: any
+local Ambience = require(script.Parent:WaitForChild("Ambience")) :: any -- the menu open / close sounds (AmbienceConfig.cues)
 
 -- ===================== AUDIO =====================
 local UIClick, UIClick3, UIIn, UIOut
@@ -1261,6 +1262,7 @@ local function openMenu(mode)
 	menuOpen = true
 	openMode = mode
 	CentralizedMenu.Enabled = true
+	Ambience.cue("menuOpen")
 	hideSidebar()
 	lastActivity = os.clock() -- wakes the blank-slot gradient loop (bottom of this file)
 
@@ -1299,6 +1301,7 @@ local function closeMenu()
 	end
 	menuOpen = false
 	openMode = nil
+	Ambience.cue("menuClose")
 	showSidebar()
 	local nav = currentNav()
 	if nav and nav.config and nav.config.module then

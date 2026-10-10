@@ -333,6 +333,12 @@
         "AdminCommandsClient": {
           "$path": "src/Client/Admin/AdminCommandsClient.client.lua"
         },
+        "Ambience": {
+          "$path": "src/Client/World/Ambience.lua"
+        },
+        "AmbienceController": {
+          "$path": "src/Client/World/AmbienceController.client.lua"
+        },
         "AttackBarController": {
           "$path": "src/Client/Combat/AttackBarController.client.lua"
         },
@@ -347,6 +353,9 @@
         },
         "CentralizedMenuController": {
           "$path": "src/Client/Menu/CentralizedMenuController.client.lua"
+        },
+        "ChatBubble": {
+          "$path": "src/Client/Chat/ChatBubble.lua"
         },
         "ChatController": {
           "$path": "src/Client/Chat/ChatController.client.lua"

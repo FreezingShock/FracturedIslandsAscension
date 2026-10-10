@@ -7,23 +7,22 @@
 --]]
 
 return {
-	version = "3.90.0",
-	date = "2026-10-09", -- the commit's date
-	commit = "Player and self nameplates, chat level badge, taller chat with top fade and scroll polish", -- the commit title (short)
+	version = "3.91.0",
+	date = "2026-10-10", -- the commit's date
+	commit = "Ambience: rolling music, footsteps by floor material with stride steps, jump and landing, menu sounds", -- the commit title (short)
 	-- what this commit added / changed / fixed: shown in chat when a player joins (ChatService.sendReleaseNotes)
 	summary = {
 		added = {
-			"Other players have the same overhead plate as enemies: name, Nexus level badge, tag row and health bar",
-			"Your own plate shows in third-person free camera and hides in first person",
-			"Each player's chat line starts with their Nexus level badge, matching the nameplate",
-			"Players die with the same shard dissolve as enemies",
+			"Background music rolls through a playlist with quiet gaps between tracks",
+			"Footsteps depend on the ground you walk on: grass, stone, sand, wood, snow, gravel and glass each have their own steps",
+			"Jumping and landing from a fall make a sound",
+			"Opening and closing the menu makes a sound",
 		},
 		changed = {
-			"The chat panel is taller (450px) and its top fades out over the older lines",
-			"The chat scrollbar stays visible and the mouse wheel moves further per notch",
+			"A footstep plays for every stride you cover, so sprinting and dashing step as fast as you move",
 		},
 		fixed = {
-			"Player plates no longer show Roblox's own name and health tag on top of ours",
+			"Footsteps no longer lag behind your movement",
 		},
 	},
 }
