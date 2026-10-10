@@ -19,6 +19,9 @@
       "ButtonServerManager": {
         "$path": "src/Server/Buttons/ButtonServerManager.server.lua"
       },
+      "ChatInit": {
+        "$path": "src/Server/Chat/ChatInit.server.lua"
+      },
       "ChatService": {
         "$path": "src/Server/Chat/ChatService.lua"
       },
@@ -176,6 +179,9 @@
         },
         "ButtonFX": {
           "$path": "src/Shared/Modules/Buttons/ButtonFX.lua"
+        },
+        "CameraFeel": {
+          "$path": "src/Shared/Modules/World/CameraFeel.lua"
         },
         "ChatBridge": {
           "$path": "src/Shared/Modules/Chat/ChatBridge.lua"

@@ -49,7 +49,9 @@ return {
 	slime_ball = "rbxassetid://114697486919728",
 	spider_eye = "rbxassetid://86306875259974",
 	stick = "rbxassetid://116855299256097",
+	stone_sword = "rbxassetid://79917725107370",
 	string = "rbxassetid://111677557501256",
 	wooden_spear = "rbxassetid://90993122828921",
+	wooden_sword = "rbxassetid://120012713963040",
 	yellow_stained_glass_pane = "rbxassetid://82332021200980",
 }

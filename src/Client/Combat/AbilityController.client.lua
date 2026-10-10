@@ -25,6 +25,8 @@ local TweenService = game:GetService("TweenService")
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 local AbilityConfig = require(Modules:WaitForChild("AbilityConfig")) :: any
 local CombatAnimator = require(Modules:WaitForChild("CombatAnimator")) :: any
+local CameraConfig = require(Modules:WaitForChild("Config"):WaitForChild("CameraConfig")) :: any
+local CameraFeel = require(Modules:WaitForChild("CameraFeel")) :: any
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
@@ -41,7 +43,7 @@ local NAME_BUSY = Color3.fromRGB(150, 150, 150)
 -- Every effect part comes from a small pool (acquire / release) and the total is capped (AbilityConfig.fxLimits), so a busy
 -- fight reuses the same parts instead of creating and destroying instances. One Heartbeat serves all running zones.
 local Limits = AbilityConfig.fxLimits
-local pools: { [string]: { BasePart } } = { ring = {}, bolt = {}, area = {} }
+local pools: { [string]: { BasePart } } = { ring = {}, bolt = {}, area = {}, layer = {} }
 local liveParts = 0
 local liveEmitters = 0
 
@@ -55,7 +57,7 @@ local function makePart(kind: string): BasePart
 	if kind == "ring" then
 		part.Shape = Enum.PartType.Cylinder
 		part.Material = Enum.Material.Neon
-	elseif kind == "bolt" then
+	elseif kind == "bolt" or kind == "layer" then
 		part.Material = Enum.Material.Neon
 	else -- area: invisible box that carries the particle emitter
 		part.Transparency = 1
@@ -85,6 +87,9 @@ end
 local function release(kind: string, part: BasePart)
 	liveParts = math.max(0, liveParts - 1)
 	part.Parent = nil
+	if kind == "layer" then
+		part:ClearAllChildren() -- layer parts carry their own emitters and lights; those go with them
+	end
 	if kind == "area" then
 		local emitter = part:FindFirstChild("Emitter") :: ParticleEmitter
 		emitter.Enabled = false
@@ -303,6 +308,897 @@ local function zoneKey(caster: Player, abilityId: string): string
 	return caster.UserId .. "/" .. abilityId
 end
 
+-- ===================== LAYERED FX =====================
+-- An fx with `layers` (AbilityConfig.fx) is stacked: each layer is one visual, drawn by the builder of its `kind` below.
+-- Layers use the same pools and caps as everything else. A running effect is a handle that owns its parts and emitters;
+-- one Heartbeat (layerStep) steps every handle. A handle ends as one: by time, by the server's "end", or when a following
+-- caster dies. Ending fades the parts and lets the emitters finish (LINGER seconds), then the parts go back to the pool.
+-- The rules for designing a layer are in docs/FX_GUIDE.md.
+local LINGER = 2.5
+local SPARKLE = "rbxasset://textures/particles/sparkles_main.dds"
+local FEET = Vector3.new(0, 2.8, 0) -- HumanoidRootPart centre to the floor
+
+local handles: { any } = {}
+local layerConnection: RBXScriptConnection? = nil
+
+local function colorSeq(colors: { Color3 }): ColorSequence
+	if #colors == 1 then
+		return ColorSequence.new(colors[1])
+	end
+	local keys = {}
+	for index, color in ipairs(colors) do
+		table.insert(keys, ColorSequenceKeypoint.new((index - 1) / (#colors - 1), color))
+	end
+	return ColorSequence.new(keys)
+end
+
+--- Particles start small, swell, then shrink to nothing.
+local function sizeCurve(size: number): NumberSequence
+	return NumberSequence.new({
+		NumberSequenceKeypoint.new(0, size * 0.5),
+		NumberSequenceKeypoint.new(0.25, size),
+		NumberSequenceKeypoint.new(1, 0),
+	})
+end
+
+--- Particles stay bright for most of their life, then fade.
+local FADE = NumberSequence.new({
+	NumberSequenceKeypoint.new(0, 0),
+	NumberSequenceKeypoint.new(0.7, 0.3),
+	NumberSequenceKeypoint.new(1, 1),
+})
+
+local function range(pair: { number }): NumberRange
+	return NumberRange.new(pair[1], pair[2] or pair[1])
+end
+
+--- An emitter with the shared look (glowing, spinning, fading). The builder sets the rest.
+local function newEmitter(spec: any, size: number): ParticleEmitter
+	local emitter = Instance.new("ParticleEmitter")
+	emitter.Texture = spec.texture or SPARKLE
+	emitter.Color = colorSeq(spec.colors or { Color3.new(1, 1, 1) })
+	emitter.LightEmission = spec.lightEmission or 1
+	emitter.Lifetime = range(spec.lifetime or { 1, 2 })
+	emitter.Speed = range(spec.speed or { 2, 4 })
+	emitter.Size = sizeCurve(size)
+	emitter.Transparency = FADE
+	emitter.Rotation = NumberRange.new(0, 360)
+	emitter.RotSpeed = NumberRange.new(-120, 120)
+	emitter.SpreadAngle = Vector2.new(spec.spread or 180, spec.spread or 180)
+	emitter.Acceleration = spec.acceleration or Vector3.zero
+	emitter.Drag = spec.drag or 0
+	emitter.Shape = Enum.ParticleEmitterShape.Box
+	return emitter
+end
+
+--- A part for one layer (nil at the part cap). Reset here, so a reused part never keeps the last layer's shape.
+local function layerPart(handle: any): BasePart?
+	local part = acquire("layer")
+	if part then
+		part.Shape = Enum.PartType.Block
+		part.Material = Enum.Material.Neon
+		part.Transparency = 0
+		part.Size = Vector3.one
+		table.insert(handle.parts, part)
+	end
+	return part
+end
+
+--- Reserves one emitter for the handle (false at the emitter cap).
+local function canEmit(handle: any): boolean
+	if liveEmitters >= Limits.maxEmitters then
+		return false
+	end
+	liveEmitters += 1
+	handle.emitters += 1
+	return true
+end
+
+--- Where a layer sits: the caster (default) or the end of the line (`at = "end"`).
+local function anchorOf(spec: any, ctx: any): Vector3
+	if spec.at == "end" then
+		return ctx.endPoint()
+	end
+	return ctx.center()
+end
+
+--- Makes sure the handle lasts until this layer is finished.
+local function keepUntil(handle: any, spec: any, ctx: any, length: number)
+	handle.endsAt = math.max(handle.endsAt, ctx.start + (spec.delay or 0) + length)
+end
+
+--- Easing curves for layers that move, grow or fade (`ease = "outBack"` ...). Input t runs 0..1 and is clamped.
+local EASE = {
+	linear = function(t: number): number
+		return t
+	end,
+	outQuad = function(t: number): number
+		return 1 - (1 - t) * (1 - t)
+	end,
+	outCubic = function(t: number): number
+		return 1 - (1 - t) ^ 3
+	end,
+	outBack = function(t: number): number -- overshoots a little, then settles
+		local c = 1.70158
+		return 1 + (c + 1) * (t - 1) ^ 3 + c * (t - 1) ^ 2
+	end,
+	inCubic = function(t: number): number -- accelerates (a drop)
+		return t ^ 3
+	end,
+	inOutSine = function(t: number): number
+		return -(math.cos(math.pi * t) - 1) / 2
+	end,
+}
+
+local function ease(name: string?, t: number): number
+	return (EASE[name or "outCubic"] or EASE.outCubic)(math.clamp(t, 0, 1))
+end
+
+local builders: { [string]: (any, any, any) -> () } = {}
+
+-- Flat glowing disc on the ground that breathes (pulses) in size.
+builders.disc = function(handle, spec, ctx)
+	local part = layerPart(handle)
+	if not part then
+		return
+	end
+	part.Shape = Enum.PartType.Cylinder
+	part.Material = Enum.Material[spec.material or "ForceField"] -- ForceField shimmers; Neon would be a flat glow
+	part.Color = spec.color
+	part.Transparency = spec.transparency or 0.6
+	local radius = spec.radius or ctx.radius * (spec.scale or 1)
+	table.insert(handle.steps, function(now)
+		local pulse = 1 + math.sin(now * (spec.pulse or 1) * math.pi * 2) * (spec.pulseAmount or 0.05)
+		local diameter = math.max(radius * 2 * pulse, 0.2)
+		local ground = anchorOf(spec, ctx) - FEET + Vector3.new(0, spec.height or 0.2, 0)
+		part.Size = Vector3.new(0.12, diameter, diameter)
+		part.CFrame = CFrame.new(ground) * CFrame.Angles(0, 0, math.rad(90))
+	end)
+end
+
+-- A ring of short neon runes that turns; each rune shimmers on its own beat. Colours alternate around the ring.
+builders.glyph = function(handle, spec, ctx)
+	local colors = spec.colors or { Color3.new(1, 1, 1) }
+	local count = spec.count or 8
+	local radius = spec.radius or ctx.radius * (spec.scale or 1)
+	local spin = math.rad(spec.spin or 30)
+	local alpha = spec.transparency or 0.1
+	local bars = {}
+	for index = 1, count do
+		local part = layerPart(handle)
+		if not part then
+			break
+		end
+		part.Color = colors[(index - 1) % #colors + 1]
+		part.Size = Vector3.new(spec.length or 1.5, spec.width or 0.3, 0.1)
+		table.insert(bars, { part = part, index = index })
+	end
+	if spec.time then
+		keepUntil(handle, spec, ctx, spec.time)
+	end
+	table.insert(handle.steps, function(now)
+		local centre = anchorOf(spec, ctx) - FEET + Vector3.new(0, spec.height or 0.3, 0)
+		local phase = now * spin
+		for _, bar in ipairs(bars) do
+			local angle = (bar.index - 1) / count * math.pi * 2 + phase
+			local offset = Vector3.new(math.cos(angle) * radius, 0, math.sin(angle) * radius)
+			-- turned so each rune is a tangent to the ring
+			bar.part.CFrame = CFrame.new(centre + offset) * CFrame.Angles(0, -(angle + math.pi / 2), 0)
+			bar.part.Transparency = alpha + 0.4 * (0.5 + 0.5 * math.sin(now * 5 + bar.index))
+		end
+	end)
+end
+
+-- A cone of coloured light from above, pointing down at the effect. Brightness flickers.
+builders.spot = function(handle, spec, ctx)
+	local part = layerPart(handle)
+	if not part then
+		return
+	end
+	part.Transparency = 1
+	part.Size = Vector3.one * 0.2
+	local light = Instance.new("SpotLight")
+	light.Color = spec.color
+	light.Range = spec.range or 20
+	light.Angle = spec.angle or 40
+	light.Brightness = spec.brightness or 3
+	light.Parent = part
+	local base = light.Brightness
+	table.insert(handle.steps, function(now)
+		local top = anchorOf(spec, ctx) + Vector3.new(0, spec.height or 12, 0)
+		part.CFrame = CFrame.lookAt(top, top - Vector3.yAxis, Vector3.zAxis)
+		light.Brightness = base * (1 + (spec.flicker or 0) * math.sin(now * 9))
+	end)
+end
+
+-- Particles in a box over the area that keep drifting (sparkles rising, spores falling). Follows the effect.
+builders.motes = function(handle, spec, ctx)
+	if not canEmit(handle) then
+		return
+	end
+	local part = layerPart(handle)
+	if not part then
+		return
+	end
+	local radius = spec.radius or ctx.radius * (spec.scale or 1)
+	part.Transparency = 1
+	part.Size = Vector3.new(radius * 2, 1, radius * 2)
+	local emitter = newEmitter(spec, spec.size or 0.4)
+	emitter.Rate = spec.rate or 12
+	emitter.EmissionDirection = spec.direction or Enum.NormalId.Top
+	emitter.Parent = part
+	table.insert(handle.steps, function()
+		part.CFrame = CFrame.new(anchorOf(spec, ctx) + Vector3.new(0, spec.height or 1, 0))
+	end)
+end
+
+-- A ring on the ground that races outward (a shockwave). Starts after `delay`, grows, then fades.
+builders.shock = function(handle, spec, ctx)
+	local part = layerPart(handle)
+	if not part then
+		return
+	end
+	part.Shape = Enum.PartType.Cylinder
+	part.Color = spec.color
+	part.Transparency = 1
+	local time = spec.time or 0.5
+	local start = ctx.start + (spec.delay or 0)
+	local radius = spec.radius or ctx.radius * (spec.scale or 1)
+	keepUntil(handle, spec, ctx, time + 0.1)
+	table.insert(handle.steps, function(now)
+		if now < start then
+			return
+		end
+		local t = math.clamp((now - start) / time, 0, 1)
+		local eased = 1 - (1 - t) ^ 3
+		local diameter = math.max(radius * 2 * eased, 0.2)
+		part.Size = Vector3.new((spec.height or 0.6) * (1 - 0.5 * t), diameter, diameter)
+		part.CFrame = CFrame.new(anchorOf(spec, ctx) - FEET + Vector3.new(0, 0.2, 0)) * CFrame.Angles(0, 0, math.rad(90))
+		part.Transparency = 0.05 + 0.95 * t ^ 1.5
+	end)
+end
+
+-- Straight cracks shooting out from the impact point. Each one grows, holds, then fades.
+builders.cracks = function(handle, spec, ctx)
+	local count = spec.count or 6
+	local length = spec.radius or ctx.radius * (spec.scale or 1)
+	local time = spec.time or 0.4
+	local start = ctx.start + (spec.delay or 0)
+	keepUntil(handle, spec, ctx, time + 0.25)
+	for index = 1, count do
+		local part = layerPart(handle)
+		if not part then
+			break
+		end
+		part.Color = spec.color
+		part.Transparency = 1
+		local heading = (index - 1) / count * math.pi * 2 + (math.random() - 0.5) * 0.5
+		local dir = Vector3.new(math.cos(heading), 0, math.sin(heading))
+		local reach = length * (0.7 + 0.3 * math.random())
+		table.insert(handle.steps, function(now)
+			if now < start then
+				return
+			end
+			local t = math.clamp((now - start) / time, 0, 1)
+			local ground = anchorOf(spec, ctx) - FEET + Vector3.new(0, 0.1, 0)
+			local len = math.max(reach * t, 0.1)
+			local mid = ground + dir * (len / 2)
+			part.Size = Vector3.new(spec.width or 0.3, 0.08, len)
+			part.CFrame = CFrame.lookAt(mid, mid + dir)
+			local fade = math.max(0, (t - 0.6) / 0.4)
+			part.Transparency = fade + (1 - fade) * 0.05
+		end)
+	end
+end
+
+-- A one-off puff of particles (debris, embers) that flies out and falls. Fires once, after `delay`.
+builders.burst = function(handle, spec, ctx)
+	if not canEmit(handle) then
+		return
+	end
+	local part = layerPart(handle)
+	if not part then
+		return
+	end
+	part.Transparency = 1
+	part.Size = Vector3.one * 0.5
+	local emitter = newEmitter(spec, spec.size or 0.6)
+	emitter.Rate = 0
+	emitter.EmissionDirection = spec.direction or Enum.NormalId.Top
+	emitter.Acceleration = spec.acceleration or Vector3.new(0, -20, 0)
+	emitter.Drag = spec.drag or 1
+	emitter.Parent = part
+	local start = ctx.start + (spec.delay or 0)
+	local fired = false
+	keepUntil(handle, spec, ctx, (spec.lifetime and (spec.lifetime[2] or spec.lifetime[1]) or 1) + 0.2)
+	table.insert(handle.steps, function(now)
+		part.CFrame = CFrame.new(anchorOf(spec, ctx) - FEET + Vector3.new(0, spec.height or 0.3, 0))
+		if not fired and now >= start then
+			fired = true
+			emitter:Emit(spec.count or 20)
+		end
+	end)
+end
+
+-- A straight neon bolt from the first point to the last, with a wider soft glow behind it. Fades out.
+builders.beam = function(handle, spec, ctx)
+	local points = ctx.points
+	if not points or #points < 2 then
+		return
+	end
+	local a, b = points[1], points[#points]
+	local time = spec.time or 0.3
+	local start = ctx.start + (spec.delay or 0)
+	keepUntil(handle, spec, ctx, time + 0.1)
+	local bolts = {
+		{ part = layerPart(handle), color = spec.color, width = spec.width or 0.5, base = 0 },
+		{ part = layerPart(handle), color = spec.glowColor or spec.color, width = spec.glowWidth or 2, base = spec.glowTransparency or 0.6 },
+	}
+	for _, bolt in ipairs(bolts) do
+		if bolt.part then
+			bolt.part.Color = bolt.color
+			bolt.part.Transparency = 1
+		end
+	end
+	table.insert(handle.steps, function(now)
+		if now < start then
+			return
+		end
+		local t = math.clamp((now - start) / time, 0, 1)
+		local mid = (a + b) / 2
+		local length = math.max((b - a).Magnitude, 0.1)
+		for _, bolt in ipairs(bolts) do
+			if bolt.part then
+				bolt.part.Size = Vector3.new(bolt.width, bolt.width, length)
+				bolt.part.CFrame = CFrame.lookAt(mid, b)
+				bolt.part.Transparency = bolt.base + (1 - bolt.base) * t * t
+			end
+		end
+	end)
+end
+
+-- Wind streaks that ride along the line with the projectile: the emitter moves from the first point to the last and
+-- blows backwards, so the streaks trail behind it.
+builders.streaks = function(handle, spec, ctx)
+	local points = ctx.points
+	if not points or #points < 2 or not canEmit(handle) then
+		return
+	end
+	local a, b = points[1], points[#points]
+	local part = layerPart(handle)
+	if not part then
+		return
+	end
+	part.Transparency = 1
+	part.Size = Vector3.one * 0.5
+	local emitter = newEmitter(spec, spec.size or 0.3)
+	emitter.Rate = spec.rate or 60
+	emitter.EmissionDirection = Enum.NormalId.Back
+	emitter.Parent = part
+	local time = spec.time or 0.3
+	local start = ctx.start + (spec.delay or 0)
+	keepUntil(handle, spec, ctx, time + (spec.lifetime and (spec.lifetime[2] or spec.lifetime[1]) or 0.5))
+	table.insert(handle.steps, function(now)
+		if now < start then
+			return
+		end
+		local t = math.clamp((now - start) / time, 0, 1)
+		local position = a:Lerp(b, t)
+		if (b - position).Magnitude > 0.05 then
+			part.CFrame = CFrame.lookAt(position, b)
+		end
+		emitter.Enabled = t < 1
+	end)
+end
+
+-- A ring that repeats: one pulse every `every` seconds (one per zone tick, say), each racing outward and fading.
+builders.pulse = function(handle, spec, ctx)
+	local part = layerPart(handle)
+	if not part then
+		return
+	end
+	part.Shape = Enum.PartType.Cylinder
+	part.Color = spec.color
+	part.Transparency = 1
+	local time = spec.time or 0.6
+	local every = spec.every or math.huge
+	local start = ctx.start + (spec.delay or 0)
+	local radius = spec.radius or ctx.radius * (spec.scale or 1)
+	if spec.every == nil then
+		keepUntil(handle, spec, ctx, time + 0.1)
+	end
+	table.insert(handle.steps, function(now)
+		local age = now - start
+		if age < 0 then
+			part.Transparency = 1
+			return
+		end
+		local phase = age % every
+		if phase > time then
+			part.Transparency = 1
+			return
+		end
+		local t = phase / time
+		local diameter = math.max(radius * 2 * ease(spec.ease, t), 0.2)
+		part.Size = Vector3.new((spec.height or 0.5) * (1 - 0.5 * t), diameter, diameter)
+		part.CFrame = CFrame.new(anchorOf(spec, ctx) - FEET + Vector3.new(0, spec.lift or 0.2, 0)) * CFrame.Angles(0, 0, math.rad(90))
+		part.Transparency = 0.05 + 0.95 * t ^ 1.5
+	end)
+end
+
+-- Straight rays from one point: a fan of thin bars that can tilt upward and turn while they grow (holy rays, frost cracks).
+builders.rays = function(handle, spec, ctx)
+	local colors = spec.colors or { spec.color }
+	local count = spec.count or 8
+	local length = spec.radius or ctx.radius * (spec.scale or 1)
+	local time = spec.time or 0.5
+	local tilt = math.rad(spec.tilt or 0)
+	local spin = math.rad(spec.spin or 0)
+	local lift = spec.lift or 0.1
+	local width = spec.width or 0.3
+	local start = ctx.start + (spec.delay or 0)
+	keepUntil(handle, spec, ctx, time + 0.25)
+	for index = 1, count do
+		local part = layerPart(handle)
+		if not part then
+			break
+		end
+		part.Color = colors[(index - 1) % #colors + 1]
+		part.Transparency = 1
+		local heading = (index - 1) / count * math.pi * 2 + (math.random() - 0.5) * 0.4
+		local reach = length * (0.75 + 0.25 * math.random())
+		table.insert(handle.steps, function(now)
+			local age = now - start
+			if age < 0 then
+				part.Transparency = 1
+				return
+			end
+			local t = math.clamp(age / time, 0, 1)
+			local h = heading + spin * age
+			local dir = Vector3.new(math.cos(h) * math.cos(tilt), math.sin(tilt), math.sin(h) * math.cos(tilt))
+			local base = anchorOf(spec, ctx) - FEET + Vector3.new(0, lift, 0)
+			local len = math.max(reach * ease(spec.ease, t), 0.1)
+			local mid = base + dir * (len / 2)
+			part.Size = Vector3.new(width, width, len)
+			part.CFrame = CFrame.lookAt(mid, mid + dir)
+			local fade = math.max(0, (t - 0.6) / 0.4)
+			part.Transparency = fade + (1 - fade) * 0.05
+		end)
+	end
+end
+
+-- A neon bolt that shoots from the first point to the last: it grows along the path (eased), holds, then fades.
+-- Lay residue behind it with a `trail` layer.
+builders.bolt = function(handle, spec, ctx)
+	local points = ctx.points
+	if not points or #points < 2 then
+		return
+	end
+	local a, b = points[1], points[#points]
+	local grow = spec.grow or 0
+	local time = spec.time or 0.3
+	local start = ctx.start + (spec.delay or 0)
+	keepUntil(handle, spec, ctx, grow + time + 0.1)
+	local bolts = {
+		{ part = layerPart(handle), color = spec.color, width = spec.width or 0.5, base = 0 },
+		{ part = layerPart(handle), color = spec.glowColor or spec.color, width = spec.glowWidth or 2, base = spec.glowTransparency or 0.6 },
+	}
+	for _, bolt in ipairs(bolts) do
+		if bolt.part then
+			bolt.part.Color = bolt.color
+			bolt.part.Transparency = 1
+		end
+	end
+	table.insert(handle.steps, function(now)
+		local age = now - start
+		if age < 0 then
+			return
+		end
+		local tip = a:Lerp(b, grow > 0 and ease(spec.ease, age / grow) or 1)
+		local length = (tip - a).Magnitude
+		local fade = math.clamp((age - grow) / time, 0, 1)
+		for _, bolt in ipairs(bolts) do
+			if bolt.part then
+				if length < 0.1 then
+					bolt.part.Transparency = 1
+				else
+					bolt.part.Size = Vector3.new(bolt.width, bolt.width, length)
+					bolt.part.CFrame = CFrame.lookAt((a + tip) / 2, tip)
+					bolt.part.Transparency = bolt.base + (1 - bolt.base) * fade * fade
+				end
+			end
+		end
+	end)
+end
+
+-- Residue: slabs laid along the path. Each one appears as the front passes it, then fades slowly. `time` is how long
+-- the front takes to cross (match the projectile), `fade` how long each slab lingers.
+builders.trail = function(handle, spec, ctx)
+	local points = ctx.points
+	if not points or #points < 2 then
+		return
+	end
+	local a, b = points[1], points[#points]
+	local length = (b - a).Magnitude
+	if length < 0.5 then
+		return
+	end
+	local dir = (b - a).Unit
+	local count = spec.count or 8
+	local time = spec.time or 0.3
+	local fade = spec.fade or 1
+	local start = ctx.start + (spec.delay or 0)
+	keepUntil(handle, spec, ctx, time + fade)
+	local segment = length / count * 1.1
+	for index = 1, count do
+		local part = layerPart(handle)
+		if not part then
+			break
+		end
+		part.Color = spec.color
+		part.Material = Enum.Material[spec.material or "Neon"]
+		part.Transparency = 1
+		part.Size = Vector3.new(spec.width or 1.5, spec.height or 0.2, segment)
+		local frac = (index - 0.5) / count
+		local mid = a:Lerp(b, frac)
+		local cframe = CFrame.lookAt(mid, mid + dir)
+		local passAt = start + frac * time
+		table.insert(handle.steps, function(now)
+			local age = now - passAt
+			if age < 0 then
+				part.Transparency = 1
+				return
+			end
+			part.CFrame = cframe
+			local f = math.clamp(age / fade, 0, 1)
+			part.Transparency = f * f
+		end)
+	end
+end
+
+-- Jagged lightning. Links come from the cast's points (a chain), or with `arcs` from random arcs out of the caster. The
+-- shape is rolled again every `refresh` seconds so the bolt crackles instead of sitting still, then it fades over `time`.
+builders.lightning = function(handle, spec, ctx)
+	local links = {}
+	if spec.arcs then
+		local center = anchorOf(spec, ctx)
+		local radius = spec.radius or ctx.radius * (spec.scale or 1)
+		for _ = 1, spec.arcs do
+			local heading = math.random() * math.pi * 2
+			local reach = radius * (0.6 + 0.4 * math.random())
+			local target = center + Vector3.new(math.cos(heading) * reach, (math.random() - 0.5) * 3, math.sin(heading) * reach)
+			table.insert(links, { a = center, b = target })
+		end
+	elseif ctx.points then
+		for index = 1, #ctx.points - 1 do
+			table.insert(links, { a = ctx.points[index], b = ctx.points[index + 1] })
+		end
+	end
+	if #links == 0 then
+		return
+	end
+	local segments = spec.segments or 5
+	local jitter = spec.jitter or 1.2
+	local width = spec.width or 0.35
+	local time = spec.time or 0.3
+	local refresh = spec.refresh or 0.05
+	local start = ctx.start + (spec.delay or 0)
+	keepUntil(handle, spec, ctx, time + 0.1)
+	local bolts = {}
+	for _, link in ipairs(links) do
+		local parts = {}
+		for _ = 1, segments do
+			local part = layerPart(handle)
+			if not part then
+				break
+			end
+			part.Color = spec.color
+			part.Transparency = 1
+			table.insert(parts, part)
+		end
+		table.insert(bolts, { a = link.a, b = link.b, parts = parts })
+	end
+	local nextRoll = start
+	table.insert(handle.steps, function(now)
+		local age = now - start
+		if age < 0 then
+			return
+		end
+		if age >= time then
+			for _, bolt in ipairs(bolts) do
+				for _, part in ipairs(bolt.parts) do
+					part.Transparency = 1
+				end
+			end
+			return
+		end
+		if now < nextRoll then
+			return
+		end
+		nextRoll = now + refresh
+		local fade = math.clamp((age - time * 0.5) / (time * 0.5), 0, 1)
+		for _, bolt in ipairs(bolts) do
+			local count = #bolt.parts
+			local pts = { bolt.a }
+			for k = 1, count - 1 do
+				local offset = Vector3.new(math.random() - 0.5, math.random() - 0.5, math.random() - 0.5) * 2 * jitter
+				table.insert(pts, bolt.a:Lerp(bolt.b, k / count) + offset)
+			end
+			table.insert(pts, bolt.b)
+			for s, part in ipairs(bolt.parts) do
+				local p, q = pts[s], pts[s + 1]
+				local len = math.max((q - p).Magnitude, 0.1)
+				part.Size = Vector3.new(width, width, len)
+				part.CFrame = CFrame.lookAt((p + q) / 2, q)
+				part.Transparency = math.clamp(fade + math.random() * 0.15, 0, 1)
+			end
+		end
+	end)
+end
+
+-- A column of light that rises out of the ground, or with `descend` drops from the sky to it. Then it fades.
+builders.pillar = function(handle, spec, ctx)
+	local part = layerPart(handle)
+	if not part then
+		return
+	end
+	part.Color = spec.color
+	part.Transparency = 1
+	local height = spec.height or 14
+	local time = spec.time or 0.4
+	local width = spec.width or 1.2
+	local start = ctx.start + (spec.delay or 0)
+	keepUntil(handle, spec, ctx, time + 0.25)
+	table.insert(handle.steps, function(now)
+		local age = now - start
+		if age < 0 then
+			part.Transparency = 1
+			return
+		end
+		local t = math.clamp(age / time, 0, 1)
+		local e = ease(spec.ease, t)
+		local top = spec.descend and height * (1 - e) or height * e
+		local len = math.max(top, 0.1)
+		local w = width * (1 - 0.4 * t)
+		local ground = anchorOf(spec, ctx) - FEET
+		part.Size = Vector3.new(w, len, w)
+		part.CFrame = CFrame.new(ground + Vector3.new(0, len / 2, 0))
+		local fade = math.max(0, (t - 0.6) / 0.4)
+		part.Transparency = 0.1 + 0.9 * fade
+	end)
+end
+
+-- A glowing ball with a soft halo. It grows (eased), or with `shrink` implodes into its point. `perPoint` puts one on
+-- every point of the cast (one per chain strike); otherwise it sits on the anchor (`at = "end"` for the end of a line).
+builders.orb = function(handle, spec, ctx)
+	local anchors = { false }
+	if spec.perPoint and ctx.points then
+		anchors = ctx.points
+	end
+	local time = spec.time or 0.4
+	local start = ctx.start + (spec.delay or 0)
+	local size = spec.size or 1.2
+	keepUntil(handle, spec, ctx, time + 0.1)
+	for _, point in ipairs(anchors) do
+		local core = layerPart(handle)
+		local halo = layerPart(handle)
+		if not (core and halo) then
+			break
+		end
+		core.Shape = Enum.PartType.Ball
+		core.Color = spec.color
+		core.Transparency = 1
+		halo.Shape = Enum.PartType.Ball
+		halo.Color = spec.glowColor or spec.color
+		halo.Transparency = 1
+		table.insert(handle.steps, function(now)
+			local age = now - start
+			if age < 0 then
+				core.Transparency = 1
+				halo.Transparency = 1
+				return
+			end
+			local t = math.clamp(age / time, 0, 1)
+			local e = ease(spec.ease, t)
+			local s = math.max(size * (spec.shrink and (1 - e) or e), 0.05)
+			local center = (point or anchorOf(spec, ctx)) + Vector3.new(0, spec.height or 0, 0)
+			local fade = math.max(0, (t - 0.5) / 0.5)
+			core.Size = Vector3.one * s
+			core.CFrame = CFrame.new(center)
+			core.Transparency = fade * fade
+			halo.Size = Vector3.one * s * 2.4
+			halo.CFrame = core.CFrame
+			halo.Transparency = math.min(1, 0.7 + 0.3 * fade)
+		end)
+	end
+end
+
+-- Crystal spikes in a ring that grow up out of the ground (eased with a small overshoot), can turn slowly, then hold.
+builders.shards = function(handle, spec, ctx)
+	local count = spec.count or 10
+	local radius = spec.radius or ctx.radius * (spec.scale or 1)
+	local height = spec.height or 4
+	local grow = spec.time or 0.5
+	local colors = spec.colors or { spec.color }
+	local start = ctx.start + (spec.delay or 0)
+	keepUntil(handle, spec, ctx, grow + 0.2)
+	local spikes = {}
+	for index = 1, count do
+		local part = layerPart(handle)
+		if not part then
+			break
+		end
+		part.Material = Enum.Material[spec.material or "Glass"]
+		part.Color = colors[(index - 1) % #colors + 1]
+		part.Transparency = 1
+		table.insert(spikes, {
+			part = part,
+			index = index,
+			width = (spec.width or 0.6) * (0.7 + 0.6 * math.random()),
+			height = height * (0.7 + 0.6 * math.random()),
+			lean = math.rad((math.random() - 0.5) * 16),
+		})
+	end
+	table.insert(handle.steps, function(now)
+		local age = now - start
+		if age < 0 then
+			return
+		end
+		local g = ease("outBack", age / grow)
+		local ground = anchorOf(spec, ctx) - FEET
+		local turn = math.rad(spec.spin or 0) * age
+		for _, spike in ipairs(spikes) do
+			local angle = (spike.index - 1) / count * math.pi * 2 + turn
+			local len = math.max(spike.height * g, 0.05)
+			local base = ground + Vector3.new(math.cos(angle) * radius, 0, math.sin(angle) * radius)
+			spike.part.Size = Vector3.new(spike.width, len, spike.width * 0.6)
+			spike.part.CFrame = CFrame.new(base + Vector3.new(0, len / 2, 0)) * CFrame.Angles(0, -angle, 0) * CFrame.Angles(spike.lean, 0, 0)
+			spike.part.Transparency = 0.15
+		end
+	end)
+end
+
+-- Chunks thrown out on arcs: they fly, fall under gravity, land on the ground and fade. Each one spins.
+builders.debris = function(handle, spec, ctx)
+	local colors = spec.colors or { Color3.fromRGB(120, 90, 60) }
+	local count = spec.count or 10
+	local sizes = spec.size or { 0.4, 0.9 }
+	local flight = spec.flight or { 0.7, 1.1 }
+	local speed = spec.speed or { 8, 14 }
+	local up = spec.up or 14
+	local gravity = spec.gravity or 40
+	local start = ctx.start + (spec.delay or 0)
+	local origin = anchorOf(spec, ctx) - FEET
+	keepUntil(handle, spec, ctx, flight[2] + 0.8)
+	for index = 1, count do
+		local part = layerPart(handle)
+		if not part then
+			break
+		end
+		part.Material = Enum.Material[spec.material or "Slate"]
+		part.Color = colors[(index - 1) % #colors + 1]
+		part.Transparency = 1
+		local s = sizes[1] + (sizes[2] - sizes[1]) * math.random()
+		part.Size = Vector3.new(s, s * (0.5 + 0.5 * math.random()), s)
+		local heading = math.random() * math.pi * 2
+		local horizontal = speed[1] + (speed[2] - speed[1]) * math.random()
+		local vx, vz = math.cos(heading) * horizontal, math.sin(heading) * horizontal
+		local vy = up * (0.6 + 0.8 * math.random())
+		local air = flight[1] + (flight[2] - flight[1]) * math.random()
+		local spinSpeed = math.rad(200 + 300 * math.random()) * (math.random() < 0.5 and -1 or 1)
+		table.insert(handle.steps, function(now)
+			local age = now - start
+			if age < 0 then
+				part.Transparency = 1
+				return
+			end
+			local t = math.min(age, air)
+			local pos = origin + Vector3.new(vx * t, vy * t - 0.5 * gravity * t * t, vz * t)
+			pos = Vector3.new(pos.X, math.max(pos.Y, origin.Y + s * 0.5), pos.Z)
+			part.CFrame = CFrame.new(pos) * CFrame.Angles(spinSpeed * t, spinSpeed * 0.5 * t, 0)
+			part.Transparency = math.min(1, math.max(0, (age - air) / 0.6))
+		end)
+	end
+end
+
+--- Ends a handle: stops its emitters and lights, fades its parts, and returns the parts to the pool after LINGER seconds.
+local function endHandle(handle: any)
+	local index = table.find(handles, handle)
+	if index then
+		table.remove(handles, index)
+	end
+	liveEmitters = math.max(0, liveEmitters - handle.emitters)
+	handle.emitters = 0
+	handle.steps = {}
+	local parts = handle.parts
+	handle.parts = {}
+	for _, part in ipairs(parts) do
+		for _, child in ipairs(part:GetChildren()) do
+			if child:IsA("ParticleEmitter") or child:IsA("SpotLight") then
+				child.Enabled = false
+			end
+		end
+		if part.Transparency < 1 then
+			TweenService:Create(part, TweenInfo.new(0.35), { Transparency = 1 }):Play()
+		end
+	end
+	task.delay(LINGER, function()
+		for _, part in ipairs(parts) do
+			release("layer", part)
+		end
+	end)
+end
+
+local function endHandlesByKey(key: string)
+	for index = #handles, 1, -1 do
+		if handles[index].key == key then
+			endHandle(handles[index])
+		end
+	end
+end
+
+local function layerStep()
+	local now = os.clock()
+	for index = #handles, 1, -1 do
+		local handle = handles[index]
+		local root = handle.root
+		local humanoid = root and root.Parent and root.Parent:FindFirstChildOfClass("Humanoid")
+		local dead = handle.follow and not (humanoid and humanoid.Health > 0)
+		if now >= handle.endsAt or dead then
+			endHandle(handle)
+		else
+			for _, step in ipairs(handle.steps) do
+				step(now)
+			end
+		end
+	end
+	if #handles == 0 and layerConnection then
+		layerConnection:Disconnect()
+		layerConnection = nil
+	end
+end
+
+--- Starts the layered effect for one cast. `data.points` (line / chain / dash) and `data.duration` are optional.
+local function playLayered(caster: Player, data: any, ability: any, fx: any)
+	local origin = data.origin :: Vector3
+	local root = caster.Character and caster.Character:FindFirstChild("HumanoidRootPart") :: BasePart?
+	local zone = ability.zone
+	local follow = zone ~= nil and zone.follow ~= false
+	local key = zone and zoneKey(caster, data.abilityId) or nil
+	if key then
+		endHandlesByKey(key) -- a recast replaces the old effect
+	end
+	local points = data.points
+	local handle = { key = key, root = root, follow = follow, parts = {}, steps = {}, emitters = 0, endsAt = 0 }
+	local ctx = {
+		start = os.clock(),
+		radius = ability.shape and (ability.shape.radius or ability.shape.reach or ability.shape.length) or 10,
+		points = points,
+		center = function(): Vector3
+			if follow and root and root.Parent then
+				return root.Position
+			end
+			return origin
+		end,
+		endPoint = function(): Vector3
+			return points and points[#points] or origin
+		end,
+	}
+	handle.endsAt = ctx.start + (zone and (data.duration or zone.duration) or 0.5)
+	for _, layer in ipairs(fx.layers) do
+		local build = builders[layer.kind]
+		if build then
+			build(handle, layer, ctx)
+		else
+			warn(("[AbilityController] %s: unknown fx layer '%s'"):format(tostring(data.abilityId), tostring(layer.kind)))
+		end
+	end
+	table.insert(handles, handle)
+	if not layerConnection then
+		layerConnection = RunService.Heartbeat:Connect(layerStep)
+	end
+end
+
 --- The cast was accepted: the caster's own client plays the animation (it replicates to everyone else).
 local function showCast(data: any)
 	local caster = data.caster :: Player
@@ -319,12 +1215,32 @@ local function showFx(data: any)
 	local ability = AbilityConfig.get(data.abilityId, data.weaponId)
 	local root = caster.Character and caster.Character:FindFirstChild("HumanoidRootPart") :: BasePart?
 	local origin = data.origin :: Vector3
+	if ability then
+		-- camera feel: an ability's shake (AbilityConfig.fx.<id>.shake: a preset name, or false for none), and a blink whip
+		local fxConfig = ability.fx and AbilityConfig.fx[ability.fx]
+		local shake = fxConfig and fxConfig.shake
+		if shake ~= false then
+			CameraFeel.shake(shake or CameraConfig.shake.abilityPreset, origin)
+		end
+		if caster == player and ability.dash and data.points and #data.points >= 2 then
+			CameraFeel.whip(data.points[2] - data.points[1])
+			CameraFeel.punchFov(CameraConfig.blink.punchFov)
+			CameraFeel.trail(CameraConfig.blink.trailSeconds)
+		end
+	end
 	if not ability or tooFar(origin) then
 		return
 	end
 	playSound(origin, ability.sound and AbilityConfig.sounds[ability.sound])
 	local fx = ability.fx and AbilityConfig.fx[ability.fx]
 	if not fx then
+		return
+	end
+	if fx.layers then
+		if ability.zone then
+			endZoneByKey(zoneKey(caster, data.abilityId)) -- layers replace the older zone effect
+		end
+		playLayered(caster, data, ability, fx)
 		return
 	end
 	local radius = ability.shape and (ability.shape.radius or ability.shape.reach or ability.shape.length) or 10
@@ -450,6 +1366,7 @@ FxEvent.OnClientEvent:Connect(function(data)
 	end
 	if data.kind == "end" then
 		endZoneByKey(zoneKey(data.caster, data.abilityId))
+		endHandlesByKey(zoneKey(data.caster, data.abilityId))
 		return
 	end
 	if data.kind ~= "start" or typeof(data.origin) ~= "Vector3" then
@@ -469,6 +1386,12 @@ FxEvent.OnClientEvent:Connect(function(data)
 end)
 
 Players.PlayerRemoving:Connect(function(leaving)
+	for index = #handles, 1, -1 do
+		local key = handles[index].key
+		if key and key:match("^" .. leaving.UserId .. "/") then
+			endHandle(handles[index])
+		end
+	end
 	for index = #zonesFx, 1, -1 do
 		if zonesFx[index].key:match("^" .. leaving.UserId .. "/") then
 			stopZoneFx(zonesFx[index])

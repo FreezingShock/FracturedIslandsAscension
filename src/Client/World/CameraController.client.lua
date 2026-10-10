@@ -37,6 +37,8 @@ local MenuBridge = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChil
 local MovementConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("MovementConfig")) :: any
 local ViewMenuConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Config"):WaitForChild("ViewMenuConfig")) :: any
 local UserGameSettings = UserSettings():GetService("UserGameSettings")
+local CameraConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Config"):WaitForChild("CameraConfig")) :: any
+local CameraFeel = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("CameraFeel")) :: any
 
 -- ===================== CONFIG =====================
 local PHASES = {
@@ -87,6 +89,12 @@ local cursorFree = false -- toggled with T
 local rightMouseDown = false -- the free camera looks around while right mouse is held
 local locked = false -- the mouse currently drives the camera
 local skipFrames = 0
+local lean = 0 -- the body's tilt in radians (CameraConfig.defaults.lean), eased
+local tilt = 0 -- the camera's roll into the strafe in radians (CameraConfig.defaults.lean.rollDegrees), eased
+local drift = Vector3.zero -- the over-the-shoulder camera's drift in camera space (CameraConfig.defaults.drift), eased
+local leanJoint: Motor6D? = nil -- the joint that tilts the upper body (Waist for R15, RootJoint for R6)
+local leanBase: CFrame? = nil -- that joint's resting C0
+local focusPoint: Vector3? = nil -- where the camera looks, eased toward the body (CameraConfig.defaults.follow)
 
 local character: Model? = nil
 local bodyParts: { BasePart } = {}
@@ -121,14 +129,28 @@ local function collectBodyParts()
 	end
 end
 
+-- the joint that tilts the upper body (R15 Waist, R6 RootJoint); lean is only applied when one exists
+local function findLeanJoint(char: Model): (Motor6D?, CFrame?)
+	local joint = char:FindFirstChild("Waist", true)
+	if not (joint and joint:IsA("Motor6D")) then
+		joint = char:FindFirstChild("RootJoint", true)
+	end
+	if joint and joint:IsA("Motor6D") then
+		return joint, joint.C0
+	end
+	return nil, nil
+end
+
 local function onCharacter(char: Model)
 	character = char
+	lean, tilt, drift = 0, 0, Vector3.zero
 	-- every new body starts in first person, looking where it faces, cursor locked
 	phase = 1
 	player:SetAttribute("CameraMode", PHASES[1].name)
 	distance, shoulder, fov = PHASES[1].distance, PHASES[1].shoulder, PHASES[1].fov
 	cursorFree = false
 	collectBodyParts()
+	leanJoint, leanBase = findLeanJoint(char)
 	char.DescendantAdded:Connect(function(d)
 		if d:IsA("BasePart") and not d:FindFirstAncestorOfClass("Tool") and not isArm(d) then
 			table.insert(bodyParts, d)
@@ -326,20 +348,62 @@ local function updateCamera(dt: number)
 	local eyes = head and head.Position or (root.Position + Vector3.new(0, 1.5, 0))
 	local chest = root.Position + HEAD_TO_CHEST
 	local thirdBlend = math.clamp(distance / 2.5, 0, 1)
-	local focus = eyes:Lerp(chest, thirdBlend)
+	local bodyFocus = eyes:Lerp(chest, thirdBlend)
 
-	local rotation = CFrame.fromOrientation(pitch, yaw, 0)
+	-- feel: the spring kicks, whip and punch come from CameraFeel (one sample per frame)
+	local feel = CameraFeel.sample(dt, target.name)
+	-- the focus follows the body closely; while a dash trails, it lags, so the camera slides after you instead of snapping
+	local followConfig = CameraConfig.defaults.follow
+	if not focusPoint or (bodyFocus - focusPoint).Magnitude > followConfig.teleportStuds then
+		focusPoint = bodyFocus -- first frame, a respawn or a teleport too big to ease: snap
+	end
+	local followSpeed = feel.trailing and followConfig.trailSpeed or followConfig.speed
+	focusPoint = (focusPoint :: Vector3):Lerp(bodyFocus, 1 - math.exp(-dt * followSpeed))
+	local focus = focusPoint :: Vector3
+
+	local viewRotation = CFrame.fromOrientation(pitch + feel.pitch, yaw + feel.yaw, 0) -- no tilt: input directions use this
+	local modeScale = CameraConfig.modes[target.name] or { lean = 1, roll = 1, drift = 1 }
+	local leanConfig = CameraConfig.defaults.lean
+	local driftConfig = CameraConfig.defaults.drift
+
+	-- Movement intent: the key direction in camera space drives the tilt, so a start and a stop read at once. The measured
+	-- speed only decides whether you are moving at all (no tilt while standing still).
+	local velocity = root.AssemblyLinearVelocity
+	local moving = Vector3.new(velocity.X, 0, velocity.Z).Magnitude
+	local intent = viewRotation:VectorToObjectSpace(humanoid.MoveDirection)
+	local strafe = math.clamp(intent.X, -1, 1)
+	local forward = math.clamp(-intent.Z, -1, 1)
+	local engaged = moving > leanConfig.deadzone and 1 or 0
+
+	-- the body leans into the strafe, and the camera rolls into it (the tilt you see in first person)
+	if not (leanJoint and leanJoint.Parent) then
+		leanJoint, leanBase = findLeanJoint(character) -- the rig's joints can appear a moment after the character spawns
+	end
+	local smoothing = 1 - math.exp(-dt * leanConfig.speed)
+	local leanTarget = -strafe * math.rad(leanConfig.maxDegrees) * modeScale.lean * engaged
+	local tiltTarget = -strafe * math.rad(leanConfig.rollDegrees) * modeScale.roll * engaged
+	lean += (leanTarget - lean) * smoothing
+	tilt += (tiltTarget - tilt) * smoothing
+	if leanJoint and leanBase then
+		leanJoint.C0 = leanBase * CFrame.Angles(0, 0, lean)
+	end
+	local rotation = CFrame.fromOrientation(pitch + feel.pitch, yaw + feel.yaw, feel.roll + tilt)
+
+	-- the over-the-shoulder camera drifts a little toward the way you move (lagged, eased)
+	local driftTarget = Vector3.new(strafe * driftConfig.maxStuds, 0, -forward * driftConfig.maxStuds * 0.4) * modeScale.drift * engaged
+	drift = drift:Lerp(driftTarget, 1 - math.exp(-dt * driftConfig.speed))
+
 	local position = focus
 	if distance > 0.01 then
-		local desired = focus + rotation:VectorToWorldSpace(Vector3.new(shoulder, 0, distance))
+		local desired = focus + rotation:VectorToWorldSpace(Vector3.new(shoulder, 0, distance) + drift)
 		rayParams.FilterDescendantsInstances = { character }
 		local offset = desired - focus
 		local hit = workspace:Raycast(focus, offset, rayParams)
 		position = hit and (hit.Position - offset.Unit * 0.4) or desired
 	end
-	camera.CFrame = CFrame.new(position) * rotation
+	camera.CFrame = CFrame.new(position + rotation:VectorToWorldSpace(feel.offset)) * rotation
 	camera.Focus = CFrame.new(focus)
-	camera.FieldOfView = fov + sprintFov
+	camera.FieldOfView = fov + sprintFov + feel.fov
 
 	-- hide the body in first person (arms and held items stay), fade it back in as the camera pulls away
 	local fade = math.clamp((THIRD_PERSON_ABOVE - distance) / (THIRD_PERSON_ABOVE - FIRST_PERSON_BELOW), 0, 1)
@@ -362,6 +426,25 @@ local function updateCamera(dt: number)
 		humanoid.AutoRotate = true
 	end
 end
+
+-- Camera feel listens to what already happens: sword blows and deaths. Ability shakes come from AbilityController.
+local weaponHit = ReplicatedStorage:WaitForChild("WeaponHit") :: RemoteEvent
+weaponHit.OnClientEvent:Connect(function(data)
+	if type(data) == "table" and typeof(data.position) == "Vector3" then
+		CameraFeel.shake("hit", typeof(data.point) == "Vector3" and data.point or data.position)
+	end
+end)
+
+local entityDeath = ReplicatedStorage:WaitForChild("EntityDeath") :: RemoteEvent
+entityDeath.OnClientEvent:Connect(function(model, _kind, deathType)
+	-- your own death: DeathController's glitch owns the shake (DeathCam is on), so nothing is added here
+	if player:GetAttribute("DeathCam") or model == player.Character then
+		return
+	end
+	if typeof(model) == "Instance" and model:IsA("Model") then
+		CameraFeel.shake(CameraFeel.shakeFor(deathType), model:GetPivot().Position)
+	end
+end)
 
 RunService:BindToRenderStep("FIACameraController", Enum.RenderPriority.Camera.Value + 1, function(dt)
 	updateCamera(dt)

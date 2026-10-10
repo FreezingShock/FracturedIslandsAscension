@@ -31,6 +31,15 @@ local ALIASES: { [string]: any } = {
 	blink_blade = "golden_sword",
 	stormcaller = "diamond_sword",
 	frostbrand = "iron_sword",
+	-- Basic swords: each uses its own basic icon.
+	wood_sword = "wooden_sword",
+	stone_sword = "stone_sword",
+	gold_sword = "golden_sword",
+	diamond_sword = "diamond_sword",
+	-- Unique swords: one of the five basic sword icons.
+	venomfang = "iron_sword",
+	earthshatter_greatsword = "diamond_sword",
+	gale_lance = "golden_sword",
 	spear_basic = "wooden_spear",
 	bow_basic = "bow",
 	staff_basic = "stick",

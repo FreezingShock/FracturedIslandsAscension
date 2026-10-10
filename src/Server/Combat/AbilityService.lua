@@ -356,6 +356,9 @@ local function resolve(player: Player, ability: any, abilityId: string, weaponId
 		ensureStep()
 	else
 		strike(player, ability, weaponId, stats, nil)
+		if ability.shape and ability.shape.kind == "line" then
+			points = { origin, origin + facing * ability.shape.length } -- the line's start and end, for its fx
+		end
 	end
 
 	broadcast(fxEvent, player, origin, {

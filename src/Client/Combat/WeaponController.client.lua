@@ -34,6 +34,8 @@ local CombatConfig = require(Modules:WaitForChild("CombatConfig")) :: any
 local AbilityConfig = require(Modules:WaitForChild("AbilityConfig")) :: any
 local CombatAnimator = require(Modules:WaitForChild("CombatAnimator")) :: any
 local CombatFX = require(Modules:WaitForChild("CombatFX")) :: any
+local CameraConfig = require(Modules:WaitForChild("Config"):WaitForChild("CameraConfig")) :: any
+local CameraFeel = require(Modules:WaitForChild("CameraFeel")) :: any
 local MenuBridge = require(Modules:WaitForChild("MenuBridge")) :: any
 
 -- ===================== REMOTES =====================
@@ -210,6 +212,10 @@ local function startSwing()
 	faceCursor()
 	CombatAnimator.play(player.Character, currentWeapon.weaponType, stepIndex, speed, currentWeapon.id)
 	CombatFX.swing(player.Character, currentWeapon.weaponType, stepIndex, speed, currentWeapon.id)
+	-- camera feel: a small kick up, rolling to alternate sides each combo step (only for your own swing)
+	local side = stepIndex % 2 == 1 and 1 or -1
+	local swingConfig = CameraConfig.swing
+	CameraFeel.kick(math.rad(swingConfig.pitchDegrees), math.rad(swingConfig.rollDegrees) * side)
 	SwordSwingEvent:FireServer()
 end
 

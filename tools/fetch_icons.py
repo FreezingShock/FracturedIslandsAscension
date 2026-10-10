@@ -27,6 +27,8 @@ UA = "FIA-icon-fetch/1.0 (Roblox game dev; local tool)"
 # key -> wiki base name. Add a line to add an icon, then re-run both tools.
 ICONS = {
     "barrier": "Barrier",  # placeholder for items without an icon
+    "wooden_sword": "Wooden_Sword",
+    "stone_sword": "Stone_Sword",
     "iron_sword": "Iron_Sword",
     "diamond_sword": "Diamond_Sword",
     "golden_sword": "Golden_Sword",

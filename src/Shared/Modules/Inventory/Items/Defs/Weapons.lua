@@ -167,6 +167,98 @@ return {
 		},
 	},
 
+	-- Basic swords (Common). Iron is sword_basic above.
+	wood_sword = {
+		name = "Wood Sword",
+		description = "A plain sword cut from timber.",
+		rarity = 0,
+		skillTag = "Combat",
+		weapon = { weaponType = "sword", attackSpeed = 1.2, knockback = 12, range = 20 },
+		stats = { Damage = 6, CritChance = 5, CritIncrease = 50 },
+	},
+
+	stone_sword = {
+		name = "Stone Sword",
+		description = "Chipped stone lashed to a wooden grip.",
+		rarity = 0,
+		skillTag = "Combat",
+		weapon = { weaponType = "sword", attackSpeed = 1.2, knockback = 13, range = 20 },
+		stats = { Damage = 10, CritChance = 8, CritIncrease = 50 },
+	},
+
+	gold_sword = {
+		name = "Gold Sword",
+		description = "Soft gold that swings quickly but dulls fast.",
+		rarity = 0,
+		skillTag = "Combat",
+		weapon = { weaponType = "sword", attackSpeed = 1.5, knockback = 12, range = 20 },
+		stats = { Damage = 18, CritChance = 12, CritIncrease = 50 },
+	},
+
+	diamond_sword = {
+		name = "Diamond Sword",
+		description = "Hard-cut diamond, the best plain blade you can make.",
+		rarity = 0,
+		skillTag = "Combat",
+		weapon = { weaponType = "sword", attackSpeed = 1.2, knockback = 15, range = 20 },
+		stats = { Damage = 24, CritChance = 15, CritIncrease = 60 },
+	},
+
+	-- Unique weapons. Each has one ability with its own mechanic (see AbilityConfig).
+	venomfang = {
+		name = "Venomfang",
+		description = "Its fangs drip with a slow, spreading poison.",
+		rarity = 2,
+		skillTag = "Combat",
+		weapon = { weaponType = "sword", attackSpeed = 1.3, knockback = 10, range = 20 },
+		stats = { Damage = 90, Strength = 20, CritChance = 12, CritIncrease = 60 },
+		abilities = {
+			{
+				name = "Venom Cloud",
+				ability = "venom_cloud",
+				key = "X",
+				cooldown = 10,
+				text = 'Leave a cloud of venom for <font color="#55FF55" family="rbxassetid://12187371840">8 seconds</font> that hits enemies inside every 2 seconds for <font color="#FF5555" family="rbxassetid://12187371840">60% damage</font> and burns them.',
+			},
+		},
+	},
+
+	earthshatter_greatsword = {
+		name = "Earthshatter",
+		description = "Heavy enough to split the ground it lands on.",
+		rarity = 3,
+		skillTag = "Combat",
+		weapon = { weaponType = "sword", attackSpeed = 0.8, knockback = 25, range = 22 },
+		stats = { Damage = 180, Strength = 40, Defense = 10, CritChance = 6, CritIncrease = 80 },
+		abilities = {
+			{
+				name = "Earthshatter",
+				ability = "earthshatter",
+				key = "RMB",
+				cooldown = 8,
+				text = 'After a short delay, slam the ground for <font color="#FF5555" family="rbxassetid://12187371840">400% damage</font> to every enemy within <font color="#55FF55" family="rbxassetid://12187371840">12 studs</font>, knocking them back hard.',
+			},
+		},
+	},
+
+	gale_lance = {
+		name = "Gale Lance",
+		description = "Wind carries the spear straight through its targets.",
+		rarity = 3,
+		skillTag = "Combat",
+		weapon = { weaponType = "spear", attackSpeed = 1.4, knockback = 12, range = 30 },
+		stats = { Damage = 120, Strength = 30, CritChance = 15, CritIncrease = 60 },
+		abilities = {
+			{
+				name = "Gale Lance",
+				ability = "gale_lance",
+				key = "V",
+				cooldown = 4,
+				text = 'Hurl a gust that pierces up to <font color="#55FF55" family="rbxassetid://12187371840">6 enemies</font> in a line <font color="#55FF55" family="rbxassetid://12187371840">30 studs</font> long, dealing <font color="#FF5555" family="rbxassetid://12187371840">160% damage</font> to each.',
+			},
+		},
+	},
+
 	staff_basic = {
 		name = "Apprentice Staff",
 		description = "A magical focus for casting spells.",
@@ -176,8 +268,8 @@ return {
 		weapon = { weaponType = "staff", attackSpeed = 1.0, knockback = 8, range = 50 },
 		stats = { Damage = 8, CritChance = 5, CritIncrease = 100 },
 		abilities = {
-			{ name = "Magic Missile", key = "Q", cooldown = 1.5, damage = 20, text = "Cast a magic missile." },
-			{ name = "Mana Shield", key = "R", cooldown = 8, damage = 0, text = "Create a protective barrier." },
+			{ name = "Magic Missile", key = "Z", cooldown = 1.5, damage = 20, text = "Cast a magic missile." },
+			{ name = "Mana Shield", key = "X", cooldown = 8, damage = 0, text = "Create a protective barrier." },
 		},
 	},
 }
