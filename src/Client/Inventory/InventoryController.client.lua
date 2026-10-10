@@ -1339,10 +1339,15 @@ local function wireHotbarSlotInput(slotIndex)
 		end
 
 		if slotData.toolInfo.pinned then
-			-- the Nexus Star never moves: a click just selects (holds) it
+			-- the Nexus Star never moves: a click equips (holds) it, and opens the Nexus menu unless it is already open
+			-- (openFullMenu would close it again)
 			task.spawn(function()
 				EquipToolFunc:InvokeServer(slotIndex)
 			end)
+			if MenuBridge.getMode() ~= "full" then
+				UIClick:Play()
+				MenuBridge.openFullMenu()
+			end
 			return
 		end
 

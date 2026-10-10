@@ -7,24 +7,19 @@
 --]]
 
 return {
-	version = "3.88.0",
+	version = "3.89.0",
 	date = "2026-10-09", -- the commit's date
-	commit = "Collection milestone rewards and attribute breakdown: stacked sources, paging, item icons", -- the commit title (short)
+	commit = "Skill breakdown grid: title slot, snake of levels, page arrows; Nexus Star opens the menu", -- the commit title (short)
 	-- what this commit added / changed / fixed: shown in chat when a player joins (ChatService.sendReleaseNotes)
 	summary = {
 		added = {
-			"Attribute breakdowns page through every source: 28 per page, with Prev and Next",
-			"Items in an attribute breakdown show their own icon",
-			"Collection and skill sources stack: every tier of a collection and every level of a skill is one slot, marked x7",
-			"Milestone reward slots show the attribute or statistic icon in its colour",
+			"Skill breakdowns are a grid: the skill's title top-left, every level in the Hypixel snake, and page arrows for levels past the first page",
+			"Hover a level for its rewards and status, or hover the title for XP, wisdom and the next reward",
+			"Clicking the Nexus Star in the hotbar equips it and opens the Nexus menu",
 		},
 		changed = {
-			"Collection and skill sources in the breakdown read Collection and Skill, with capital letters in every title",
-			"The amount under each breakdown slot is larger",
+			"The old Skill page with the scrolling level strip is gone; Farming and Combat run to level 60 on three pages",
 		},
-		fixed = {
-			"Milestone reward pages built with the wrong icons and colours, and stopped partway through",
-			"Collection rewards now re-apply when you join, not only after a stat changes",
-		},
+		fixed = {},
 	},
 }

@@ -29,7 +29,7 @@
 local SkillsConfig = {}
 
 SkillsConfig.ORDER = { "Farming", "Foraging", "Fishing", "Mining", "Combat", "Carpentry" }
-SkillsConfig.PAGE_SIZE = 25 -- level slots on the breakdown strip (SkillLevels.ScrollingFrame Level1..Level25)
+SkillsConfig.PAGE_SIZE = 25 -- level slots per breakdown page (the snake in SkillsConfig.SNAKE)
 
 SkillsConfig.skills = {
 	Farming = {
@@ -158,45 +158,85 @@ function SkillsConfig.pageCount(skill: string): number
 	return math.ceil(SkillsConfig.cap(skill) / SkillsConfig.PAGE_SIZE)
 end
 
--- ===================== LEVEL STRIP LAYOUT (the snake) =====================
--- The 25 slots of a page are placed by SkillsPageModule along a snake path (no UIGridLayout): first 3 down, then
--- repeat { 2 right, 2 up, 2 right, 2 down }. Change the path or sizes here; rows = how many rows the strip has.
+-- ===================== BREAKDOWN GRID (the Skills drill-down) =====================
+-- A 9 x 6 pooled grid like every Nexus grid. Cell = row * columns + column (the LayoutOrder). Transcribed from the
+-- Hypixel reference: the title top-left, level 1 under it (the olive cell), then the snake of levels 2-25 down and around
+-- the grid, ending bottom-right; the page arrows and Back sit on the bottom row, clear of the snake.
+SkillsConfig.GRID = {
+	columns = 9,
+	rows = 6,
+	title = { 0, 0 }, -- { col, row }
+	prev = { 3, 5 }, -- page arrows (bottom row, either side of Back)
+	back = { 4, 5 },
+	next = { 5, 5 },
+	close = { 0, 5 },
+}
+
+-- The snake: start is level 1; each move is one step (D/U/L/R) and every step is one level. 24 moves = 25 cells.
 SkillsConfig.SNAKE = {
-	rows = 4,
-	cell = 65, -- slot size in pixels
-	gapX = 10,
-	gapY = 7,
-	pad = 10, -- space around the strip
-	first = { "D", 3 },
-	loop = { { "R", 2 }, { "U", 2 }, { "R", 2 }, { "D", 2 } },
+	start = { 0, 1 },
+	moves = {
+		"D", "D", "R", "R", "U", "U", "U", "R", "R", "D", "D", "D",
+		"R", "R", "U", "U", "U", "R", "R", "D", "D", "D", "D", "D",
+	},
 }
 
 local STEP = { R = { 1, 0 }, L = { -1, 0 }, D = { 0, 1 }, U = { 0, -1 } }
 
---- Grid cells ({ col, row }, 0-based) of the first `count` slots along the snake path.
+--- Grid cells ({ col, row }, 0-based) of the first `count` level slots of a page, along the snake.
 function SkillsConfig.snakeCells(count: number): { { number } }
-	local snake = SkillsConfig.SNAKE
-	local cells = { { 0, 0 } }
-	local col, row = 0, 0
-	local function walk(direction: string, steps: number)
-		local d = STEP[direction]
-		for _ = 1, steps do
-			if #cells >= count then
-				return
-			end
-			col += d[1]
-			row = math.clamp(row + d[2], 0, snake.rows - 1)
-			table.insert(cells, { col, row })
+	local start = SkillsConfig.SNAKE.start
+	local cells = { { start[1], start[2] } }
+	local col, row = start[1], start[2]
+	for _, move in ipairs(SkillsConfig.SNAKE.moves) do
+		if #cells >= count then
+			break
 		end
-	end
-	walk(snake.first[1], snake.first[2])
-	while #cells < count do
-		for _, segment in ipairs(snake.loop) do
-			walk(segment[1], segment[2])
-		end
+		local d = STEP[move]
+		col += d[1]
+		row += d[2]
+		table.insert(cells, { col, row })
 	end
 	return cells
 end
+
+--- Every problem with the grid layout (empty list = fine): cells off the grid, shared cells, too few level cells.
+function SkillsConfig.layoutErrors(): { string }
+	local errors = {}
+	local grid = SkillsConfig.GRID
+	local owner = {}
+	local function claim(name: string, cell: { number })
+		if cell[1] < 0 or cell[1] >= grid.columns or cell[2] < 0 or cell[2] >= grid.rows then
+			table.insert(errors, name .. " is outside the " .. grid.columns .. "x" .. grid.rows .. " grid")
+			return
+		end
+		local key = cell[2] * grid.columns + cell[1]
+		if owner[key] then
+			table.insert(errors, name .. " shares a cell with " .. owner[key])
+		end
+		owner[key] = name
+	end
+	claim("title", grid.title)
+	claim("prev", grid.prev)
+	claim("back", grid.back)
+	claim("next", grid.next)
+	claim("close", grid.close)
+	local cells = SkillsConfig.snakeCells(SkillsConfig.PAGE_SIZE)
+	if #cells < SkillsConfig.PAGE_SIZE then
+		table.insert(errors, "the snake has " .. #cells .. " cells, needs " .. SkillsConfig.PAGE_SIZE)
+	end
+	for i, cell in ipairs(cells) do
+		claim("level " .. i, cell)
+	end
+	return errors
+end
+
+-- ===================== SLOT ICONS =====================
+-- The icon of a level slot is the first reward of that level whose type is listed here and has an icon. The default
+-- reward is the stat buff, so most slots show their stat's icon in the stat's colour. A level with no icon at all shows
+-- PLACEHOLDER_ICON, an ItemIconData key (swap it here, no code).
+SkillsConfig.SLOT_ICON_TYPES = { "item", "recipe", "gameStat" }
+SkillsConfig.PLACEHOLDER_ICON = "barrier"
 
 -- ===================== ROMAN NUMERALS =====================
 local ROMAN_PARTS = { { 50, "L" }, { 40, "XL" }, { 10, "X" }, { 9, "IX" }, { 5, "V" }, { 4, "IV" }, { 1, "I" } }

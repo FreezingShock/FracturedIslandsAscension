@@ -377,7 +377,6 @@ local NEXUS_BUTTONS = {
 		action = "grid",
 		targetGrid = "SkillsGrid",
 		menuTitle = "Your Skills",
-		menuChild = "SkillsMenu",
 	},
 	Profile = {
 		action = "grid",
@@ -723,48 +722,6 @@ local SETTINGS_BUTTONS = {
 }
 
 local SKILLS_BUTTONS = {
-	FarmingSkills = {
-		action = "page",
-		module = SkillsPageModule,
-		menuTitle = "Farming Skill",
-		menuChild = "SkillsMenu",
-		openArg = "Farming",
-	},
-	ForagingSkills = {
-		action = "page",
-		module = SkillsPageModule,
-		menuTitle = "Foraging Skill",
-		menuChild = "SkillsMenu",
-		openArg = "Foraging",
-	},
-	FishingSkills = {
-		action = "page",
-		module = SkillsPageModule,
-		menuTitle = "Fishing Skill",
-		menuChild = "SkillsMenu",
-		openArg = "Fishing",
-	},
-	MiningSkills = {
-		action = "page",
-		module = SkillsPageModule,
-		menuTitle = "Mining Skill",
-		menuChild = "SkillsMenu",
-		openArg = "Mining",
-	},
-	CombatSkills = {
-		action = "page",
-		module = SkillsPageModule,
-		menuTitle = "Combat Skill",
-		menuChild = "SkillsMenu",
-		openArg = "Combat",
-	},
-	CarpentrySkills = {
-		action = "page",
-		module = SkillsPageModule,
-		menuTitle = "Carpentry Skill",
-		menuChild = "SkillsMenu",
-		openArg = "Carpentry",
-	},
 	BackButton = {
 		tooltipData = {
 			title = '<font color="#55FF55"><b>Go back</b></font>',
@@ -783,6 +740,60 @@ local SKILLS_BUTTONS = {
 			click = "",
 		},
 		action = "close",
+	},
+}
+-- Each skill opens its breakdown (SkillsPageModule.openSkill navigates into the SkillsMenu2 grid).
+for _, skillName in ipairs({ "Farming", "Foraging", "Fishing", "Mining", "Combat", "Carpentry" }) do
+	SKILLS_BUTTONS[skillName .. "Skills"] = {
+		action = "callback",
+		callback = function()
+			SkillsPageModule.openSkill(skillName)
+		end,
+	}
+end
+
+-- The breakdown page: the arrows flip levels in place, Back pops to the Skills grid.
+local SKILL_MENU2_BUTTONS = {
+	BackButton = {
+		tooltipData = {
+			title = '<font color="#55FF55"><b>Go back</b></font>',
+			desc = '<font color="#AAAAAA">Return to the previous menu.</font>',
+			click = "",
+		},
+		action = "callback",
+		callback = function()
+			SkillsPageModule.back()
+		end,
+	},
+	CloseSlot = {
+		tooltipData = {
+			title = '<font color="#FF5555"><b>Close Menu</b></font>',
+			desc = "",
+			click = "",
+		},
+		action = "close",
+	},
+	PagePrev = {
+		tooltipData = {
+			title = '<font color="#FFFF55"><b>Previous page</b></font>',
+			desc = '<font color="#AAAAAA">Show the levels before these.</font>',
+			click = "",
+		},
+		action = "callback",
+		callback = function()
+			SkillsPageModule.turnPage(-1)
+		end,
+	},
+	PageNext = {
+		tooltipData = {
+			title = '<font color="#FFFF55"><b>Next page</b></font>',
+			desc = '<font color="#AAAAAA">Show the next levels.</font>',
+			click = "",
+		},
+		action = "callback",
+		callback = function()
+			SkillsPageModule.turnPage(1)
+		end,
 	},
 }
 
@@ -1718,6 +1729,22 @@ registerCollectionGrid("CollectionsMenu4", COLLECTION_MENU4_BUTTONS, "Collection
 	CollectionsPageModule.populateTier(frame)
 end)
 
+-- Skill breakdown (SkillsPageModule): the title, the snake of levels and the arrows are built from its state on populate.
+local SkillsMenu2Template = GridTemplates:FindFirstChild("SkillsMenu2")
+if SkillsMenu2Template then
+	GridMenuModule.registerPooledGrid("SkillsMenu2", SkillsMenu2Template, SKILL_MENU2_BUTTONS, {
+		title = "Skill",
+		onPopulate = function(frame)
+			SkillsPageModule.populate(frame)
+		end,
+		onDepopulate = function()
+			SkillsPageModule.depopulate()
+		end,
+	})
+else
+	warn("[CMC] GridTemplates/SkillsMenu2 not found: run tools/studio/build_skills_menu2.luau")
+end
+
 GridMenuModule.registerPooledGrid("ProfileMenu2", GridTemplates:WaitForChild("ProfileMenu2"), PROFILE_MENU2_BUTTONS, {
 	title = "Attributes",
 	blankGroups = ProfileConfig.PROFILE_MENU2_BLANK_GROUPS,
@@ -1748,7 +1775,12 @@ else
 end
 
 -- ===================== INITIALIZE PAGE MODULES =====================
-SkillsPageModule.init(sharedRefs, menuChildFrames["SkillsMenu"])
+SkillsPageModule.init(sharedRefs)
+-- the retired SkillDescFrame page: nothing navigates to it any more, so keep its frame hidden
+local retiredSkillsFrame = menuFrame:FindFirstChild("SkillsMenu")
+if retiredSkillsFrame then
+	retiredSkillsFrame.Visible = false
+end
 ProfilePageModule.init(sharedRefs)
 ProfilePageModule.setAttributeClickHandler(function(skillName, attrConfig)
 	if GridMenuModule.hasGrid("ProfileMenu3") then

@@ -1,7 +1,10 @@
 --[[
+	RETIRED (3.89.0): the SkillDescFrame breakdown is replaced by the SkillsMenu2 grid. Do not run this. It is kept as
+	the record of the old page; build_skills_menu2.luau builds the new templates.
+
 	build_skills_menu.luau - run through the Studio MCP (execute_luau, Edit datamodel, Play stopped).
 
-	Reworks the GUI of the Skills page (SkillsPageModule looks everything up BY NAME):
+	Reworks the GUI of the Skills page (SkillsPageModule looked everything up BY NAME, before 3.89.0):
 	  StarterGui.CentralizedAscensionMenu...SkillsMenu.SkillDescFrame
 	    SkillLevels.ScrollingFrame   the 25 reusable level slots are renamed from I..XXV to Level1..Level25 (the script sets
 	                                 text, colors, milestone stroke); the 15 empty spacer Frames that shifted the grid are removed
