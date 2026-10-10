@@ -15,3 +15,7 @@ One line per idea ever proposed. Status: proposed | built | rejected | parked. E
 | 2026-10-08-3-2 | Fishing Holes | M | 2026-10-08 | proposed |
 | 2026-10-08-3-3 | Night Hunt | M | 2026-10-08 | proposed |
 | 2026-10-08-3-4 | Seasonal Farm Plots | L | 2026-10-08 | proposed |
+| 2026-10-09-1 | Hunt Contracts | M | 2026-10-09 | proposed |
+| 2026-10-09-2 | Perfect Dodge | S | 2026-10-09 | proposed |
+| 2026-10-09-3 | Warp Map | M | 2026-10-09 | proposed |
+| 2026-10-09-4 | Pets | L | 2026-10-09 | proposed |
