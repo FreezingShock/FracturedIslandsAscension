@@ -131,10 +131,12 @@ NameplateConfig.kinds = {
 	npc = {}, -- hostile / passive NPCs: no passive flag in EnemyConfig yet, so nothing classifies as npc today
 	player = {
 		badge = { top = "#55FFFF", bottom = "#2A8C8C", stroke = "#0E3A3A", text = "#FFFFFF" }, -- Nexus level badge, not compared to combat level
+		bubble = {}, -- chat bubble overrides for other players (fields of ChatConfig.Bubble, e.g. { Lifetime = 4 })
 	},
 	self = {
 		cameraModes = { free = true }, -- the plate shows only in these camera phases: third-person free orbit, never first person
 		badge = { top = "#55FFFF", bottom = "#2A8C8C", stroke = "#0E3A3A", text = "#FFFFFF" },
+		bubble = {}, -- chat bubble overrides for your own bubble (fields of ChatConfig.Bubble)
 	},
 }
 

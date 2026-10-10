@@ -7,22 +7,21 @@
 --]]
 
 return {
-	version = "3.91.0",
+	version = "3.92.0",
 	date = "2026-10-10", -- the commit's date
-	commit = "Ambience: rolling music, footsteps by floor material with stride steps, jump and landing, menu sounds", -- the commit title (short)
+	commit = "Chat speech bubble above the sender's nameplate, styled to match it", -- the commit title (short)
 	-- what this commit added / changed / fixed: shown in chat when a player joins (ChatService.sendReleaseNotes)
 	summary = {
 		added = {
-			"Background music rolls through a playlist with quiet gaps between tracks",
-			"Footsteps depend on the ground you walk on: grass, stone, sand, wood, snow, gravel and glass each have their own steps",
-			"Jumping and landing from a fall make a sound",
-			"Opening and closing the menu makes a sound",
+			"Chat messages show as a speech bubble above the sender's nameplate, in the nameplate's style",
+			"Each player shows up to three bubbles at once, and they fade out after six seconds",
+			"Your own bubble shows in third-person free camera",
 		},
 		changed = {
-			"A footstep plays for every stride you cover, so sprinting and dashing step as fast as you move",
+			"The bubble rises and falls with the nameplate's health bar and tags",
 		},
 		fixed = {
-			"Footsteps no longer lag behind your movement",
+			"Roblox's own chat bubbles are turned off, so only the new bubble shows",
 		},
 	},
 }

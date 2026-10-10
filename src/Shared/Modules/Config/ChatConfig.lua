@@ -280,6 +280,22 @@ ChatConfig.Visual = {
 	AutoScrollThreshold = 20,
 }
 
+-- ===================== BUBBLE CONFIG (the chat bubble over a player's nameplate) =====================
+-- The look (pill, stroke, tail, text colour) is the Studio template ReplicatedStorage.GUI.EnemyNameplate_Bubble (+ _BubbleStack),
+-- built by tools/studio/build_chat_bubble.luau. These numbers are what ChatBubble applies at runtime.
+-- Layering: this table, then NameplateConfig.kinds.<kind>.bubble for that kind ("player" for others, "self" for you).
+--   Lifetime / FadeSeconds: a bubble fades out over its last FadeSeconds, then is removed at Lifetime.
+--   MaxBubbles: a player shows up to this many at once; an older one fades early when a new one arrives over the cap.
+--   MaxWidth: the bubble wraps its text at this many px. Gap: px between the bubbles and the top of the nameplate's Stack.
+ChatConfig.Bubble = {
+	MaxBubbles = 3,
+	Lifetime = 6,
+	FadeSeconds = 1,
+	TextSize = 16,
+	MaxWidth = 260,
+	Gap = 8,
+}
+
 -- ===================== BEHAVIOUR CONFIG =====================
 ChatConfig.Behaviour = {
 	MaxHistory = 120,

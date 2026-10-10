@@ -35,6 +35,7 @@ local ChatBridge = require(Modules:WaitForChild("ChatBridge")) :: any
 local CFG = require(Modules:WaitForChild("Config"):WaitForChild("NameplateConfig")) :: any
 local ResourceConfig = require(Modules:WaitForChild("ResourceConfig")) :: any -- the Nexus level attribute name
 local LevelBadge = require(Modules:WaitForChild("LevelBadge")) :: any
+local ChatBubble = require(script.Parent:WaitForChild("ChatBubble")) :: any -- the speech bubble over the sender's nameplate
 local Topbar = require(ReplicatedStorage:WaitForChild("TopbarPlus")) :: any
 local SystemMsg = ReplicatedStorage:WaitForChild("SystemMessage") :: RemoteEvent
 
@@ -634,6 +635,9 @@ TextChatService.MessageReceived:Connect(function(msg)
 		text = msg.Text, -- filtered and rich-text escaped by TextChatService
 		timestamp = os.time(),
 	})
+	if sender then
+		ChatBubble.say(sender, msg.Text) -- the speech bubble over the sender's nameplate (same message, after the dedupe above)
+	end
 end)
 
 SystemMsg.OnClientEvent:Connect(renderPayload)
