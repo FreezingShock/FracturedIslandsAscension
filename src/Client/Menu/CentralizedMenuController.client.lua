@@ -1874,6 +1874,9 @@ end)
 
 -- ===================== E KEY TOGGLE =====================
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
+	if player:GetAttribute("IntroActive") then
+		return -- the loading screen owns input until Play
+	end
 	if input.KeyCode == Enum.KeyCode.E then
 		if gameProcessed then
 			return -- typing in a TextBox (chat, admin panel...): E is a letter, not a hotkey

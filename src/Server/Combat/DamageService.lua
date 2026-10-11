@@ -261,6 +261,10 @@ function DamageService.hurtPlayer(player: Player, amount: number, source: Instan
 	if not (humanoid and root) or humanoid.Health <= 0 then
 		return 0
 	end
+	-- the join shield (IntroService): nothing lands until the loading screen is over
+	if player:GetAttribute("IntroShield") then
+		return 0
+	end
 	-- dodge roll i-frames (MovementService writes DodgeUntil in server time): the hit deals nothing
 	local dodgeUntil = player:GetAttribute("DodgeUntil")
 	if type(dodgeUntil) == "number" and workspace:GetServerTimeNow() < dodgeUntil then

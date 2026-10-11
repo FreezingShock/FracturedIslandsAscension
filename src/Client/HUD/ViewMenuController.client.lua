@@ -261,7 +261,7 @@ playerGui.ChildAdded:Connect(function(child)
 end)
 
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
-	if gameProcessed or input.KeyCode ~= Config.toggleKey then
+	if gameProcessed or player:GetAttribute("IntroActive") or input.KeyCode ~= Config.toggleKey then
 		return
 	end
 	infoEnabled = not infoEnabled

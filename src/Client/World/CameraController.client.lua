@@ -289,7 +289,7 @@ rayParams.RespectCanCollide = true
 --- How the mouse should behave right now. Phases 1-2: cursor locked to the centre unless T / a menu / typing
 --- frees it. Free camera: cursor always free; holding right mouse freezes it in place and looks around.
 local function wantedMouseBehavior(): Enum.MouseBehavior
-	if MenuBridge.isOpen() or GuiService.MenuIsOpen or UserInputService:GetFocusedTextBox() ~= nil then
+	if player:GetAttribute("IntroActive") or MenuBridge.isOpen() or GuiService.MenuIsOpen or UserInputService:GetFocusedTextBox() ~= nil then
 		return Enum.MouseBehavior.Default
 	end
 	if phase == FREE_PHASE then
@@ -302,6 +302,9 @@ local function updateCamera(dt: number)
 	local camera = workspace.CurrentCamera
 	if not camera then
 		return
+	end
+	if player:GetAttribute("IntroActive") then
+		return -- the loading screen's cutscene owns the camera until Play
 	end
 	if camera.CameraType ~= Enum.CameraType.Scriptable then
 		camera.CameraType = Enum.CameraType.Scriptable

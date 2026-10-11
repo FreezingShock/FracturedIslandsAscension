@@ -31,6 +31,7 @@ restyling) unless you set `local FORCE = true` at the top.
 | `build_scoreboard.luau` | `StarterGui.FIAScoreboard` (Panel: Board > Lines, Template; tooltip look) | `ScoreboardController` |
 | `build_actionbar.luau` | `FIAHUD.Root.ActionBar` (CanvasGroup > Label (+ Pop UIScale, Stroke), Sub (+ Stroke)); sizes from `HudTheme.actionBar` | `ActionBarClient` |
 | `build_notifications.luau` | `StarterGui.FIANotifications` (Stack + Templates: Slot, CardLevelUp, CardCollection, CardPickup, CardSystem, RewardLine; tooltip look from the Figma file "FIA Notifications") | `NotificationController` |
+| `build_intro_screen.luau` | `ReplicatedFirst.IntroScreen` (Fade, SkipSurface, Title, StatusLabel, ProgressBar > Fill, PlayButton, MenuBar, MenuPanel, Templates > MenuButton); cloned by `IntroLoader` | `IntroLoader` / `IntroController` (names in `Config/LoadingConfig`) |
 | `build_chat_gui.luau` | `ReplicatedStorage.GUI.FIAChatGui` (Panel 480x450 > Body > FadeGroup (CanvasGroup, UIGradient top fade) > LogFrame, InputBar (InputBox, CharCount, SendBtn), NewMsgBtn; Templates: Entry, Row, Line (UIFlexItem), Spacer; tooltip look) | `ChatController` |
 | `migrate_chat_fade.luau` | Brings an existing `FIAChatGui` up to the fading, taller layout in place (FadeGroup, Row, Line Flex, 450px panel); idempotent, keeps Studio restyles | `ChatController` |
 | `build_chat_bubble.luau` | `ReplicatedStorage.GUI.EnemyNameplate_BubbleStack` (column) and `EnemyNameplate_Bubble` (CanvasGroup: Pill > Text, Tail); the chat speech bubble over a nameplate | `ChatBubble` |

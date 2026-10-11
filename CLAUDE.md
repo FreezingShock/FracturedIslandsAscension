@@ -13,6 +13,7 @@ Roblox incremental/progression game (Hypixel SkyBlock-style skills + stats). Sol
 | `src/Server/**` | `ServerScriptService` (flat) |
 | `src/Shared/Modules/**` | `ReplicatedStorage.Modules` (flat) |
 | `src/Client/**` | `StarterPlayer.StarterPlayerScripts` (flat) |
+| `src/ReplicatedFirst/**` | `ReplicatedFirst` (flat) |
 
 **Layout:** each realm (`src/Server`, `src/Shared/Modules`, `src/Client`) is organised into **system folders** (`Data`, `Inventory`, `Buttons`, `Combat`, `World`, `Chat`, `Admin`; Shared also has `Menu`, `Stats`, `Config`, `Util`; Client also has `Menu`, `HUD`). The folders exist only on disk: in Studio every script is still flat (`ReplicatedStorage.Modules.StatisticsConfig`, `ServerScriptService.SkillsDataManager`), so `WaitForChild("Name")` lookups never change.
 - `default.project.json` is **generated**. After adding, moving, renaming or deleting a script run `python tools/gen_project.py` (or `--check`), then restart `rojo serve` and reconnect the Studio plugin. Never hand-edit the project file.

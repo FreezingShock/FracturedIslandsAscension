@@ -33,7 +33,7 @@ local function setHeld(value: boolean)
 end
 
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
-	if keys[input.KeyCode] and not gameProcessed then
+	if keys[input.KeyCode] and not gameProcessed and not game:GetService("Players").LocalPlayer:GetAttribute("IntroActive") then
 		setHeld(true)
 	end
 end)
@@ -62,7 +62,7 @@ local DODGE = MovementConfig.dodge
 local SECTORS = { "f", "fr", "r", "br", "b", "bl", "l", "fl" }
 
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
-	if input.KeyCode == DODGE_KEY and not gameProcessed and not MenuBridge.isOpen() then
+	if input.KeyCode == DODGE_KEY and not gameProcessed and not MenuBridge.isOpen() and not player:GetAttribute("IntroActive") then
 		DodgeRequest:FireServer()
 	end
 end)

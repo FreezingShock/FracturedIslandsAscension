@@ -248,7 +248,7 @@ end
 local holdingAttack = false
 
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
-	if gameProcessed or input.UserInputType ~= Enum.UserInputType.MouseButton1 then
+	if gameProcessed or player:GetAttribute("IntroActive") or input.UserInputType ~= Enum.UserInputType.MouseButton1 then
 		return
 	end
 	holdingAttack = true
@@ -337,7 +337,7 @@ local function abilityKeyName(input: InputObject): string?
 end
 
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
-	if gameProcessed or not currentWeapon or MenuBridge.isOpen() then
+	if gameProcessed or player:GetAttribute("IntroActive") or not currentWeapon or MenuBridge.isOpen() then
 		return
 	end
 	local keyName = abilityKeyName(input)

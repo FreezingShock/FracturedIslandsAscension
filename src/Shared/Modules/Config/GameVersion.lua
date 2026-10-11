@@ -7,21 +7,19 @@
 --]]
 
 return {
-	version = "3.92.0",
+	version = "3.93.0",
 	date = "2026-10-10", -- the commit's date
-	commit = "Chat speech bubble above the sender's nameplate, styled to match it", -- the commit title (short)
+	commit = "Intro loading screen: preload, locked cutscene, transparent menu", -- the commit title (short)
 	-- what this commit added / changed / fixed: shown in chat when a player joins (ChatService.sendReleaseNotes)
 	summary = {
 		added = {
-			"Chat messages show as a speech bubble above the sender's nameplate, in the nameplate's style",
-			"Each player shows up to three bubbles at once, and they fade out after six seconds",
-			"Your own bubble shows in third-person free camera",
+			"Loading screen on every join: a progress bar fills while the assets preload, and Play unlocks at 100%",
+			"A camera tour of random spots around the map plays behind it; hold click to skip to the last shot",
+			"Settings and controls panels open from the loading screen while it loads"
 		},
 		changed = {
-			"The bubble rises and falls with the nameplate's health bar and tags",
+			"While the loading screen is up, the camera, the cursor and game keys stand down until you press Play"
 		},
-		fixed = {
-			"Roblox's own chat bubbles are turned off, so only the new bubble shows",
-		},
+		fixed = {},
 	},
 }

@@ -7,7 +7,7 @@ must still appear FLAT in Studio (ServerScriptService.X, ReplicatedStorage.Modul
 StarterPlayerScripts.X) because the game finds modules by name with WaitForChild.
 Rojo cannot flatten folders itself, so every script is mapped individually.
 
-Rules (per realm: src/Server, src/Shared/Modules, src/Client):
+Rules (per realm: src/Server, src/Shared/Modules, src/Client, src/ReplicatedFirst):
   * a .lua/.luau file                      -> one instance, named after the file
                                               (.client.lua = LocalScript, .server.lua = Script)
   * a folder with init.lua / init.luau /
@@ -82,6 +82,7 @@ def build():
                 "$className": "ReplicatedStorage",
                 "Modules": {"$className": "Folder", **children("Shared/Modules")},
             },
+            "ReplicatedFirst": {"$className": "ReplicatedFirst", **children("ReplicatedFirst")},
             "StarterPlayer": {
                 "$className": "StarterPlayer",
                 "StarterPlayerScripts": {"$className": "StarterPlayerScripts", **children("Client")},
@@ -101,7 +102,7 @@ def count_scripts(realm_dir):
 def main():
     if "--counts" in sys.argv:
         print(f"Modules={count_scripts('Shared/Modules')} ServerScriptService={count_scripts('Server')} "
-              f"StarterPlayerScripts={count_scripts('Client')}")
+              f"StarterPlayerScripts={count_scripts('Client')} ReplicatedFirst={count_scripts('ReplicatedFirst')}")
         return
     text = json.dumps(build(), indent=2, ensure_ascii=False) + "\n"
     if "--check" in sys.argv:

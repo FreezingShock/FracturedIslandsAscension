@@ -1519,7 +1519,7 @@ RequestInventoryEvent:FireServer()
 -- Like Minecraft: the wheel cycles the selected slot (1..9) while the cursor is locked to the game view.
 local lastWheelAt = 0
 UserInputService.InputChanged:Connect(function(input, gameProcessed)
-	if input.UserInputType ~= Enum.UserInputType.MouseWheel or gameProcessed then
+	if input.UserInputType ~= Enum.UserInputType.MouseWheel or gameProcessed or player:GetAttribute("IntroActive") then
 		return
 	end
 	if MenuBridge.isOpen() or UserInputService.MouseBehavior ~= Enum.MouseBehavior.LockCenter then
@@ -1553,7 +1553,7 @@ local keyToSlot = {
 }
 
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
-	if gameProcessed then
+	if gameProcessed or player:GetAttribute("IntroActive") then
 		return
 	end
 	if input.UserInputType ~= Enum.UserInputType.Keyboard then
@@ -1616,7 +1616,7 @@ end)
 -- A held tool with OnUse = "nexusMenu" (item def `onUse`): a left click in the game view opens the Nexus Menu and the
 -- inventory. Clicks on GUI are filtered by gameProcessed, and nothing happens while a menu is already open.
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
-	if gameProcessed or input.UserInputType ~= Enum.UserInputType.MouseButton1 or MenuBridge.isOpen() then
+	if gameProcessed or player:GetAttribute("IntroActive") or input.UserInputType ~= Enum.UserInputType.MouseButton1 or MenuBridge.isOpen() then
 		return
 	end
 	local character = player.Character

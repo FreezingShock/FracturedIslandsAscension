@@ -73,6 +73,9 @@
       "EquipmentService": {
         "$path": "src/Server/Inventory/EquipmentService.lua"
       },
+      "IntroService": {
+        "$path": "src/Server/Intro/IntroService.server.lua"
+      },
       "InventoryDataManager": {
         "$path": "src/Server/Data/InventoryDataManager.lua"
       },
@@ -225,6 +228,9 @@
         "GridMenuModule": {
           "$path": "src/Shared/Modules/Menu/GridMenuModule.lua"
         },
+        "IntroPanelModule": {
+          "$path": "src/Shared/Modules/Menu/IntroPanelModule.lua"
+        },
         "ItemIconData": {
           "$path": "src/Shared/Modules/Inventory/ItemIconData.lua"
         },
@@ -314,6 +320,12 @@
         }
       }
     },
+    "ReplicatedFirst": {
+      "$className": "ReplicatedFirst",
+      "IntroLoader": {
+        "$path": "src/ReplicatedFirst/IntroLoader.client.lua"
+      }
+    },
     "StarterPlayer": {
       "$className": "StarterPlayer",
       "StarterPlayerScripts": {
@@ -389,6 +401,9 @@
         },
         "HeldItemNameController": {
           "$path": "src/Client/HUD/HeldItemNameController.client.lua"
+        },
+        "IntroController": {
+          "$path": "src/Client/Intro/IntroController.client.lua"
         },
         "InventoryController": {
           "$path": "src/Client/Inventory/InventoryController.client.lua"
